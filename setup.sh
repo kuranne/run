@@ -1,0 +1,35 @@
+#--- Python Setup ---#
+# Colors
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+echo -e "${CYAN}Checking for python3...${NC}"
+[[ $(command -v python3) ]] || { echo -e "${RED}Can't execute python3${NC}"; exit 1; }
+
+echo -e "${CYAN}Setting up virtual environment...${NC}"
+python3 -m venv .venv
+source ./.venv/bin/activate
+pip install -r ./requirements.txt
+
+#--- Create Wrapper Script ---#
+echo -e "${CYAN}Creating runner script...${NC}"
+CURRENT_DIR=$(pwd)
+RUN_SCRIPT="${CURRENT_DIR}/run"
+
+cat <<EOF > "$RUN_SCRIPT"
+#!/bin/bash
+exec "${CURRENT_DIR}/.venv/bin/python" "${CURRENT_DIR}/run.py" "\$@"
+EOF
+
+chmod +x "$RUN_SCRIPT"
+
+#--- Symlink ---#
+echo -e "${CYAN}Symlinking to ~/bin...${NC}"
+mkdir -p ${HOME}/bin
+ln -sf "$RUN_SCRIPT" ${HOME}/bin/run
+
+#--- Clear & Clean ---#
+echo -e "${GREEN}Setup complete!${NC}"
+echo -e "You can now use 'run' command."
