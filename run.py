@@ -58,6 +58,8 @@ class CompilerRunner:
         # Clean flags extra '' and ""
         clean_flags = extra_flags.strip().strip('"').strip("'")
         self.extra_flags = shlex.split(clean_flags) if clean_flags else []
+        
+        self.dry_run = op_flags.get("dry_run", False)
 
     def get_executable_path(self, source_path: Path) -> Path:
         name = source_path.stem
@@ -68,6 +70,11 @@ class CompilerRunner:
         try:
             tag = "COMPILE" if compiling else "RUN"
             cmd_str = " ".join(cmd)
+            
+            if self.dry_run:
+                Printer.action("DRY-RUN", f"{tag}: {cmd_str}", Colors.YELLOW)
+                return True
+
             Printer.action(tag, cmd_str)
 
             start_time = time.perf_counter()
@@ -277,6 +284,10 @@ class CompilerRunner:
     def cleanup(self):
         if not self.flags["keep"]:
             for f in self.output_files:
+                if self.dry_run:
+                     Printer.action("DRY-RUN", f"Would delete: {f}", Colors.YELLOW)
+                     continue
+                
                 if f.exists():
                     try:
                         f.unlink()
@@ -290,6 +301,7 @@ def main():
     parser.add_argument("--keep", action="store_true", help="Keep the output binary(s)")
     parser.add_argument("-m", "--multi", action="store_true", help="Compile multi-files")
     parser.add_argument("-t", "--time", action="store_true", help="Time counter for execute binary")
+    parser.add_argument("-d", "--dry-run", action="store_true", help="Simulate execution without running commands")
     
     parser.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files. Optional depth arg (default: infinite)")
     parser.add_argument("-f", "--flags", type=str, default="", help='Compiler flags')
@@ -312,7 +324,8 @@ def main():
     operator_flags = {
         "multi" : args.multi,
         "keep" : args.keep,
-        "time" : args.time
+        "time" : args.time,
+        "dry_run": args.dry_run
     }
 
     # Init runner
