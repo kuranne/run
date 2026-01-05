@@ -18,6 +18,32 @@ class Colors:
     RESET = '\033[0m'
     BOLD = '\033[1m'
 
+class Printer:
+    @staticmethod
+    def action(tag: str, message: str, color: str = Colors.GREEN):
+        # [ TAG ] Message
+        print(f"{Colors.BOLD}{color}[ {tag} ]{Colors.RESET} {message}")
+
+    @staticmethod
+    def time(seconds: float):
+         print(f"{Colors.GRAY}  -> Took {seconds:.3f}s{Colors.RESET}")
+
+    @staticmethod
+    def error(message: str):
+        print(f"{Colors.BOLD}{Colors.RED}[ ERROR ]{Colors.RESET} {message}")
+    
+    @staticmethod
+    def info(message: str):
+         print(f"{Colors.BOLD}{Colors.CYAN}[ INFO ]{Colors.RESET} {message}")
+
+    @staticmethod
+    def warning(message: str):
+         print(f"{Colors.BOLD}{Colors.YELLOW}[ WARN ]{Colors.RESET} {message}")
+
+    @staticmethod
+    def separator():
+        print(f"\n{Colors.GRAY}{'-'*30}{Colors.RESET}\n")
+
 class CompilerRunner:
     def __init__(self, op_flags, extra_flags: str = ""):
         # Platform detection
@@ -40,19 +66,18 @@ class CompilerRunner:
 
     def run_command(self, cmd: List[str], use_shell: bool = False, compiling: bool = False) -> bool:
         try:
-            if not compiling:
-                print(f"{Colors.GREEN}[{Colors.RESET}Run {" ".join(cmd)}{Colors.GREEN}]{Colors.RESET}")
-            else:
-                print(f"{Colors.GREEN}[{Colors.RESET}Compile {" ".join(cmd)}{Colors.GREEN}]{Colors.RESET}")
+            tag = "COMPILE" if compiling else "RUN"
+            cmd_str = " ".join(cmd)
+            Printer.action(tag, cmd_str)
 
             start_time = time.perf_counter()
             result = spc.run(cmd, check=False, shell=use_shell)
             
             if self.flags["time"]:
-                print(f"{Colors.GREEN}[{Colors.RESET}Use {time.perf_counter() - start_time:.3f}s{Colors.GREEN}]{Colors.RESET}")
+                Printer.time(time.perf_counter() - start_time)
             return result.returncode == 0
         except FileNotFoundError:
-            print(f"{Colors.RED}Error: Command '{cmd[0]}' not found.{Colors.RESET}")
+            Printer.error(f"Command '{cmd[0]}' not found.")
             return False
 
     def find_source_files(self, path: Path, max_depth: int = None) -> List[str]:
@@ -78,7 +103,7 @@ class CompilerRunner:
         if not files: return
         file_paths = [Path(f) for f in files]
         
-        print(f"\n{Colors.GRAY}--------------{Colors.RESET}\n")
+        Printer.separator()
         if multi:
             self._handle_multi_compile(file_paths)
         else:
@@ -131,14 +156,14 @@ class CompilerRunner:
         
         if is_release:
             # Case: Build Release -> Run Binary
-            print(f"{Colors.CYAN}Building release...{Colors.RESET}")
+            Printer.info("Building release...")
             build_cmd = ["cargo", "build"] + self.extra_flags
             if not self.run_command(build_cmd, compiling=True):
                 return
             
             pkg_name = self._get_cargo_package_name(toml_path)
             if not pkg_name:
-                print(f"{Colors.RED}Error: Could not parse package name from Cargo.toml{Colors.RESET}")
+                Printer.error("Could not parse package name from Cargo.toml")
                 return
 
             bin_name = f"{pkg_name}.exe" if not self.is_posix else pkg_name
@@ -147,7 +172,7 @@ class CompilerRunner:
             if target_bin.exists():
                 self._execute_binary(target_bin)
             else:
-                print(f"{Colors.RED}Error: Binary not found at {target_bin}{Colors.RESET}")
+                Printer.error(f"Binary not found at {target_bin}")
         else:
             # Case: Default Run Quiet
             # Note: -q comes before --flags to ensure cargo itself is quiet
@@ -158,7 +183,7 @@ class CompilerRunner:
         cargo_toml = self._find_cargo_toml(fp)
         
         if cargo_toml:
-            print(f"{Colors.CYAN}Found Cargo project: {cargo_toml.parent.name}{Colors.RESET}")
+            Printer.info(f"Found Cargo project: {cargo_toml.parent.name}")
             self.run_cargo_mode(cargo_toml)
         else:
             # --- Rustc Mode (Single File) ---
@@ -168,13 +193,31 @@ class CompilerRunner:
                 self.output_files.append(out_name)
                 self._execute_binary(out_name)
 
+    def _get_python_executable(self) -> str:
+        """Check for .venv or .env and return python path, else system default"""
+        potential_venvs = [".venv", ".env"]
+        # Check in current working directory
+        for venv in potential_venvs:
+            venv_path = Path(venv)
+            if venv_path.is_dir():
+                if self.is_posix:
+                    py_path = venv_path / "bin" / "python"
+                else:
+                    py_path = venv_path / "Scripts" / "python.exe"
+                
+                if py_path.exists():
+                    Printer.info(f"Using venv: {venv}")
+                    return str(py_path)
+        
+        return "python" if not self.is_posix else "python3"
+
     def _handle_single_file(self, fp: Path):
         ext = fp.suffix.lower()
         out_name = self.get_executable_path(fp)
 
         match ext:
             case ".py":
-                prog = "python" if not self.is_posix else "python3"
+                prog = self._get_python_executable()
                 self.run_command([prog, str(fp)])
             case ".lua":
                 check_cmd = "where" if not self.is_posix else "command -v"
@@ -198,7 +241,7 @@ class CompilerRunner:
                     self.output_files.append(out_name)
                     self._execute_binary(out_name)
             case _:
-                print(f"{Colors.RED}Unsupported extension: {ext}{Colors.RESET}")
+                Printer.error(f"Unsupported extension: {ext}")
 
     def _handle_multi_compile(self, paths: List[Path]):
         sources = [p for p in paths if p.suffix in self.c_family_ext]
@@ -222,7 +265,7 @@ class CompilerRunner:
                 self.output_files.append(out_name)
                 self._execute_binary(out_name)
         else:
-            print(f"{Colors.RED}Unsupported extension for multi: {ext}{Colors.RESET}")
+            Printer.error(f"Unsupported extension for multi: {ext}")
 
     def _execute_binary(self, bin_path: Path):
         target = str(bin_path) if self.is_posix else str(bin_path.absolute())
@@ -289,9 +332,9 @@ def main():
         depth = args.link_auto if args.link_auto != -1 else None
         src_files = runner.find_source_files(Path("."), max_depth=depth)
         if not src_files:
-            print(f"{Colors.RED}No C/C++ source files found via -L auto-search (depth={depth}).{Colors.RESET}")
+            Printer.error(f"No C/C++ source files found via -L auto-search (depth={depth}).")
             return 1
-        print(f"{Colors.GREEN}Auto-found {len(src_files)} source files: {src_files}{Colors.RESET}")
+        Printer.info(f"Auto-found {len(src_files)} source files: {src_files}")
         try:
             runner.compile_and_run(src_files, multi=True)
         finally:
@@ -306,7 +349,8 @@ def main():
 
     # 4. No files, No Cargo -> Fallback to Input
     try:
-        val = input(f"{Colors.YELLOW}No file given, enter file(s) name: {Colors.RESET}").strip()
+        print(f"{Colors.YELLOW}[ INPUT ] No file given, enter file(s) name: {Colors.RESET}", end="")
+        val = input().strip()
         if val: 
             args.files = shlex.split(val)
             runner.compile_and_run(args.files, args.multi)
@@ -319,5 +363,5 @@ def main():
 
 if __name__ == "__main__":
     exit_code = main()
-    print(f"\n{Colors.GRAY}--------------{Colors.RESET}")
+    Printer.separator()
     sys.exit(exit_code)
