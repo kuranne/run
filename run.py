@@ -17,17 +17,18 @@ class Colors:
     BOLD = '\033[1m'
 
 class CompilerRunner:
-    def __init__(self, flags: str = ""):
+    def __init__(self, op_flags, extra_flags: str = ""):
         # Platform detection
         self.is_posix = os.name == "posix"
         
         # Initialize
+        self.flags = op_flags
         self.output_files: List[Path] = []
         self.c_family_header_ext = {'.h', '.hpp'}
         self.c_family_ext = {'.c', '.cpp', '.cc'}
 
         # Clean flags extra '' and ""
-        clean_flags = flags.strip().strip('"').strip("'")
+        clean_flags = extra_flags.strip().strip('"').strip("'")
         self.extra_flags = shlex.split(clean_flags) if clean_flags else []
 
     def get_executable_path(self, source_path: Path) -> Path:
@@ -219,20 +220,22 @@ class CompilerRunner:
         self.run_command([target])
 
     def cleanup(self):
-        for f in self.output_files:
-            if f.exists():
-                try:
-                    f.unlink()
-                except OSError:
-                    pass
+        if not self.flags["keep"]:
+            for f in self.output_files:
+                if f.exists():
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
 
 def main():
     parser = argparse.ArgumentParser(description="Professional Auto Compiler & Runner")
     parser.add_argument("files", nargs="*", help="Files to compile and run")
     parser.add_argument("-m", "--multi", action="store_true", help="Compile multi-files")
+    parser.add_argument("--keep", action="store_true", help="Keep the output binary(s)")
     parser.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files. Optional depth arg (default: infinite)")
     parser.add_argument("-f", "--flags", type=str, default="", help='Compiler flags')
-    
+ 
     # Process -f-flags without space
     processed_args = []
     i = 1
@@ -246,7 +249,15 @@ def main():
         i += 1
 
     args = parser.parse_args(processed_args)
-    runner = CompilerRunner(flags=args.flags)
+
+    # Process operation and flag(s) -> dictionary of it
+    operator_flags = {
+        "multi" : args.multi,
+        "keep" : args.keep
+    }
+
+    # Init runner
+    runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags)
 
     # 1. Check if files provided
     if args.files:
