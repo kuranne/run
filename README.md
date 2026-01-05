@@ -1,25 +1,107 @@
-# Auto Compile & Run Script
-This is a small script that will help you compile & run quickly, or run many file at once.  
+# Auto Compiler & Runner
+
+A configurable runner. It handles compilation, execution, and cleanup automatically.
+
+I just lazy to compile then run, so I made this.
+
+## Features
+
+- **Auto-Detection**: detailed execution info with colored output.
+- **Smart Compilation**: Automatically compiles C/C++/Rust before running.
+- **Project Config (`Run.toml`)**: Define custom runners and flag presets.
+- **Virtual Env Support**: Automatically detects `.venv` or `.env` and uses the local Python.
+- **Multi-File Support**: Easily link multiple C/C++ files.
+- **Dry Run**: Simulate execution to check commands without running them.
+
+## In Future Features (Maybe)
+
+- **JSON Config**: for each project, if define `Run.json` inside, it will use it instead of default config.
+- **Update**: update the tool to latest version from GitHub.
 
 ## Installation
-clone this repository to any where, then cd into this repository directory and run `./setup.sh` or use following command  
 
-### Linux/MaxOS
-```
+### Requirements
+
+- **Python 3.11+** (Required for TOML support)
+
+### Linux / macOS
+
+```bash
 git clone https://github.com/kuranne/run.git ~/.local/share/run_kuranne
-cd ~/.local/share/run_kuranne && ./setup.sh
+cd ~/.local/share/run_kuranne
+./setup.sh
 ```
 
 ### Windows (PowerShell)
-```
+
+```powershell
 git clone https://github.com/kuranne/run.git "$HOME\AppData\Local\run_kuranne"
 cd "$HOME\AppData\Local\run_kuranne"
 .\setup.ps1
 ```
 
-## Usage
-`run` `<file(s)>`&emsp;&emsp;&emsp;&emsp;Run file(s) at once  
-`run` `-m` `<file(s)>`&emsp;&emsp;Compile and run multi file  
-`run` `--help`&emsp;&emsp;&emsp;&emsp;&emsp;&emsp;For Help
+_Note: This will set up a local virtual environment and add a `run` command to your PATH._
 
-I hope this script would run well and there won't no have any pull request.
+## Usage
+
+```bash
+run <files> [flags]
+```
+
+| Flag                    | Description                                       |
+| ----------------------- | ------------------------------------------------- |
+| `-m`, `--multi`         | Compile multiple files together                   |
+| `-p`, `--preset <name>` | Use a flag preset from `Run.toml`                 |
+| `-L [depth]`            | Auto-find and link C/C++ source files             |
+| `-d`, `--dry-run`       | Print commands without executing                  |
+| `-t`, `--time`          | Show execution time                               |
+| `-f <flags>`            | Pass extra flags to the compiler                  |
+| `--keep`                | Keep the compiled binary (don't delete after run) |
+
+### Examples
+
+**Run a Python script (auto-detects venv [default]):**
+
+```bash
+run script.py ...
+```
+
+**Run a C++ file with a preset:**
+
+```bash
+run main.cpp -p debug
+```
+
+**Auto-find and compile all C files in current dir:**
+
+```bash
+run -L <depth>
+```
+
+**Dry run to see what would happen before real run:**
+
+```bash
+run main.cpp -p release -d
+```
+
+## Configuration (Run.toml)
+
+Create a `Run.toml` in your project root or in the script installation directory.
+
+```toml
+[runners]
+# Override default runners
+c = "clang"
+cpp = "clang++"
+# python = "python3"
+
+[presets.debug]
+c = "-g -Wall -Wextra"
+cpp = "-g -Wall -Wextra -std=c++20"
+rust = "-g"
+
+[presets.release]
+c = "-O3"
+cpp = "-O3 -std=c++20"
+rust = "-C opt-level=3"
+```
