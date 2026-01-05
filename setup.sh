@@ -8,10 +8,13 @@ NC='\033[0m'
 echo "${CYAN}Checking for python3...${NC}"
 [[ $(command -v python3) ]] || { echo "${RED}Can't execute python3${NC}"; exit 1; }
 
+# Check Python Version (>= 3.11)
+python3 -c "import sys; exit(0) if sys.version_info >= (3, 11) else exit(1)" || { echo "${RED}Python 3.11+ required${NC}"; exit 1; }
+
 echo "${CYAN}Setting up virtual environment...${NC}"
 python3 -m venv .venv
 source ./.venv/bin/activate
-# pip install -r ./requirements.txt
+pip install -r ./requirements.txt
 
 #--- Create Wrapper Script ---#
 echo "${CYAN}Creating runner script...${NC}"
