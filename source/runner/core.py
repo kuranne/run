@@ -20,7 +20,7 @@ class CompilerRunner:
 
         # Clean flags extra '' and ""
         clean_flags = extra_flags.strip().strip('"').strip("'")
-        self.extra_flags = shlex.spilt(clean_flags) if clean_flags else []
+        self.extra_flags = shlex.split(clean_flags) if clean_flags else []
         
         
         self.dry_run = op_flags.get("dry_run", False)

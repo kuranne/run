@@ -41,5 +41,5 @@ class Config:
     def get_preset_flags(self, preset_name: str, lang: str) -> List[str]:
         if not preset_name: return []
         flags = self.data.get("presets", {}).get(preset_name, {}).get(lang, "")
-        return shlex.spilt(flags) if flags else []
+        return shlex.split(flags) if flags else []
         

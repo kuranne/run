@@ -81,7 +81,7 @@ def main():
         print(f"{Colors.YELLOW}[ INPUT ] No file given, enter file(s) name: {Colors.RESET}", end="")
         val = input().strip()
         if val: 
-            args.files = shlex.spilt(val)
+            args.files = shlex.split(val)
             runner.compile_and_run(args.files, args.multi)
     except (EOFError, KeyboardInterrupt):
         return 1
