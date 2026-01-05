@@ -17,10 +17,6 @@ if (!(Test-Path ".venv")) {
     python -m venv .venv
 }
 
-# Install requirements
-Write-Host "Installing requirements..." -ForegroundColor Cyan
-& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-
 #--- Create Wrapper ---#
 Write-Host "Creating run.cmd wrapper..." -ForegroundColor Cyan
 $batchContent = "@`"%~dp0.venv\Scripts\python.exe`" `"%~dp0run.py`" %*"
