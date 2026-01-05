@@ -5,6 +5,7 @@ import subprocess as spc
 import argparse
 import sys
 import shlex
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -13,6 +14,7 @@ class Colors:
     CYAN = '\033[96m'
     YELLOW = '\033[93m'
     RED = '\033[91m'
+    GRAY = '\033[1;30m'
     RESET = '\033[0m'
     BOLD = '\033[1m'
 
@@ -36,9 +38,18 @@ class CompilerRunner:
         # Windows: .exe, POSIX: .out
         return Path(f"{name}.exe" if not self.is_posix else f"./{name}.out")
 
-    def run_command(self, cmd: List[str], use_shell: bool = False) -> bool:
+    def run_command(self, cmd: List[str], use_shell: bool = False, compiling: bool = False) -> bool:
         try:
+            if not compiling:
+                print(f"{Colors.GREEN}[{Colors.RESET}Run {" ".join(cmd)}{Colors.GREEN}]{Colors.RESET}")
+            else:
+                print(f"{Colors.GREEN}[{Colors.RESET}Compile {" ".join(cmd)}{Colors.GREEN}]{Colors.RESET}")
+
+            start_time = time.perf_counter()
             result = spc.run(cmd, check=False, shell=use_shell)
+            
+            if self.flags["time"]:
+                print(f"{Colors.GREEN}[{Colors.RESET}Use {time.perf_counter() - start_time:.3f}s{Colors.GREEN}]{Colors.RESET}")
             return result.returncode == 0
         except FileNotFoundError:
             print(f"{Colors.RED}Error: Command '{cmd[0]}' not found.{Colors.RESET}")
@@ -67,12 +78,11 @@ class CompilerRunner:
         if not files: return
         file_paths = [Path(f) for f in files]
         
-        print(f"{Colors.YELLOW}--------------{Colors.RESET}")
+        print(f"\n{Colors.GRAY}--------------{Colors.RESET}\n")
         if multi:
             self._handle_multi_compile(file_paths)
         else:
             for fp in file_paths:
-                print(f"\n{Colors.CYAN}Current --- {fp}{Colors.RESET}")
                 self._handle_single_file(fp)
 
     # --- Cargo Utilities ---
@@ -123,7 +133,7 @@ class CompilerRunner:
             # Case: Build Release -> Run Binary
             print(f"{Colors.CYAN}Building release...{Colors.RESET}")
             build_cmd = ["cargo", "build"] + self.extra_flags
-            if not self.run_command(build_cmd):
+            if not self.run_command(build_cmd, compiling=True):
                 return
             
             pkg_name = self._get_cargo_package_name(toml_path)
@@ -154,7 +164,7 @@ class CompilerRunner:
             # --- Rustc Mode (Single File) ---
             out_name = self.get_executable_path(fp)
             cmd = ["rustc", str(fp), "-o", str(out_name)] + self.extra_flags
-            if self.run_command(cmd):
+            if self.run_command(cmd, compiling=True):
                 self.output_files.append(out_name)
                 self._execute_binary(out_name)
 
@@ -165,24 +175,26 @@ class CompilerRunner:
         match ext:
             case ".py":
                 prog = "python" if not self.is_posix else "python3"
-                spc.run([prog, str(fp)])
-            case ".java":
-                spc.run(["java", str(fp)])
-            case ".go":
-                spc.run(["go", "run", str(fp)])
-            case ".rs":
-                self._handle_rust_execution(fp)
+                self.run_command([prog, str(fp)])
             case ".lua":
                 check_cmd = "where" if not self.is_posix else "command -v"
                 is_lua = spc.run(f"{check_cmd} lua", shell=True, capture_output=True).returncode == 0
                 prog = "lua" if is_lua else "luajit"
-                spc.run([prog, str(fp)])
+                self.run_command([prog, str(fp)])
+
+            case ".java":
+                self.run_command(["java", str(fp)])
             case ".js":
-                spc.run(["node", str(fp)])
+                self.run_command(["node", str(fp)])
+            case ".go":
+                self.run_command(["go", "run", str(fp)])
+            case ".rs":
+                self._handle_rust_execution(fp)
+
             case _ if ext in self.c_family_ext:
                 compiler = "gcc" if ext == ".c" else "g++"
                 cmd = [compiler] + self.extra_flags + [str(fp), "-o", str(out_name)]
-                if self.run_command(cmd):
+                if self.run_command(cmd, compiling=True):
                     self.output_files.append(out_name)
                     self._execute_binary(out_name)
             case _:
@@ -206,7 +218,7 @@ class CompilerRunner:
                 cmd.append(f"-I{d}")
             cmd += ["-o", str(out_name)]
 
-            if self.run_command(cmd):
+            if self.run_command(cmd, compiling=True):
                 self.output_files.append(out_name)
                 self._execute_binary(out_name)
         else:
@@ -231,8 +243,11 @@ class CompilerRunner:
 def main():
     parser = argparse.ArgumentParser(description="Professional Auto Compiler & Runner")
     parser.add_argument("files", nargs="*", help="Files to compile and run")
-    parser.add_argument("-m", "--multi", action="store_true", help="Compile multi-files")
+    
     parser.add_argument("--keep", action="store_true", help="Keep the output binary(s)")
+    parser.add_argument("-m", "--multi", action="store_true", help="Compile multi-files")
+    parser.add_argument("-t", "--time", action="store_true", help="Time counter for execute binary")
+    
     parser.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files. Optional depth arg (default: infinite)")
     parser.add_argument("-f", "--flags", type=str, default="", help='Compiler flags')
  
@@ -253,7 +268,8 @@ def main():
     # Process operation and flag(s) -> dictionary of it
     operator_flags = {
         "multi" : args.multi,
-        "keep" : args.keep
+        "keep" : args.keep,
+        "time" : args.time
     }
 
     # Init runner
@@ -303,5 +319,5 @@ def main():
 
 if __name__ == "__main__":
     exit_code = main()
-    print()
+    print(f"\n{Colors.GRAY}--------------{Colors.RESET}")
     sys.exit(exit_code)
