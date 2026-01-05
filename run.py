@@ -8,7 +8,44 @@ import shlex
 import time
 from pathlib import Path
 from typing import List, Optional
+try:
+    import tomllib
+except ImportError:
+    sys.exit("Error: Python 3.11+ required for tomllib")
 
+class Config:
+
+    def __init__(self):
+        self.data = {}
+        
+        # Search paths: 1. Current Dir, 2. Script Dir
+        search_paths = [
+            Path.cwd() / "Run.toml",
+            Path(__file__).parent / "Run.toml"
+        ]
+        
+        config_path = None
+        for p in search_paths:
+            if p.exists():
+                config_path = p
+                break
+        
+        if config_path:
+            try:
+                with open(config_path, "rb") as f:
+                    self.data = tomllib.load(f)
+                Printer.info(f"Loaded config: {config_path}")
+            except Exception as e:
+                Printer.error(f"Failed to parse {config_path}: {e}")
+
+    def get_runner(self, lang: str, default: str) -> str:
+        return self.data.get("runners", {}).get(lang, default)
+    
+    def get_preset_flags(self, preset_name: str, lang: str) -> List[str]:
+        if not preset_name: return []
+        flags = self.data.get("presets", {}).get(preset_name, {}).get(lang, "")
+        return shlex.split(flags) if flags else []
+        
 class Colors:
     GREEN = '\033[92m'
     CYAN = '\033[96m'
@@ -59,7 +96,10 @@ class CompilerRunner:
         clean_flags = extra_flags.strip().strip('"').strip("'")
         self.extra_flags = shlex.split(clean_flags) if clean_flags else []
         
+        
         self.dry_run = op_flags.get("dry_run", False)
+        self.config = Config()
+        self.preset = op_flags.get("preset", None)
 
     def get_executable_path(self, source_path: Path) -> Path:
         name = source_path.stem
@@ -195,7 +235,12 @@ class CompilerRunner:
         else:
             # --- Rustc Mode (Single File) ---
             out_name = self.get_executable_path(fp)
-            cmd = ["rustc", str(fp), "-o", str(out_name)] + self.extra_flags
+            
+            # Preset flags
+            preset_flags = self.config.get_preset_flags(self.preset, "rust")
+            rustc = self.config.get_runner("rust", "rustc")
+
+            cmd = [rustc, str(fp), "-o", str(out_name)] + self.extra_flags + preset_flags
             if self.run_command(cmd, compiling=True):
                 self.output_files.append(out_name)
                 self._execute_binary(out_name)
@@ -242,8 +287,13 @@ class CompilerRunner:
                 self._handle_rust_execution(fp)
 
             case _ if ext in self.c_family_ext:
-                compiler = "gcc" if ext == ".c" else "g++"
-                cmd = [compiler] + self.extra_flags + [str(fp), "-o", str(out_name)]
+                lang = "c" if ext == ".c" else "cpp"
+                default_compiler = "gcc" if lang == "c" else "g++"
+                compiler = self.config.get_runner(lang, default_compiler)
+                
+                preset_flags = self.config.get_preset_flags(self.preset, lang)
+
+                cmd = [compiler] + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
                 if self.run_command(cmd, compiling=True):
                     self.output_files.append(out_name)
                     self._execute_binary(out_name)
@@ -259,10 +309,14 @@ class CompilerRunner:
         ext = main_source.suffix.lower()
 
         if ext in self.c_family_ext:
-            compiler = "gcc" if ext == ".c" else "g++"
+            lang = "c" if ext == ".c" else "cpp"
+            default_compiler = "gcc" if lang == "c" else "g++"
+            compiler = self.config.get_runner(lang, default_compiler)
+            
+            preset_flags = self.config.get_preset_flags(self.preset, lang)
             out_name = self.get_executable_path(main_source)
 
-            cmd = [compiler] + self.extra_flags + [str(s) for s in sources]
+            cmd = [compiler] + self.extra_flags + preset_flags + [str(s) for s in sources]
             include_dirs = {str(h.parent) for h in headers}
             for d in include_dirs:
                 cmd.append(f"-I{d}")
@@ -302,6 +356,7 @@ def main():
     parser.add_argument("-m", "--multi", action="store_true", help="Compile multi-files")
     parser.add_argument("-t", "--time", action="store_true", help="Time counter for execute binary")
     parser.add_argument("-d", "--dry-run", action="store_true", help="Simulate execution without running commands")
+    parser.add_argument("-p", "--preset", type=str, help="Configuration preset (from Run.toml)")
     
     parser.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files. Optional depth arg (default: infinite)")
     parser.add_argument("-f", "--flags", type=str, default="", help='Compiler flags')
@@ -325,7 +380,8 @@ def main():
         "multi" : args.multi,
         "keep" : args.keep,
         "time" : args.time,
-        "dry_run": args.dry_run
+        "dry_run": args.dry_run,
+        "preset": args.preset
     }
 
     # Init runner
@@ -345,7 +401,7 @@ def main():
         depth = args.link_auto if args.link_auto != -1 else None
         src_files = runner.find_source_files(Path("."), max_depth=depth)
         if not src_files:
-            Printer.error(f"No C/C++ source files found via -L auto-search (depth={depth}).")
+            Printer.error(f"No supported source files found via -L auto-search (depth={depth}).")
             return 1
         Printer.info(f"Auto-found {len(src_files)} source files: {src_files}")
         try:

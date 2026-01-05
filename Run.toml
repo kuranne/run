@@ -1,0 +1,21 @@
+[runners]
+# Override default compilers
+# c = "clang"
+# cpp = "clang++"
+# for python, either support in windows and posix already in default
+# but if you want to use specific version, you can override it
+# python = "python3" 
+
+[presets.debug]
+c = "-g -Wall -Wextra"
+cpp = "-g -Wall -Wextra -std=c++20"
+rust = "-g"
+
+[presets.release]
+c = "-O3"
+cpp = "-O3 -std=c++20"
+rust = "-C opt-level=3"
+
+[presets.fast]
+c = "-O2 -march=native"
+cpp = "-O2 -march=native"

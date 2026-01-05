@@ -1,0 +1,2 @@
+#!/bin/bash
+exec "/Users/kuranne/Projects/run/.venv/bin/python" "/Users/kuranne/Projects/run/run.py" "$@"
