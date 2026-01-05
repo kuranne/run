@@ -1,5 +1,2 @@
 .DS_Store
-
-!run.py
-!Run.toml
 update.sh

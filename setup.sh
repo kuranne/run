@@ -22,7 +22,7 @@ RUN_SCRIPT="${CURRENT_DIR}/run"
 
 cat <<EOF > "$RUN_SCRIPT"
 #!/bin/bash
-exec "${CURRENT_DIR}/.venv/bin/python" "${CURRENT_DIR}/run.py" "\$@"
+exec "${CURRENT_DIR}/.venv/bin/python" "${CURRENT_DIR}/source/main.py" "\$@"
 EOF
 
 chmod +x "$RUN_SCRIPT"
