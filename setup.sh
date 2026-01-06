@@ -15,6 +15,10 @@ echo "${CYAN}Setting up virtual environment...${NC}"
 python3 -m venv .venv
 source ./.venv/bin/activate
 
+#--- Install Dependencies ---#
+echo "${CYAN}Installing dependencies...${NC}"
+pip install -r requirements.txt
+
 #--- Create Wrapper Script ---#
 echo "${CYAN}Creating runner script...${NC}"
 CURRENT_DIR=$(pwd)

@@ -6,6 +6,7 @@ import shlex
 from pathlib import Path
 from runner.ui import Printer, Colors
 from runner.core import CompilerRunner
+from update import update
 
 def main():
     # Parser
@@ -17,10 +18,11 @@ def main():
     parser.add_argument("-t", "--time", action="store_true", help="Time counter for execute binary")
     parser.add_argument("-d", "--dry-run", action="store_true", help="Simulate execution without running commands")
     parser.add_argument("-p", "--preset", type=str, help="Configuration preset (from Run.toml)")
+    parser.add_argument("-u", "--update", action="store_true", help="Update run to latest version from GitHub")
     
     parser.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files. Optional depth arg (default: infinite)")
     parser.add_argument("-f", "--flags", type=str, default="", help='Compiler flags')
- 
+
     # Process -f-flags without space
     processed_args = []
     i = 1
@@ -34,6 +36,10 @@ def main():
         i += 1
 
     args = parser.parse_args(processed_args)
+
+    if args.update:
+        update("kuranne/run", "v26.1")
+        return 0
 
     # Process operation and flag(s) -> dictionary of it
     operator_flags = {

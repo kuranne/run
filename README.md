@@ -16,7 +16,6 @@ I just lazy to compile then run, so I made this.
 ## In Future Features (Maybe)
 
 - **JSON Config**: for each project, if define `Run.json` inside, it will use it instead of default config.
-- **Update**: update the tool to latest version from GitHub.
 
 ## Installation
 
