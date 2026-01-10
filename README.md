@@ -11,7 +11,7 @@ I just lazy to compile then run, so I made this.
 - **Custom Language Support**: Add any language via `Run.toml` configuration.
 - **Project Config (`Run.toml`)**: Define custom runners and flag presets.
 - **Virtual Env Support**: Automatically detects `.venv` or `.env` and uses the local Python.
-- **Multi-File Support**: Easily link multiple C/C++ files.
+- **Multi-File Support**: Easily link multiple C/C++/Java files.
 - **Dry Run**: Simulate execution to check commands without running them.
 
 ## In Future Features (Maybe)
@@ -50,7 +50,7 @@ run <files> [flags]
 
 | Flag                    | Description                                       |
 | ----------------------- | ------------------------------------------------- |
-| `-m`, `--multi`         | Compile multiple files together                   |
+| `-m`, `--multi`         | Compile multiple files together (C/C++/Java)      |
 | `-p`, `--preset <name>` | Use a flag preset from `Run.toml`                 |
 | `-L [depth]`            | Auto-find and link C/C++ source files             |
 | `-d`, `--dry-run`       | Print commands without executing                  |
@@ -76,6 +76,12 @@ run main.cpp -p debug
 
 ```bash
 run -L <depth>
+```
+
+**Compile multiple Java files together:**
+
+```bash
+run Main.java Helper.java Utils.java -m
 ```
 
 **Dry run to see what would happen before real run:**
