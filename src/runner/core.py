@@ -53,16 +53,10 @@ class CompilerRunner(BaseRunner, RustHandler):
                 is_lua = spc.run(f"{check_cmd} lua", shell=True, capture_output=True).returncode == 0
                 prog = "lua" if is_lua else "luajit"
                 self.run_command([prog, str(fp)])
-
-            case ".java":
-                self.run_command(["java", str(fp)])
-            case ".js":
-                self.run_command(["node", str(fp)])
-            case ".go":
-                self.run_command(["go", "run", str(fp)])
             case ".rs":
                 self._handle_rust_execution(fp)
-
+            case ".java":
+                self.run_command(["java", str(fp)])
             case _ if ext in self.c_family_ext:
                 lang = "c" if ext == ".c" else "cpp"
                 default_compiler = "gcc" if lang == "c" else "g++"
@@ -75,7 +69,12 @@ class CompilerRunner(BaseRunner, RustHandler):
                     self.output_files.append(out_name)
                     self._execute_binary(out_name)
             case _:
-                Printer.error(f"Unsupported extension: {ext}")
+                # Check for custom language configuration
+                lang_config = self.config.get_language_by_extension(ext)
+                if lang_config:
+                    self._handle_custom_language(fp, lang_config, out_name)
+                else:
+                    Printer.error(f"Unsupported extension: {ext}")
 
     def _handle_multi_compile(self, paths: List[Path]):
         sources = [p for p in paths if p.suffix in self.c_family_ext]
@@ -104,6 +103,31 @@ class CompilerRunner(BaseRunner, RustHandler):
                 self._execute_binary(out_name)
         else:
             Printer.error(f"Unsupported extension for multi: {ext}")
+
+    def _handle_custom_language(self, fp: Path, lang_config: dict, out_name: Path):
+        """Handle custom language execution based on configuration"""
+        lang_name = lang_config.get("name", "unknown")
+        runner = lang_config.get("runner")
+        lang_type = lang_config.get("type", "interpreter")
+        
+        if not runner:
+            Printer.error(f"No runner specified for language: {lang_name}")
+            return
+        
+        if lang_type == "interpreter":
+            # Run directly like Python, Ruby, etc.
+            self.run_command([runner, str(fp)])
+        elif lang_type == "compiler":
+            # Compile first, then execute like C/C++
+            compile_flags = lang_config.get("compile_flags", [])
+            preset_flags = self.config.get_preset_flags(self.preset, lang_name)
+            
+            cmd = [runner] + compile_flags + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
+            if self.run_command(cmd, compiling=True):
+                self.output_files.append(out_name)
+                self._execute_binary(out_name)
+        else:
+            Printer.error(f"Unknown language type '{lang_type}' for {lang_name}")
 
     def _execute_binary(self, bin_path: Path):
         target = str(bin_path) if self.is_posix else str(bin_path.absolute())

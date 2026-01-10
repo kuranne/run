@@ -1,10 +1,6 @@
 [runners]
 # Override default compilers
-# c = "clang"
-# cpp = "clang++"
-# for python, either support in windows and posix already in default
-# but if you want to use specific version, you can override it
-# python = "python3" 
+# Example c = "clang", cpp = "clang++", rust = "rustc" etc
 
 [presets.debug]
 c = "-g -Wall -Wextra"
@@ -19,3 +15,41 @@ rust = "-C opt-level=3"
 [presets.fast]
 c = "-O2 -march=native"
 cpp = "-O2 -march=native"
+
+# Custom language support
+# Add custom languages with their file extensions and runners
+# type: "interpreter" (run directly) or "compiler" (compile then run)
+
+[languages.ruby]
+extensions = [".rb"]
+runner = "ruby"
+type = "interpreter"
+
+[languages.go]
+extensions = [".go"]
+runner = "go"
+type = "interpreter"
+compile_flags = ["run"]
+
+[languages.cs]
+extensions = [".cs"]
+runner = "dotnet"
+type = "interpreter"
+compile_flags = ["run"]
+
+[languages.js]
+extensions = [".js"]
+runner = "node"
+type = "interpreter"
+
+[languages.kotlin]
+extensions = [".kt", ".kts"]
+runner = "kotlinc"
+type = "compiler"
+compile_flags = ["-include-runtime", "-d"]
+
+[languages.zig]
+extensions = [".zig"]
+runner = "zig"
+type = "compiler"
+compile_flags = ["build-exe"]
