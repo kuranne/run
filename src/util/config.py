@@ -2,7 +2,7 @@ import sys
 import shlex
 from typing import List
 from pathlib import Path
-from runner.ui import Printer
+from util.output import Printer
 
 try:
     import tomllib

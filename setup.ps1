@@ -23,7 +23,7 @@ Write-Host "Installing dependencies..." -ForegroundColor Cyan
 
 #--- Create Wrapper ---#
 Write-Host "Creating run.cmd wrapper..." -ForegroundColor Cyan
-$batchContent = "@`"%~dp0.venv\Scripts\python.exe`" `"%~dp0source\main.py`" %*"
+$batchContent = "@`"%~dp0.venv\Scripts\python.exe`" `"%~dp0src\main.py`" %*"
 Set-Content -Path "run.cmd" -Value $batchContent
 
 #--- Add to PATH ---#

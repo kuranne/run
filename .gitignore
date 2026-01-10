@@ -1,2 +1,10 @@
+# System
 .DS_Store
+
+# Tools
+.venv/
+__pycache__/
+.tool-versions
+
+# Others
 update.sh
