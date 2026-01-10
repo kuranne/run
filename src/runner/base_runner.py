@@ -51,25 +51,6 @@ class BaseRunner:
             Printer.error(f"Command '{cmd[0]}' not found.")
             return False
         
-    def find_source_files(self, path: Path, max_depth: int = None) -> List[str]:
-        """Recursively find c/c++ source files with optional max depth"""
-        files = []
-        
-        # 0 means just the current directory (no recursion into subdirs)
-        # 1 means current + 1 level deep
-        
-        start_level = len(path.absolute().parts)
-        
-        for p in path.rglob("*"):
-            if max_depth is not None:
-                current_level = len(p.parent.absolute().parts)
-                if current_level - start_level > max_depth:
-                    continue
-                
-            if p.is_file() and p.suffix in self.c_family_ext:
-                files.append(str(p))
-        return files
-    
     def _compile_c_family(self, fp: Path):
         """Handles C/C++ compilation and execution"""
         lang = "c" if fp.suffix == ".c" else "cpp"
