@@ -4,11 +4,14 @@ import sys
 from argparse import ArgumentParser
 import shlex
 from pathlib import Path
-from runner.ui import Printer, Colors
-from runner.core import CompilerRunner
-from update import update
+
+from util.output import Printer, Colors
+from util.update import update
+from runner import CompilerRunner
 
 def main():
+    current_version = "v26.1.1"
+
     # Parser
     parser = ArgumentParser(description="Professional Auto Compiler & Runner")
     parser.add_argument("files", nargs="*", help="Files to compile and run")
@@ -38,7 +41,7 @@ def main():
     args = parser.parse_args(processed_args)
 
     if args.update:
-        update("kuranne/run", "v26.1")
+        update("kuranne/run", current_version)
         return 0
 
     # Process operation and flag(s) -> dictionary of it
