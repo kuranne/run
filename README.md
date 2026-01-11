@@ -13,10 +13,11 @@ I just lazy to compile then run, so I made this.
 - **Virtual Env Support**: Automatically detects `.venv` or `.env` and uses the local Python.
 - **Multi-File Support**: Easily link multiple C/C++/Java files.
 - **Dry Run**: Simulate execution to check commands without running them.
+- **TOML Config**: for each project, if define `Run.toml` inside, it will use it instead of default config.
 
-## In Future Features (Maybe)
+## In Future Features (Maybe)  
 
-- **JSON Config**: for each project, if define `Run.json` inside, it will use it instead of default config.
+- **No Plan**: email me for your idea.  
 
 ## Installation
 

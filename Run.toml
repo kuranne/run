@@ -1,55 +1,24 @@
-[runners]
-# Override default compilers
+[runner]
+# Override default compilers and/or interpreter
 # Example c = "clang", cpp = "clang++", rust = "rustc" etc
 
-[presets.debug]
+[preset.debug]
 c = "-g -Wall -Wextra"
 cpp = "-g -Wall -Wextra -std=c++20"
 rust = "-g"
 
-[presets.release]
+[preset.release]
 c = "-O3"
 cpp = "-O3 -std=c++20"
 rust = "-C opt-level=3"
 
-[presets.fast]
-c = "-O2 -march=native"
-cpp = "-O2 -march=native"
-
-# Custom language support
+# Custom languages support
 # Add custom languages with their file extensions and runners
 # type: "interpreter" (run directly) or "compiler" (compile then run)
 
-[languages.ruby]
-extensions = [".rb"]
-runner = "ruby"
-type = "interpreter"
-
-[languages.go]
-extensions = [".go"]
-runner = "go"
-type = "interpreter"
-compile_flags = ["run"]
-
-[languages.cs]
-extensions = [".cs"]
-runner = "dotnet"
-type = "interpreter"
-compile_flags = ["run"]
-
-[languages.js]
+# Example
+[language.javascript]
 extensions = [".js"]
 runner = "node"
-type = "interpreter"
-
-[languages.kotlin]
-extensions = [".kt", ".kts"]
-runner = "kotlinc"
-type = "compiler"
-compile_flags = ["-include-runtime", "-d"]
-
-[languages.zig]
-extensions = [".zig"]
-runner = "zig"
-type = "compiler"
-compile_flags = ["build-exe"]
+type = "interpreter"            # Change this to "compiler" if the language want to compile first
+# compiler_flags = ["<flags>"]  # This is example for flags that will use during compiling
