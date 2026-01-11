@@ -8,6 +8,13 @@ from pathlib import Path
 from util.output import Printer, Colors
 
 def update(repo: str, current_version: str):
+    """
+    Update the runner to the latest version from GitHub.
+
+    Args:
+        repo (str): GitHub repository (e.g., 'user/repo').
+        current_version (str): The current installed version tag.
+    """
     api_url = f"https://api.github.com/repos/{repo}/releases/latest"
     
     try:
@@ -78,5 +85,7 @@ def update(repo: str, current_version: str):
                 
         Printer.action("SUCCESS", f"Updated to {latest_version} successfully!", Colors.GREEN)
         
+    except requests.RequestException as e:
+        Printer.error(f"Network error during update: {e}")
     except Exception as e:
         Printer.error(f"Failed to update: {e}")

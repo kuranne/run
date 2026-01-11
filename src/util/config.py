@@ -1,6 +1,6 @@
 import sys
 import shlex
-from typing import List
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 from util.output import Printer
 
@@ -10,9 +10,15 @@ except ImportError:
     sys.exit("Error: Python 3.11+ required for tomllib")
 
 class Config:
+    """
+    Configuration manager for the runner, handling TOML config loading and retrieval.
+    """
 
     def __init__(self):
-        self.data = {}
+        """
+        Initialize the Config manager, loading Run.toml from detected paths.
+        """
+        self.data: Dict[str, Any] = {}
         projects_directory = Path(__file__).resolve().parent.parent.parent
         
         # Search paths: 1. Current Dir, 2. Script Dir
@@ -36,19 +42,52 @@ class Config:
                 Printer.error(f"Failed to parse {config_path}: {e}")
 
     def get_runner(self, lang: str, default: str) -> str:
+        """
+        Get the runner command for a specific language.
+
+        Args:
+            lang (str): Language key (e.g., 'c', 'cpp', 'python').
+            default (str): Default runner to use if not found.
+
+        Returns:
+            str: The runner command.
+        """
         return self.data.get("runner", {}).get(lang, default)
     
-    def get_preset_flags(self, preset_name: str, lang: str) -> List[str]:
+    def get_preset_flags(self, preset_name: Optional[str], lang: str) -> List[str]:
+        """
+        Get compiler/interpreter flags for a specific preset and language.
+
+        Args:
+            preset_name (Optional[str]): Name of the preset (e.g., 'debug', 'release').
+            lang (str): Language key.
+
+        Returns:
+            List[str]: List of flags.
+        """
         if not preset_name: return []
         flags = self.data.get("preset", {}).get(preset_name, {}).get(lang, "")
         return shlex.split(flags) if flags else []
     
-    def get_custom_languages(self) -> dict:
-        """Returns all custom language configurations"""
+    def get_custom_languages(self) -> Dict[str, Any]:
+        """
+        Returns all custom language configurations.
+
+        Returns:
+            Dict[str, Any]: Dictionary of language configurations.
+        """
         return self.data.get("language", {})
     
-    def get_language_by_extension(self, ext: str) -> dict | None:
-        """Find language configuration by file extension"""
+    def get_language_by_extension(self, ext: str) -> Optional[Dict[str, Any]]:
+        """
+        Find language configuration by file extension.
+
+        Args:
+            ext (str): File extension (e.g., '.kt', '.zig').
+
+        Returns:
+            Optional[Dict[str, Any]]: Language configuration dictionary including name, or None if not found.
+        """
         languages = self.get_custom_languages()
         for lang_name, lang_config in languages.items():
             extensions = lang_config.get("extensions", [])
@@ -60,6 +99,14 @@ class Config:
         return None
     
     def is_custom_language_configured(self, ext: str) -> bool:
-        """Check if a file extension has a custom language configuration"""
+        """
+        Check if a file extension has a custom language configuration.
+
+        Args:
+            ext (str): File extension.
+
+        Returns:
+            bool: True if configured, False otherwise.
+        """
         return self.get_language_by_extension(ext) is not None
         
