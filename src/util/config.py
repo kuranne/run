@@ -36,16 +36,16 @@ class Config:
                 Printer.error(f"Failed to parse {config_path}: {e}")
 
     def get_runner(self, lang: str, default: str) -> str:
-        return self.data.get("runners", {}).get(lang, default)
+        return self.data.get("runner", {}).get(lang, default)
     
     def get_preset_flags(self, preset_name: str, lang: str) -> List[str]:
         if not preset_name: return []
-        flags = self.data.get("presets", {}).get(preset_name, {}).get(lang, "")
+        flags = self.data.get("preset", {}).get(preset_name, {}).get(lang, "")
         return shlex.split(flags) if flags else []
     
     def get_custom_languages(self) -> dict:
         """Returns all custom language configurations"""
-        return self.data.get("languages", {})
+        return self.data.get("language", {})
     
     def get_language_by_extension(self, ext: str) -> dict | None:
         """Find language configuration by file extension"""
