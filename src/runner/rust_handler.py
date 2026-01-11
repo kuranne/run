@@ -3,8 +3,19 @@ from typing import Optional
 from util.output import Printer
 
 class RustHandler:
+    """
+    Mixin class handling Cargo/Rust specific operations.
+    """
     def _find_cargo_toml(self, start_path: Path) -> Optional[Path]:
-        """Walk up to find Cargo.toml"""
+        """
+        Walk up from start_path to find Cargo.toml.
+        
+        Args:
+            start_path (Path): Path to start searching from.
+
+        Returns:
+            Optional[Path]: Path to Cargo.toml if found, else None.
+        """
         current = start_path.absolute()
         if current.is_file():
             current = current.parent
@@ -17,7 +28,15 @@ class RustHandler:
         return None
 
     def _get_cargo_package_name(self, toml_path: Path) -> Optional[str]:
-        """Simple parsing to get package name from Cargo.toml"""
+        """
+        Simple parsing to get package name from Cargo.toml.
+
+        Args:
+            toml_path (Path): Path to Cargo.toml.
+
+        Returns:
+            Optional[str]: Package name if found, else None.
+        """
         try:
             with open(toml_path, 'r', encoding='utf-8') as f:
                 in_package = False
@@ -38,8 +57,13 @@ class RustHandler:
             pass
         return None
 
-    def run_cargo_mode(self, toml_path: Path = None):
-        """Handle cargo execution logic: run -q OR build && run"""
+    def run_cargo_mode(self, toml_path: Optional[Path] = None):
+        """
+        Handle cargo execution logic: run -q OR build && run.
+
+        Args:
+            toml_path (Optional[Path]): Path to Cargo.toml. Defaults to "Cargo.toml" in cwd.
+        """
         # If path not provided, assume current dir
         if not toml_path:
             toml_path = Path("Cargo.toml")

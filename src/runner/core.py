@@ -1,19 +1,40 @@
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Dict, Any
 import subprocess as spc
+import re
 from util.output import Printer, Colors
 from .base_runner import BaseRunner
 from .rust_handler import RustHandler
 
 class CompilerRunner(BaseRunner, RustHandler):
-    def __init__(self, op_flags, extra_flags: str = ""):
+    """
+    Main runner class that handles compilation and execution logic for various languages.
+    Inherits from BaseRunner and RustHandler.
+    """
+    def __init__(self, op_flags: Dict[str, Any], extra_flags: str = ""):
+        """
+        Initialize the CompilerRunner.
+
+        Args:
+            op_flags (Dict[str, Any]): Operation flags.
+            extra_flags (str): Extra compiler flags.
+        """
         super().__init__(op_flags, extra_flags)
         self.c_family_ext = {'.c', '.cpp', '.cc'}
         self.c_family_header_ext = {'.h', '.hpp'}
         self.java_ext = {'.java'}
 
-    def find_source_files(self, path: Path, max_depth: int = None) -> List[str]:
-        """Recursively find c/c++/java source files with optional max depth"""
+    def find_source_files(self, path: Path, max_depth: Optional[int] = None) -> List[str]:
+        """
+        Recursively find C/C++/Java source files with optional max depth.
+
+        Args:
+            path (Path): Starting directory.
+            max_depth (Optional[int]): Maximum depth to recurse. None for infinite.
+
+        Returns:
+            List[str]: List of found source file paths.
+        """
         files = []
 
         ext = self.c_family_ext.union(self.java_ext)
@@ -34,6 +55,13 @@ class CompilerRunner(BaseRunner, RustHandler):
         return files
 
     def compile_and_run(self, files: List[str], multi: bool = False):
+        """
+        Compile and run the provided files.
+
+        Args:
+            files (List[str]): List of file paths to process.
+            multi (bool): Whether to treat files as a single multi-file project.
+        """
         if not files: return
         file_paths = [Path(f) for f in files]
         
@@ -45,7 +73,12 @@ class CompilerRunner(BaseRunner, RustHandler):
                 self._handle_single_file(fp)
 
     def _get_python_executable(self) -> str:
-        """Check for .venv or .env and return python path, else system default"""
+        """
+        Check for .venv or .env and return python path, else system default.
+
+        Returns:
+            str: Path to the python executable or command name.
+        """
         potential_venvs = [".venv", ".env"]
         # Check in current working directory
         for venv in potential_venvs:
@@ -63,6 +96,12 @@ class CompilerRunner(BaseRunner, RustHandler):
         return "python" if not self.is_posix else "python3"
 
     def _handle_single_file(self, fp: Path):
+        """
+        Handle execution flow for a single file.
+
+        Args:
+            fp (Path): Path to the source file.
+        """
         ext = fp.suffix.lower()
         out_name = self.get_executable_path(fp)
 
@@ -113,6 +152,12 @@ class CompilerRunner(BaseRunner, RustHandler):
                     Printer.error(f"Unsupported extension: {ext}")
 
     def _handle_multi_compile(self, paths: List[Path]):
+        """
+        Handle multi-file compilation by detecting language type.
+
+        Args:
+            paths (List[Path]): List of all source files.
+        """
         # Detect language type from files
         c_sources = [p for p in paths if p.suffix in self.c_family_ext]
         java_sources = [p for p in paths if p.suffix in self.java_ext]
@@ -125,7 +170,13 @@ class CompilerRunner(BaseRunner, RustHandler):
             Printer.error("No supported files found for multi-compile")
 
     def _handle_multi_c_family(self, sources: List[Path], all_paths: List[Path]):
-        """Handle multi-file C/C++ compilation"""
+        """
+        Handle multi-file C/C++ compilation.
+
+        Args:
+            sources (List[Path]): List of source files.
+            all_paths (List[Path]): List of all files including headers.
+        """
         headers = [p for p in all_paths if p.suffix in self.c_family_header_ext]
         
         main_source = sources[0]
@@ -148,7 +199,12 @@ class CompilerRunner(BaseRunner, RustHandler):
             self._execute_binary(out_name)
 
     def _handle_multi_java(self, sources: List[Path]):
-        """Handle multi-file Java compilation"""
+        """
+        Handle multi-file Java compilation.
+
+        Args:
+            sources (List[Path]): List of Java source files.
+        """
         compiler = self.config.get_runner("java", "javac")
         preset_flags = self.config.get_preset_flags(self.preset, "java")
         
@@ -169,13 +225,21 @@ class CompilerRunner(BaseRunner, RustHandler):
             else:
                 Printer.error(f"Could not find main class in {sources[0]}")
 
-    def _extract_java_main_class(self, java_file: Path) -> str:
-        """Extract the main class name from a Java file"""
+    def _extract_java_main_class(self, java_file: Path) -> Optional[str]:
+        """
+        Extract the main class name from a Java file.
+
+        Args:
+            java_file (Path): Path to the Java file.
+
+        Returns:
+            Optional[str]: Name of the main class, or None if not found.
+        """
         try:
             with open(java_file, 'r') as f:
                 content = f.read()
                 # Look for public class declaration
-                import re
+                
                 # Match: public class ClassName
                 match = re.search(r'public\s+class\s+(\w+)', content)
                 if match:
@@ -189,7 +253,14 @@ class CompilerRunner(BaseRunner, RustHandler):
         return None
 
     def _handle_custom_language(self, fp: Path, lang_config: dict, out_name: Path):
-        """Handle custom language execution based on configuration"""
+        """
+        Handle custom language execution based on configuration.
+
+        Args:
+            fp (Path): Source file path.
+            lang_config (dict): Language configuration dictionary.
+            out_name (Path): Output executable path.
+        """
         lang_name = lang_config.get("name", "unknown")
         runner = lang_config.get("runner")
         lang_type = lang_config.get("type", "interpreter")
@@ -214,21 +285,14 @@ class CompilerRunner(BaseRunner, RustHandler):
             Printer.error(f"Unknown language type '{lang_type}' for {lang_name}")
 
     def _execute_binary(self, bin_path: Path):
+        """
+        Execute a compiled binary.
+
+        Args:
+            bin_path (Path): Path to the binary.
+        """
         target = str(bin_path) if self.is_posix else str(bin_path.absolute())
         # Ensure ./ for POSIX relative paths
         if self.is_posix and not target.startswith('/') and not target.startswith('./'):
              target = f"./{target}"
         self.run_command([target])
-
-    def cleanup(self):
-        if not self.flags["keep"]:
-            for f in self.output_files:
-                if self.dry_run:
-                     Printer.action("DRY-RUN", f"Would delete: {f}", Colors.YELLOW)
-                     continue
-                
-                if f.exists():
-                    try:
-                        f.unlink()
-                    except OSError:
-                        pass

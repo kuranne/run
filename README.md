@@ -19,9 +19,24 @@ Now version is `26.1.1`, hope you updated to latest version!
 - **Dry Run**: Simulate execution to check commands without running them.
 - **TOML Config**: for each project, if define `Run.toml` inside, it will use it instead of default config.
 
-## In Future Features (Maybe)  
+## In Future Features (Maybe)
 
-- **No Plan**: email me for your idea.  
+1. Add comprehensive error handling and logging - Replace bare except clauses and print statements with proper logging
+2. Implement input validation and sanitization - Prevent command injection attacks through file names and flags
+3. Add a test suite - Create unit and integration tests to prevent regressions
+
+### Code Quality Improvements
+
+1. Standardize error handling patterns - Use consistent exception handling across all modules
+2. Implement configuration validation - Validate TOML configuration on load
+3. Add security hardening - Sandboxing and privilege checks for compiled code execution
+
+### Feature Enhancements
+
+1. Add caching mechanism - Cache compilation results for unchanged files
+2. Implement parallel compilation - Support for building multiple files simultaneously
+3. Add language auto-detection improvements - Better heuristics for file type detection
+4. Implement proper cleanup on failure - Ensure all temporary files are cleaned up
 
 ## Installation
 
