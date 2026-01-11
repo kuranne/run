@@ -4,6 +4,10 @@ A configurable runner. It handles compilation, execution, and cleanup automatica
 
 I just lazy to compile then run, so I made this.
 
+## Current version
+
+Now version is `26.1.1`, hope you updated to latest version!
+
 ## Features
 
 - **Auto-Detection**: detailed execution info with colored output.
@@ -96,7 +100,7 @@ run main.cpp -p release -d
 Create a `Run.toml` in your project root or in the script installation directory.
 
 ```toml
-[runners]
+[runner]
 # Override default runners
 c = "clang"
 cpp = "clang++"
