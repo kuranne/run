@@ -8,14 +8,16 @@ I just lazy to compile then run, so I made this.
 
 - **Auto-Detection**: detailed execution info with colored output.
 - **Smart Compilation**: Automatically compiles C/C++/Rust before running.
+- **Custom Language Support**: Add any language via `Run.toml` configuration.
 - **Project Config (`Run.toml`)**: Define custom runners and flag presets.
 - **Virtual Env Support**: Automatically detects `.venv` or `.env` and uses the local Python.
-- **Multi-File Support**: Easily link multiple C/C++ files.
+- **Multi-File Support**: Easily link multiple C/C++/Java files.
 - **Dry Run**: Simulate execution to check commands without running them.
+- **TOML Config**: for each project, if define `Run.toml` inside, it will use it instead of default config.
 
-## In Future Features (Maybe)
+## In Future Features (Maybe)  
 
-- **JSON Config**: for each project, if define `Run.json` inside, it will use it instead of default config.
+- **No Plan**: email me for your idea.  
 
 ## Installation
 
@@ -49,7 +51,7 @@ run <files> [flags]
 
 | Flag                    | Description                                       |
 | ----------------------- | ------------------------------------------------- |
-| `-m`, `--multi`         | Compile multiple files together                   |
+| `-m`, `--multi`         | Compile multiple files together (C/C++/Java)      |
 | `-p`, `--preset <name>` | Use a flag preset from `Run.toml`                 |
 | `-L [depth]`            | Auto-find and link C/C++ source files             |
 | `-d`, `--dry-run`       | Print commands without executing                  |
@@ -75,6 +77,12 @@ run main.cpp -p debug
 
 ```bash
 run -L <depth>
+```
+
+**Compile multiple Java files together:**
+
+```bash
+run Main.java Helper.java Utils.java -m
 ```
 
 **Dry run to see what would happen before real run:**
@@ -104,3 +112,58 @@ c = "-O3"
 cpp = "-O3 -std=c++20"
 rust = "-C opt-level=3"
 ```
+
+## Custom Languages
+
+You can add support for any language by defining it in `Run.toml`. This allows you to use the runner with languages beyond the built-in support.
+
+### Interpreter Languages
+
+For interpreted languages (like Ruby, Perl, PHP), set `type = "interpreter"`:
+
+```toml
+[languages.ruby]
+extensions = [".rb"]
+runner = "ruby"
+type = "interpreter"
+```
+
+Then run your script:
+
+```bash
+run script.rb
+```
+
+### Compiled Languages
+
+For compiled languages (like Kotlin, Zig, D), set `type = "compiler"`:
+
+```toml
+[languages.kotlin]
+extensions = [".kt", ".kts"]
+runner = "kotlinc"
+type = "compiler"
+compile_flags = ["-include-runtime", "-d"]
+```
+
+The runner will compile first, then execute the binary automatically.
+
+### Custom Language Presets
+
+You can also define presets for your custom languages:
+
+```toml
+[languages.zig]
+extensions = [".zig"]
+runner = "zig"
+type = "compiler"
+compile_flags = ["build-exe"]
+
+[presets.debug.zig]
+zig = "-O Debug"
+
+[presets.release.zig]
+zig = "-O ReleaseFast"
+```
+
+Then use: `run main.zig -p release`
