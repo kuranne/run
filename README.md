@@ -9,7 +9,7 @@ I just lazy to compile then run, so I made this.
 - **Auto-Detection**: detailed execution info with colored output.
 - **Smart Compilation**: Automatically compiles C/C++/Rust before running.
 - **Custom Language Support**: Add any language via `Run.toml` configuration.
-- **Project Config (`Run.toml`)**: Define custom runners and flag presets.
+- **Project Config (`Run.toml`)**: Define custom runners and flag preset.
 - **Virtual Env Support**: Automatically detects `.venv` or `.env` and uses the local Python.
 - **Multi-File Support**: Easily link multiple C/C++/Java files.
 - **Dry Run**: Simulate execution to check commands without running them.
@@ -102,12 +102,12 @@ c = "clang"
 cpp = "clang++"
 # python = "python3"
 
-[presets.debug]
+[preset.debug]
 c = "-g -Wall -Wextra"
 cpp = "-g -Wall -Wextra -std=c++20"
 rust = "-g"
 
-[presets.release]
+[preset.release]
 c = "-O3"
 cpp = "-O3 -std=c++20"
 rust = "-C opt-level=3"
@@ -115,14 +115,14 @@ rust = "-C opt-level=3"
 
 ## Custom Languages
 
-You can add support for any language by defining it in `Run.toml`. This allows you to use the runner with languages beyond the built-in support.
+You can add support for any languages by defining it in `Run.toml`. This allows you to use the runner with language beyond the built-in support.
 
 ### Interpreter Languages
 
 For interpreted languages (like Ruby, Perl, PHP), set `type = "interpreter"`:
 
 ```toml
-[languages.ruby]
+[language.ruby]
 extensions = [".rb"]
 runner = "ruby"
 type = "interpreter"
@@ -139,7 +139,7 @@ run script.rb
 For compiled languages (like Kotlin, Zig, D), set `type = "compiler"`:
 
 ```toml
-[languages.kotlin]
+[language.kotlin]
 extensions = [".kt", ".kts"]
 runner = "kotlinc"
 type = "compiler"
@@ -150,19 +150,19 @@ The runner will compile first, then execute the binary automatically.
 
 ### Custom Language Presets
 
-You can also define presets for your custom languages:
+You can also define presets for your custom language:
 
 ```toml
-[languages.zig]
+[language.zig]
 extensions = [".zig"]
 runner = "zig"
 type = "compiler"
 compile_flags = ["build-exe"]
 
-[presets.debug.zig]
+[preset.debug.zig]
 zig = "-O Debug"
 
-[presets.release.zig]
+[preset.release.zig]
 zig = "-O ReleaseFast"
 ```
 
