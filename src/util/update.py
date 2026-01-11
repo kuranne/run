@@ -5,7 +5,7 @@ import zipfile
 import tempfile
 import shutil
 from pathlib import Path
-from runner.ui import Printer, Colors
+from util.output import Printer, Colors
 
 def update(repo: str, current_version: str):
     api_url = f"https://api.github.com/repos/{repo}/releases/latest"

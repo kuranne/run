@@ -12,7 +12,22 @@ echo "${CYAN}Checking for python3...${NC}"
 python3 -c "import sys; exit(0) if sys.version_info >= (3, 11) else exit(1)" || { echo "${RED}Python 3.11+ required${NC}"; exit 1; }
 
 echo "${CYAN}Setting up virtual environment...${NC}"
-python3 -m venv .venv
+if [[ ! -d ./.venv ]]; then
+    python3 -m venv .venv
+else
+    echo -n "Founded .venv in installed directory, want to reinstall venv?[y/N]: "
+    read res
+    if [[ $res =~ ^[Yy]$ ]]; then
+        echo -n "run rm -rf .venv ?[y/N]: "
+        read res
+        if [[ $res =~ ^[Yy]$ ]]; then
+            rm -rf .venv
+            python3 -m venv .venv
+        else
+            echo "Cancelled reinstalling"
+        fi
+    fi
+fi
 source ./.venv/bin/activate
 
 #--- Install Dependencies ---#
@@ -26,7 +41,7 @@ RUN_SCRIPT="${CURRENT_DIR}/run"
 
 cat <<EOF > "$RUN_SCRIPT"
 #!/bin/bash
-exec "${CURRENT_DIR}/.venv/bin/python" "${CURRENT_DIR}/source/main.py" "\$@"
+exec "${CURRENT_DIR}/.venv/bin/python" "${CURRENT_DIR}/src/main.py" "\$@"
 EOF
 
 chmod +x "$RUN_SCRIPT"
