@@ -6,6 +6,8 @@ from typing import List, Dict, Optional, Any
 from pathlib import Path
 from util.config import Config
 from util.output import Printer, Colors
+from util.errors import ExecutionError, CompilationError
+from util.security import SecurityManager
 
 class BaseRunner:
     """
@@ -60,27 +62,42 @@ class BaseRunner:
             compiling (bool): True if this is a compilation step (affects output tag).
 
         Returns:
-            bool: True if command executed successfully (exit code 0), False otherwise.
+            bool: True if command executed successfully (exit code 0).
+            
+        Raises:
+            ExecutionError: If command fails / not found.
+            CompilationError: If compilation command fails.
         """
+        tag = "COMPILE" if compiling else "RUN"
+        cmd_str = " ".join(cmd)
+        
+        if self.dry_run:
+            Printer.action("DRY-RUN", f"{tag}: {cmd_str}", Colors.YELLOW)
+            return True
+
+        # Check for suspicious flags (if needed, but might be annoying for compilers)
+        # SecurityManager.check_suspicious_flags(cmd)
+
+        Printer.action(tag, cmd_str)
+        
+        env = SecurityManager.sanitize_execution_env()
+
+        start_time = time.perf_counter()
         try:
-            tag = "COMPILE" if compiling else "RUN"
-            cmd_str = " ".join(cmd)
+            result = spc.run(cmd, check=False, shell=use_shell, env=env)
             
-            if self.dry_run:
-                Printer.action("DRY-RUN", f"{tag}: {cmd_str}", Colors.YELLOW)
-                return True
-
-            Printer.action(tag, cmd_str)
-
-            start_time = time.perf_counter()
-            result = spc.run(cmd, check=False, shell=use_shell)
-            
-            if self.flags["time"]:
+            if self.flags.get("time", False):
                 Printer.time(time.perf_counter() - start_time)
-            return result.returncode == 0
+            
+            if result.returncode != 0:
+                if compiling:
+                    raise CompilationError(f"Compilation failed with exit code {result.returncode}")
+                else:
+                    raise ExecutionError(f"Execution failed with exit code {result.returncode}")
+            return True
+            
         except FileNotFoundError:
-            Printer.error(f"Command '{cmd[0]}' not found.")
-            return False
+            raise ExecutionError(f"Command '{cmd[0]}' not found.")
         
     def _compile_c_family(self, fp: Path):
         """
@@ -96,9 +113,11 @@ class BaseRunner:
         preset_flags = self.config.get_preset_flags(self.preset, lang)
         cmd = [compiler] + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
         
-        if self.run_command(cmd, compiling=True):
-            self.output_files.append(out_name)
-            self._execute_binary(out_name)
+        # run_command raises exception on failure, so we don't need if check here anymore
+        # but kept for flow clarity or if we catch it later
+        self.run_command(cmd, compiling=True)
+        self.output_files.append(out_name)
+        self._execute_binary(out_name)
 
     def compile_and_run(self, files: List[str], multi: bool = False):
         """
@@ -119,9 +138,7 @@ class BaseRunner:
                 self._handle_single_file(fp)
 
     def cleanup(self):
-        """
-        Clean up generated binary/class files if --keep is not specified.
-        """
+        """Clean up generated binary/class files if --keep is not specified."""
         if not self.flags["keep"]:
             for f in self.output_files:
                 if self.dry_run:
@@ -131,5 +148,5 @@ class BaseRunner:
                 if f.exists():
                     try:
                         f.unlink()
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        Printer.warning(f"Failed to cleanup {f}: {e}")
