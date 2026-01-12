@@ -336,16 +336,23 @@ class CompilerRunner(BaseRunner, RustHandler):
         try:
             with open(java_file, 'r') as f:
                 content = f.read()
+                
+                # Check for package declaration
+                package_name = ""
+                package_match = re.search(r'^\s*package\s+([\w.]+)\s*;', content, re.MULTILINE)
+                if package_match:
+                    package_name = package_match.group(1) + "."
+
                 # Look for public class declaration
                 
                 # Match: public class ClassName
                 match = re.search(r'public\s+class\s+(\w+)', content)
                 if match:
-                    return match.group(1)
+                    return package_name + match.group(1)
                 # Fallback: try to find any class with main method
                 match = re.search(r'class\s+(\w+)\s*\{[^}]*public\s+static\s+void\s+main', content, re.DOTALL)
                 if match:
-                    return match.group(1)
+                    return package_name + match.group(1)
         except Exception as e:
             # This is a bit lower level error, maybe just logging is fine, but lets conform
              raise ExecutionError(f"Error reading Java file: {e}")
