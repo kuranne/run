@@ -2,7 +2,11 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 import subprocess as spc
 import re
+import concurrent.futures
+import os
 from util.output import Printer, Colors
+from util.errors import ConfigError, ExecutionError
+from util.cache import CacheManager
 from .base_runner import BaseRunner
 from .rust_handler import RustHandler
 
@@ -23,6 +27,7 @@ class CompilerRunner(BaseRunner, RustHandler):
         self.c_family_ext = {'.c', '.cpp', '.cc'}
         self.c_family_header_ext = {'.h', '.hpp'}
         self.java_ext = {'.java'}
+        self.cache = CacheManager()
 
     def find_source_files(self, path: Path, max_depth: Optional[int] = None) -> List[str]:
         """
@@ -102,7 +107,34 @@ class CompilerRunner(BaseRunner, RustHandler):
         Args:
             fp (Path): Path to the source file.
         """
+    def _handle_single_file(self, fp: Path):
+        """
+        Handle execution flow for a single file.
+
+        Args:
+            fp (File Path): Path to the source file.
+        """
         ext = fp.suffix.lower()
+        
+        # Auto-detect language by shebang if no extension
+        if not ext and fp.is_file():
+            try:
+                with open(fp, 'r') as f:
+                    first_line = f.readline().strip()
+                    if first_line.startswith("#!"):
+                        if "python" in first_line:
+                            ext = ".py"
+                        elif "bash" in first_line or "sh" in first_line:
+                            # We don't have sh runner explicit, but...
+                            # Maybe we can support shell scripts via generic runner?
+                            # For now just detecting python is a good start.
+                            pass
+                        elif "ruby" in first_line:
+                             # If we had ruby support...
+                             pass
+            except Exception:
+                pass
+
         out_name = self.get_executable_path(fp)
 
         match ext:
@@ -122,15 +154,18 @@ class CompilerRunner(BaseRunner, RustHandler):
                 
                 # Compile the Java file
                 cmd = [compiler] + self.extra_flags + preset_flags + [str(fp)]
-                if self.run_command(cmd, compiling=True):
-                    # Extract main class and run
-                    main_class = self._extract_java_main_class(fp)
-                    if main_class:
-                        class_file = fp.with_suffix('.class')
-                        self.output_files.append(class_file)
-                        self.run_command(["java", main_class])
-                    else:
-                        Printer.error(f"Could not find main class in {fp}")
+                
+                self.run_command(cmd, compiling=True)
+                # If raises exception, we won't reach here
+                
+                # Extract main class and run
+                main_class = self._extract_java_main_class(fp)
+                if main_class:
+                    class_file = fp.with_suffix('.class')
+                    self.output_files.append(class_file)
+                    self.run_command(["java", main_class])
+                else:
+                    raise ExecutionError(f"Could not find main class in {fp}")
                         
             case _ if ext in self.c_family_ext:
                 lang = "c" if ext == ".c" else "cpp"
@@ -140,16 +175,17 @@ class CompilerRunner(BaseRunner, RustHandler):
                 preset_flags = self.config.get_preset_flags(self.preset, lang)
 
                 cmd = [compiler] + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
-                if self.run_command(cmd, compiling=True):
-                    self.output_files.append(out_name)
-                    self._execute_binary(out_name)
+                
+                self.run_command(cmd, compiling=True)
+                self.output_files.append(out_name)
+                self._execute_binary(out_name)
             case _:
                 # Check for custom language configuration
                 lang_config = self.config.get_language_by_extension(ext)
                 if lang_config:
                     self._handle_custom_language(fp, lang_config, out_name)
                 else:
-                    Printer.error(f"Unsupported extension: {ext}")
+                    raise ConfigError(f"Unsupported extension: {ext}")
 
     def _handle_multi_compile(self, paths: List[Path]):
         """
@@ -167,11 +203,41 @@ class CompilerRunner(BaseRunner, RustHandler):
         elif java_sources:
             self._handle_multi_java(java_sources)
         else:
-            Printer.error("No supported files found for multi-compile")
+            raise ConfigError("No supported files found for multi-compile")
+
+    def _compile_object_file(self, compiler: str, source: Path, extra_cmd: List[str]) -> Optional[Path]:
+        """
+        Compile a single source file to object file.
+        Returns path to object file if successful, None otherwise.
+        """
+        # Use cache directory for object files
+        obj_file = self.cache.get_object_path(source)
+        if self.is_posix:
+             # Ensure extension is correct for platform if needed, though suffix check handles it
+             pass 
+        else:
+             obj_file = obj_file.with_suffix(".obj")
+
+        # Check cache
+        if not self.cache.is_changed(source) and obj_file.exists():
+            # Cache hit
+            return obj_file
+
+        Printer.action("COMPILE", f"{source.name} -> object")
+        cmd = [compiler, "-c", str(source), "-o", str(obj_file)] + extra_cmd
+        
+        try:
+            self.run_command(cmd, compiling=True)
+            # We DONT add to output_files because we want to persist them in cache
+            # self.output_files.append(obj_file) 
+            self.cache.update_cache(source)
+            return obj_file
+        except ExecutionError:
+            return None
 
     def _handle_multi_c_family(self, sources: List[Path], all_paths: List[Path]):
         """
-        Handle multi-file C/C++ compilation.
+        Handle multi-file C/C++ compilation with parallel execution and caching.
 
         Args:
             sources (List[Path]): List of source files.
@@ -186,15 +252,46 @@ class CompilerRunner(BaseRunner, RustHandler):
         compiler = self.config.get_runner(lang, default_compiler)
         
         preset_flags = self.config.get_preset_flags(self.preset, lang)
-        out_name = self.get_executable_path(main_source)
-
-        cmd = [compiler] + self.extra_flags + preset_flags + [str(s) for s in sources]
+        
+        # Base command for object file compilation
+        base_cmd = self.extra_flags + preset_flags
         include_dirs = {str(h.parent) for h in headers}
         for d in include_dirs:
-            cmd.append(f"-I{d}")
-        cmd += ["-o", str(out_name)]
+            base_cmd.append(f"-I{d}")
 
-        if self.run_command(cmd, compiling=True):
+        object_files = []
+        failed = False
+        
+        # Parallel compilation
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+        Printer.info(f"Compiling {len(sources)} files using {max_workers} threads...")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_source = {
+                executor.submit(self._compile_object_file, compiler, src, base_cmd): src 
+                for src in sources
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_source):
+                src = future_to_source[future]
+                try:
+                    obj_path = future.result()
+                    if obj_path:
+                        object_files.append(obj_path)
+                    else:
+                        failed = True
+                except Exception as e:
+                    Printer.error(f"Failed to compile {src}: {e}")
+                    failed = True
+
+        if failed:
+            raise ExecutionError("Build failed during compilation phase.")
+
+        # Link
+        out_name = self.get_executable_path(main_source)
+        link_cmd = [compiler] + [str(o) for o in object_files] + ["-o", str(out_name)] + self.extra_flags + preset_flags
+        
+        if self.run_command(link_cmd, compiling=True):
             self.output_files.append(out_name)
             self._execute_binary(out_name)
 
@@ -211,19 +308,20 @@ class CompilerRunner(BaseRunner, RustHandler):
         # Compile all Java files
         cmd = [compiler] + self.extra_flags + preset_flags + [str(s) for s in sources]
         
-        if self.run_command(cmd, compiling=True):
-            # Extract main class name from the first file
-            main_class = self._extract_java_main_class(sources[0])
-            if main_class:
-                # Add .class files to cleanup
-                for src in sources:
-                    class_file = src.with_suffix('.class')
-                    self.output_files.append(class_file)
-                
-                # Run the main class
-                self.run_command(["java", main_class])
-            else:
-                Printer.error(f"Could not find main class in {sources[0]}")
+        self.run_command(cmd, compiling=True)
+        
+        # Extract main class name from the first file
+        main_class = self._extract_java_main_class(sources[0])
+        if main_class:
+            # Add .class files to cleanup
+            for src in sources:
+                class_file = src.with_suffix('.class')
+                self.output_files.append(class_file)
+            
+            # Run the main class
+            self.run_command(["java", main_class])
+        else:
+             raise ExecutionError(f"Could not find main class in {sources[0]}")
 
     def _extract_java_main_class(self, java_file: Path) -> Optional[str]:
         """
@@ -249,7 +347,8 @@ class CompilerRunner(BaseRunner, RustHandler):
                 if match:
                     return match.group(1)
         except Exception as e:
-            Printer.error(f"Error reading Java file: {e}")
+            # This is a bit lower level error, maybe just logging is fine, but lets conform
+             raise ExecutionError(f"Error reading Java file: {e}")
         return None
 
     def _handle_custom_language(self, fp: Path, lang_config: dict, out_name: Path):
@@ -266,8 +365,7 @@ class CompilerRunner(BaseRunner, RustHandler):
         lang_type = lang_config.get("type", "interpreter")
         
         if not runner:
-            Printer.error(f"No runner specified for language: {lang_name}")
-            return
+             raise ConfigError(f"No runner specified for language: {lang_name}")
         
         if lang_type == "interpreter":
             # Run directly like Python, Ruby, etc.
@@ -278,11 +376,12 @@ class CompilerRunner(BaseRunner, RustHandler):
             preset_flags = self.config.get_preset_flags(self.preset, lang_name)
             
             cmd = [runner] + compile_flags + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
-            if self.run_command(cmd, compiling=True):
-                self.output_files.append(out_name)
-                self._execute_binary(out_name)
+            
+            self.run_command(cmd, compiling=True)
+            self.output_files.append(out_name)
+            self._execute_binary(out_name)
         else:
-            Printer.error(f"Unknown language type '{lang_type}' for {lang_name}")
+             raise ConfigError(f"Unknown language type '{lang_type}' for {lang_name}")
 
     def _execute_binary(self, bin_path: Path):
         """

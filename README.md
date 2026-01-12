@@ -18,18 +18,9 @@ Now version is `26.1.1`, hope you updated to latest version!
 - **Multi-File Support**: Easily link multiple C/C++/Java files.
 - **Dry Run**: Simulate execution to check commands without running them.
 - **TOML Config**: for each project, if define `Run.toml` inside, it will use it instead of default config.
+- **Debug Logging**: Create log from compiling or running executable.  
 
 ## In Future Features (Maybe)
-
-1. Add comprehensive error handling and logging - Replace bare except clauses and print statements with proper logging
-2. Implement input validation and sanitization - Prevent command injection attacks through file names and flags
-3. Add a test suite - Create unit and integration tests to prevent regressions
-
-### Code Quality Improvements
-
-1. Standardize error handling patterns - Use consistent exception handling across all modules
-2. Implement configuration validation - Validate TOML configuration on load
-3. Add security hardening - Sandboxing and privilege checks for compiled code execution
 
 ### Feature Enhancements
 
@@ -77,6 +68,8 @@ run <files> [flags]
 | `-t`, `--time`          | Show execution time                               |
 | `-f <flags>`            | Pass extra flags to the compiler                  |
 | `--keep`                | Keep the compiled binary (don't delete after run) |
+| `--debug`               | Create log after running                          |
+| `--unsafe`              | Allow running in root                             |
 
 ### Examples
 
@@ -87,6 +80,8 @@ run script.py ...
 ```
 
 **Run a C++ file with a preset:**
+
+For C/C++ file(s), you may add linker flag(s) manually or create a preset and use it.
 
 ```bash
 run main.cpp -p debug

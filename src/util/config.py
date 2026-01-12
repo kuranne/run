@@ -10,14 +10,10 @@ except ImportError:
     sys.exit("Error: Python 3.11+ required for tomllib")
 
 class Config:
-    """
-    Configuration manager for the runner, handling TOML config loading and retrieval.
-    """
+    """Configuration manager for the runner, handling TOML config loading and retrieval."""
 
     def __init__(self):
-        """
-        Initialize the Config manager, loading Run.toml from detected paths.
-        """
+        """Initialize the Config manager, loading Run.toml from detected paths."""
         self.data: Dict[str, Any] = {}
         projects_directory = Path(__file__).resolve().parent.parent.parent
         
@@ -40,7 +36,43 @@ class Config:
                 Printer.info(f"Loaded config: {config_path}")
             except Exception as e:
                 Printer.error(f"Failed to parse {config_path}: {e}")
+            
+            # Validate after loading
+            self.validate()
 
+    def validate(self):
+        """
+        Validate the loaded configuration.
+        
+        Raises:
+            ValueError: If configuration is invalid.
+        """
+        if not self.data:
+            return
+
+        # check 'runner'
+        if "runner" in self.data:
+             if not isinstance(self.data["runner"], dict):
+                 raise ValueError("'runner' section must be a table (dict)")
+
+        # check 'language'
+        if "language" in self.data:
+            if not isinstance(self.data["language"], dict):
+                 raise ValueError("'language' section must be a table (dict)")
+            
+            for name, config in self.data["language"].items():
+                if not isinstance(config, dict):
+                    raise ValueError(f"Language '{name}' config must be a table")
+                
+                if "extensions" not in config:
+                    raise ValueError(f"Language '{name}' missing required 'extensions' list")
+                
+                if not isinstance(config["extensions"], list):
+                    raise ValueError(f"Language '{name}' 'extensions' must be a list")
+
+                if "runner" not in config:
+                     raise ValueError(f"Language '{name}' missing required 'runner' command")
+    
     def get_runner(self, lang: str, default: str) -> str:
         """
         Get the runner command for a specific language.
