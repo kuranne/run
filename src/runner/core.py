@@ -353,27 +353,28 @@ class CompilerRunner(BaseRunner, RustHandler):
         """
         lang_name = lang_config.get("name", "unknown")
         runner = lang_config.get("runner")
+        subcommand = lang_config.get("subcommand")
         lang_type = lang_config.get("type", "interpreter")
+        flags = lang_config.get("flags", []) # List
+        preset_flags = self.config.get_preset_flags(self.preset, lang_name)
+        execute_args = lang_config.get("arguments", [])
+        run_cmd = [runner]
+        if subcommand:
+            run_cmd.extend(subcommand.split())
         
         if not runner:
              raise ConfigError(f"No runner specified for language: {lang_name}")
         
         if lang_type == "interpreter":
             # Run directly like Python, Ruby, etc.
-            flags = lang_config.get("flags", []) # List
-            preset_flags = self.config.get_preset_flags(self.preset, lang_name)
-            execute_args = lang_config.get("execute_args", [])
 
-            cmd = [runner] + flags + self.extra_flags + preset_flags + [str(fp)] + execute_args + self.run_args
+            cmd = run_cmd + flags + self.extra_flags + preset_flags + [str(fp)] + execute_args + self.run_args 
 
             self.run_command(cmd)
         elif lang_type == "compiler":
             # Compile first, then execute like C/C++
-            flags = lang_config.get("flags", [])
-            preset_flags = self.config.get_preset_flags(self.preset, lang_name)
-            execute_args = lang_config.get("execute_args", [])
             
-            cmd = [runner] + flags + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
+            cmd = run_cmd + flags + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
             
             self.run_command(cmd, compiling=True)
             self.output_files.append(out_name)
