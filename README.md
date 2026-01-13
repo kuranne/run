@@ -6,7 +6,7 @@ I just lazy to compile then run, so I made this.
 
 ## Current version
 
-Now version is `26.1.2`, hope you updated to latest version!
+Now version is `26.1.3`, hope you updated to latest version!
 
 ## Features
 
