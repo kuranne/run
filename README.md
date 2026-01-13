@@ -6,7 +6,7 @@ I just lazy to compile then run, so I made this.
 
 ## Current version
 
-Now version is `26.1.1`, hope you updated to latest version!
+Now version is `26.1.2`, hope you updated to latest version!
 
 ## Features
 
@@ -70,6 +70,8 @@ run <files> [flags]
 | `--keep`                | Keep the compiled binary (don't delete after run) |
 | `--debug`               | Create log after running                          |
 | `--unsafe`              | Allow running in root                             |
+| `--version`             | Check current version (local)                     |
+| `--update`              | Update  automaticly                               |
 
 ### Examples
 
