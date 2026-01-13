@@ -379,6 +379,7 @@ class CompilerRunner(BaseRunner, RustHandler):
             # Run directly like Python, Ruby, etc.
             flags = lang_config.get("flags", []) # List
             preset_flags = self.config.get_preset_flags(self.preset, lang_name)
+            execute_args = lang_config.get("execute_args", [])
 
             cmd = [runner] + flags + self.extra_flags + preset_flags + [str(fp)] + execute_args
 
