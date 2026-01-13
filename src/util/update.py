@@ -9,7 +9,7 @@ from util.output import Printer, Colors
 
 def _get_latest_version_from_raw(repo: str, branch: str = "workspace") -> str:
     """Fetch version string from a raw file in the repository."""
-    raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/src/util/version.py"
+    raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/src/version.txt"
     
     response = requests.get(raw_url, timeout=5)
     response.raise_for_status()
