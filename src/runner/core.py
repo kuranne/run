@@ -59,24 +59,6 @@ class CompilerRunner(BaseRunner, RustHandler):
                 files.append(str(p))
         return files
 
-    def compile_and_run(self, files: List[str], multi: bool = False):
-        """
-        Compile and run the provided files.
-
-        Args:
-            files (List[str]): List of file paths to process.
-            multi (bool): Whether to treat files as a single multi-file project.
-        """
-        if not files: return
-        file_paths = [Path(f) for f in files]
-        
-        Printer.separator()
-        if multi:
-            self._handle_multi_compile(file_paths)
-        else:
-            for fp in file_paths:
-                self._handle_single_file(fp)
-
     def _get_python_executable(self) -> str:
         """
         Check for .venv or .env and return python path, else system default.
@@ -404,7 +386,7 @@ class CompilerRunner(BaseRunner, RustHandler):
 
         Args:
             bin_path (Path): Path to the binary.
-            args (List): List of argruments.
+            args (List): List of arguments.
         """
         target = str(bin_path) if self.is_posix else str(bin_path.absolute())
 

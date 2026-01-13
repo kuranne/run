@@ -25,7 +25,7 @@ class BaseRunner:
         # Platform detection
         self.is_posix = os.name == "posix"
 
-        # Argrument
+        # Arguments
         self.flags = op_flags
         self.dry_run = self.flags.get("dry_run", False)
         self.preset = self.flags.get("preset", None)
@@ -130,7 +130,6 @@ class BaseRunner:
         if not files: return
         file_paths = [Path(f) for f in files]
         
-        Printer.separator()
         if multi:
             self._handle_multi_compile(file_paths)
         else:

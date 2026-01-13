@@ -25,6 +25,7 @@ def main():
     parser.add_argument("-u", "--update", action="store_true", help="Update run to latest version from GitHub")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--unsafe", action="store_true", help="Allow running as root")
+    parser.add_argument("--version", action="store_true", help=f"Versions of binary Currently: {__version__}")
     
     parser.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files. Optional depth arg (default: infinite)")
     parser.add_argument("-f", "--flags", type=str, default="", help='Compiler flags')
@@ -43,6 +44,16 @@ def main():
 
     args = parser.parse_args(processed_args)
     
+    # Versions Check
+    if args.version:
+        Printer.info(f"Currently: {__version__}")
+        return 0
+
+    # Handle Update
+    if args.update:
+        update("kuranne/run", __version__)
+        return 0
+    
     if args.debug:
         import logging
         logging.getLogger("run_kuranne").setLevel(logging.DEBUG)
@@ -55,9 +66,6 @@ def main():
         Printer.error(str(e))
         return 1
 
-    if args.update:
-        update("kuranne/run", __version__)
-        return 0
 
     # Process operation and flag(s) -> dictionary of it
     operator_flags = {
@@ -126,5 +134,4 @@ def main():
 
 if __name__ == "__main__":
     exit_code = main()
-    Printer.separator()
     sys.exit(exit_code)
