@@ -17,8 +17,10 @@ rust = "-C opt-level=3"
 # type: "interpreter" (run directly) or "compiler" (compile then run)
 
 # Example
-[language.javascript]
-extensions = [".js"]
-runner = "node"
-type = "interpreter"            # Change this to "compiler" if the language want to compile first
-# flags = ["<flags>"]           # This is example for flags that will use during compiling
+# [language.csharp]
+# extensions = [".cs"]
+# runner = "dotnet"
+# subcommand = "run"
+# type = "interpreter"              # Change this to "compiler" if the language want to compile first
+# flags = ["<flags>"]               # This is example for flags that will use during compiling
+# arguments = ["<argument>"]
