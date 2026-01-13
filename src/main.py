@@ -10,7 +10,6 @@ from util.errors import RunError, ConfigError, ExecutionError, CompilationError
 from util.update import update
 from util.security import SecurityManager
 from runner import CompilerRunner
-from util.version import __version__
 
 def main():
     # Parser
@@ -25,7 +24,7 @@ def main():
     parser.add_argument("-u", "--update", action="store_true", help="Update run to latest version from GitHub")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--unsafe", action="store_true", help="Allow running as root")
-    parser.add_argument("--version", action="store_true", help=f"Versions of binary Currently: {__version__}")
+    parser.add_argument("--version", action="store_true", help=f"Versions of binary")
     
     parser.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files. Optional depth arg (default: infinite)")
     parser.add_argument("-f", "--flags", type=str, default="", help='Compiler flags')
@@ -44,15 +43,24 @@ def main():
 
     args = parser.parse_args(processed_args)
     
-    # Versions Check
-    if args.version:
-        Printer.info(f"Currently: {__version__}")
-        return 0
+    # Check Versions & Update
+    try:
+        version_file = Path(__file__).resolve().parent / "version.txt"
+        
+        with open(version_file, "r") as f:
+            __version__ = "".join(f.read().split())
+            if args.version:
+                Printer.info(f"Currently: {__version__}")
+                return 0
 
-    # Handle Update
-    if args.update:
-        update("kuranne/run", __version__)
-        return 0
+            if args.update:
+                Printer.info(f"Currently: {__version__}")
+                update("kuranne/run", __version__)
+                return 0
+    
+    except FileNotFoundError:
+        Printer.warning("Not found version.txt in binary directory, please reinstall run")
+        return 1
     
     if args.debug:
         import logging
