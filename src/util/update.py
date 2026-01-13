@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from util.output import Printer, Colors
 
-def _get_latest_version_from_raw(repo: str, branch: str = "workspace") -> str:
+def _get_latest_version_from_raw(repo: str, branch: str = "main") -> str:
     """Fetch version string from a raw file in the repository."""
     raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/src/version.txt"
     
@@ -53,7 +53,7 @@ def update(repo: str, current_version: str):
         Printer.action("CHECK", f"Checking for updates... (Current: {current_version})", Colors.CYAN)
         
         # Get latest version from raw file
-        latest_version = _get_latest_version_from_raw(repo, branch="main")
+        latest_version = _get_latest_version_from_raw(repo=repo)
         
         if latest_version == current_version:
             Printer.action("UPDATE", "You are already on the latest version.")

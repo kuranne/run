@@ -93,4 +93,8 @@ class RustHandler:
             # Case: Default Run Quiet
             # Note: -q comes before --flags to ensure cargo itself is quiet
             cmd = ["cargo", "run", "-q"] + self.extra_flags
+            
+            if hasattr(self, 'run_args') and self.run_args:
+                 cmd += ["--"] + self.run_args
+                 
             self.run_command(cmd)

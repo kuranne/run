@@ -15,15 +15,16 @@ class CompilerRunner(BaseRunner, RustHandler):
     Main runner class that handles compilation and execution logic for various languages.
     Inherits from BaseRunner and RustHandler.
     """
-    def __init__(self, op_flags: Dict[str, Any], extra_flags: str = ""):
+    def __init__(self, op_flags: Dict[str, Any], extra_flags: str = "", run_args: str = ""):
         """
         Initialize the CompilerRunner.
 
         Args:
             op_flags (Dict[str, Any]): Operation flags.
             extra_flags (str): Extra compiler flags.
+            run_args (str): Arguments to pass to the executed program.
         """
-        super().__init__(op_flags, extra_flags)
+        super().__init__(op_flags, extra_flags, run_args)
         self.c_family_ext = {'.c', '.cpp', '.cc'}
         self.c_family_header_ext = {'.h', '.hpp'}
         self.java_ext = {'.java'}
@@ -122,12 +123,12 @@ class CompilerRunner(BaseRunner, RustHandler):
         match ext:
             case ".py":
                 prog = self._get_python_executable()
-                self.run_command([prog, str(fp)])
+                self.run_command([prog, str(fp)] + self.run_args)
             case ".lua":
                 check_cmd = "where" if not self.is_posix else "command -v"
                 is_lua = spc.run(f"{check_cmd} lua", shell=True, capture_output=True).returncode == 0
                 prog = "lua" if is_lua else "luajit"
-                self.run_command([prog, str(fp)])
+                self.run_command([prog, str(fp)] + self.run_args)
             case ".rs":
                 self._handle_rust_execution(fp)
             case ".java":
@@ -145,7 +146,7 @@ class CompilerRunner(BaseRunner, RustHandler):
                 if main_class:
                     class_file = fp.with_suffix('.class')
                     self.output_files.append(class_file)
-                    self.run_command(["java", main_class])
+                    self.run_command(["java", main_class] + self.run_args)
                 else:
                     raise ExecutionError(f"Could not find main class in {fp}")
                         
@@ -301,7 +302,7 @@ class CompilerRunner(BaseRunner, RustHandler):
                 self.output_files.append(class_file)
             
             # Run the main class
-            cmd = ["java", main_class] # + execute_args
+            cmd = ["java", main_class] + self.run_args
             self.run_command(cmd)
         else:
              raise ExecutionError(f"Could not find main class in {sources[0]}")
@@ -363,7 +364,7 @@ class CompilerRunner(BaseRunner, RustHandler):
             preset_flags = self.config.get_preset_flags(self.preset, lang_name)
             execute_args = lang_config.get("execute_args", [])
 
-            cmd = [runner] + flags + self.extra_flags + preset_flags + [str(fp)] + execute_args
+            cmd = [runner] + flags + self.extra_flags + preset_flags + [str(fp)] + execute_args + self.run_args
 
             self.run_command(cmd)
         elif lang_type == "compiler":
@@ -394,5 +395,5 @@ class CompilerRunner(BaseRunner, RustHandler):
         if self.is_posix and not target.startswith('/') and not target.startswith('./'):
              target = f"./{target}"
         
-        cmd = [target] + args
+        cmd = [target] + args + self.run_args
         self.run_command(cmd)
