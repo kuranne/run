@@ -18,10 +18,16 @@ Now version is `26.1.1`, hope you updated to latest version!
 - **Multi-File Support**: Easily link multiple C/C++/Java files.
 - **Dry Run**: Simulate execution to check commands without running them.
 - **TOML Config**: for each project, if define `Run.toml` inside, it will use it instead of default config.
+- **Debug Logging**: Create log from compiling or running executable.  
 
-## In Future Features (Maybe)  
+## In Future Features (Maybe)
 
-- **No Plan**: email me for your idea.  
+### Feature Enhancements
+
+1. Add caching mechanism - Cache compilation results for unchanged files
+2. Implement parallel compilation - Support for building multiple files simultaneously
+3. Add language auto-detection improvements - Better heuristics for file type detection
+4. Implement proper cleanup on failure - Ensure all temporary files are cleaned up
 
 ## Installation
 
@@ -62,6 +68,8 @@ run <files> [flags]
 | `-t`, `--time`          | Show execution time                               |
 | `-f <flags>`            | Pass extra flags to the compiler                  |
 | `--keep`                | Keep the compiled binary (don't delete after run) |
+| `--debug`               | Create log after running                          |
+| `--unsafe`              | Allow running in root                             |
 
 ### Examples
 
@@ -72,6 +80,8 @@ run script.py ...
 ```
 
 **Run a C++ file with a preset:**
+
+For C/C++ file(s), you may add linker flag(s) manually or create a preset and use it.
 
 ```bash
 run main.cpp -p debug
@@ -147,7 +157,7 @@ For compiled languages (like Kotlin, Zig, D), set `type = "compiler"`:
 extensions = [".kt", ".kts"]
 runner = "kotlinc"
 type = "compiler"
-compile_flags = ["-include-runtime", "-d"]
+flags = ["-include-runtime", "-d"]
 ```
 
 The runner will compile first, then execute the binary automatically.
@@ -161,7 +171,7 @@ You can also define presets for your custom language:
 extensions = [".zig"]
 runner = "zig"
 type = "compiler"
-compile_flags = ["build-exe"]
+flags = ["build-exe"]
 
 [preset.debug.zig]
 zig = "-O Debug"
