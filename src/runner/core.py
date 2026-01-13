@@ -376,7 +376,12 @@ class CompilerRunner(BaseRunner, RustHandler):
         
         if lang_type == "interpreter":
             # Run directly like Python, Ruby, etc.
-            self.run_command([runner, str(fp)])
+            flags = lang_config.get("compile_flags", []) # List
+            preset_flags = self.config.get_preset_flags(self.preset, lang_name)
+
+            cmd = [runner] + flags + self.extra_flags + preset_flags + [str(fp)]
+
+            self.run_command(cmd)
         elif lang_type == "compiler":
             # Compile first, then execute like C/C++
             compile_flags = lang_config.get("compile_flags", [])
