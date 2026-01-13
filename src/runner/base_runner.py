@@ -14,13 +14,14 @@ class BaseRunner:
     Base class for runners, handling common functionality like command execution,
     platform detection, and cleanup.
     """
-    def __init__(self, op_flags: Dict[str, Any], extra_flags: str = ""):
+    def __init__(self, op_flags: Dict[str, Any], extra_flags: str = "", run_args: str = ""):
         """
         Initialize the BaseRunner.
 
         Args:
             op_flags (Dict[str, Any]): Dictionary of operation flags (e.g., 'dry_run', 'preset').
             extra_flags (str): String of extra compiler flags.
+            run_args (str): Arguments to pass to the executed program.
         """
         # Platform detection
         self.is_posix = os.name == "posix"
@@ -37,6 +38,10 @@ class BaseRunner:
         # Clean flags from extra quotes and split into list
         clean_flags = extra_flags.strip().strip('"').strip("'")
         self.extra_flags = shlex.split(clean_flags) if clean_flags else []
+        
+        # Run args
+        clean_run_args = run_args.strip().strip('"').strip("'")
+        self.run_args = shlex.split(clean_run_args) if clean_run_args else []
 
     def get_executable_path(self, source_path: Path) -> Path:
         """

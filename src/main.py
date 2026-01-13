@@ -28,6 +28,7 @@ def main():
     
     parser.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files. Optional depth arg (default: infinite)")
     parser.add_argument("-f", "--flags", type=str, default="", help='Compiler flags')
+    parser.add_argument("-a", "--argument", type=str, default="", help="Arguments to pass to the executed program")
 
     # Process -f-flags without space
     processed_args = []
@@ -86,7 +87,7 @@ def main():
 
     try:
         # Init runner
-        runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags)
+        runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=args.argument)
 
         # 1. Check if files provided
         if args.files:
