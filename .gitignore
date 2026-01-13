@@ -5,6 +5,3 @@
 .venv/
 __pycache__/
 .tool-versions
-
-# Others
-update.sh
