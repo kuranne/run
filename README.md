@@ -157,7 +157,7 @@ For compiled languages (like Kotlin, Zig, D), set `type = "compiler"`:
 extensions = [".kt", ".kts"]
 runner = "kotlinc"
 type = "compiler"
-compile_flags = ["-include-runtime", "-d"]
+flags = ["-include-runtime", "-d"]
 ```
 
 The runner will compile first, then execute the binary automatically.
@@ -171,7 +171,7 @@ You can also define presets for your custom language:
 extensions = [".zig"]
 runner = "zig"
 type = "compiler"
-compile_flags = ["build-exe"]
+flags = ["build-exe"]
 
 [preset.debug.zig]
 zig = "-O Debug"

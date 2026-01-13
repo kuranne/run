@@ -293,7 +293,7 @@ class CompilerRunner(BaseRunner, RustHandler):
         
         if self.run_command(link_cmd, compiling=True):
             self.output_files.append(out_name)
-            self._execute_binary(out_name)
+            self._execute_binary(bin_path=out_name)
 
     def _handle_multi_java(self, sources: List[Path]):
         """
@@ -319,7 +319,8 @@ class CompilerRunner(BaseRunner, RustHandler):
                 self.output_files.append(class_file)
             
             # Run the main class
-            self.run_command(["java", main_class])
+            cmd = ["java", main_class] # + execute_args
+            self.run_command(cmd)
         else:
              raise ExecutionError(f"Could not find main class in {sources[0]}")
 
@@ -376,34 +377,39 @@ class CompilerRunner(BaseRunner, RustHandler):
         
         if lang_type == "interpreter":
             # Run directly like Python, Ruby, etc.
-            flags = lang_config.get("compile_flags", []) # List
+            flags = lang_config.get("flags", []) # List
             preset_flags = self.config.get_preset_flags(self.preset, lang_name)
 
-            cmd = [runner] + flags + self.extra_flags + preset_flags + [str(fp)]
+            cmd = [runner] + flags + self.extra_flags + preset_flags + [str(fp)] + execute_args
 
             self.run_command(cmd)
         elif lang_type == "compiler":
             # Compile first, then execute like C/C++
-            compile_flags = lang_config.get("compile_flags", [])
+            flags = lang_config.get("flags", [])
             preset_flags = self.config.get_preset_flags(self.preset, lang_name)
+            execute_args = lang_config.get("execute_args", [])
             
-            cmd = [runner] + compile_flags + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
+            cmd = [runner] + flags + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
             
             self.run_command(cmd, compiling=True)
             self.output_files.append(out_name)
-            self._execute_binary(out_name)
+            self._execute_binary(bin_path=out_name, args=execute_args)
         else:
              raise ConfigError(f"Unknown language type '{lang_type}' for {lang_name}")
 
-    def _execute_binary(self, bin_path: Path):
+    def _execute_binary(self, bin_path: Path, args: List[str] = []):
         """
         Execute a compiled binary.
 
         Args:
             bin_path (Path): Path to the binary.
+            args (List): List of argruments.
         """
         target = str(bin_path) if self.is_posix else str(bin_path.absolute())
+
         # Ensure ./ for POSIX relative paths
         if self.is_posix and not target.startswith('/') and not target.startswith('./'):
              target = f"./{target}"
-        self.run_command([target])
+        
+        cmd = [target] + args
+        self.run_command(cmd)
