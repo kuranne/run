@@ -74,7 +74,7 @@ def update(repo: str, current_version: str):
             _download_file(download_url, temp_zip)
             content_path = _extract_zip(temp_zip, extract_path)
 
-            install_dir = Path(__file__).resolve().parent.parent
+            install_dir = Path(__file__).resolve().parent.parent.parent
             
             Printer.action("INSTALL", f"Installing to {install_dir}...", Colors.CYAN)
             _install_files(content_path, install_dir)
