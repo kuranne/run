@@ -24,7 +24,8 @@ def main():
 
     # Handle update function
     if args.update:
-        update(repo="kuranne/run", version=__version__)
+        update(repo="kuranne/run", current_version=__version__)
+        return 0
 
     # Security Check
     try:
