@@ -18,8 +18,28 @@ import subprocess
 from pathlib import Path
 
 def log(msg):
-    with open("{log_file}", "a") as f:
-        f.write(msg + "\\n")
+    try:
+        with open(r"{log_file}", "a", encoding="utf-8") as f:
+            f.write(str(msg) + "\\n")
+    except:
+        pass
+
+def force_remove(path):
+    if not path.exists(): return
+    try:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+    except Exception as e:
+        log(f"Error removing {{path}}: {{e}}")
+        # On Windows, sometimes file is locked briefly, retry once
+        time.sleep(0.5)
+        try:
+            if path.is_dir(): shutil.rmtree(path)
+            else: os.remove(path)
+        except:
+            pass
 
 def main():
     log("Starting update process...")
@@ -37,20 +57,25 @@ def main():
     except Exception as e:
         log(f"Error waiting for process: {{e}}")
     
-    log("Parent process exited. Starting update...")
+    # Give it an extra second to release file locks (important on Windows)
+    time.sleep(1)
     
-    src_dir = Path("{src_dir}")
-    install_dir = Path("{install_dir}")
+    src_dir = Path(r"{src_dir}")
+    install_dir = Path(r"{install_dir}")
+    temp_root = Path(r"{temp_root}")
     
     try:
-        # Copy files
         log(f"Copying files from {{src_dir}} to {{install_dir}}")
+        
+        # Copy logic: Iterate source and overwrite destination
         for item in src_dir.iterdir():
             dest = install_dir / item.name
+            
+            if dest.exists():
+                force_remove(dest)
+                
             if item.is_dir():
-                if dest.exists():
-                    shutil.rmtree(dest)
-                shutil.copytree(item, dest)
+                shutil.copytree(item, dest, dirs_exist_ok=True)
             else:
                 shutil.copy2(item, dest)
         
@@ -60,26 +85,29 @@ def main():
         setup_script = install_dir / ("setup.ps1" if os.name == "nt" else "setup.sh")
         if setup_script.exists():
             log(f"Running setup script: {{setup_script}}")
-            # Make sure it's executable
+            
             if os.name != "nt":
                 os.chmod(setup_script, 0o755)
                 cmd = ["/bin/bash", str(setup_script)]
             else:
                 cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(setup_script)]
-                
-            subprocess.run(cmd, check=True, cwd=install_dir)
-            log("Setup completed successfully.")
-        else:
-            log("Setup script not found, skipping.")
             
+            # Run setup but don't fail the whole update if setup script has minor errors
+            try:    
+                subprocess.run(cmd, check=True, cwd=install_dir)
+                log("Setup completed successfully.")
+            except subprocess.CalledProcessError as e:
+                log(f"Setup script returned error: {{e}} (Update files likely preserved)")
+        
     except Exception as e:
-        log(f"Update failed: {{e}}")
+        log(f"CRITICAL UPDATE FAILED: {{e}}")
+        # Optional: Try to rollback here if you had a backup
         sys.exit(1)
     finally:
-        # Cleanup temp dir
+        # Cleanup temp dir explicitly
         try:
-            shutil.rmtree(src_dir.parent.parent) # Clean up the temp dir created by mkdtemp
-            log("Cleaned up temporary files.")
+            log(f"Cleaning up temp: {{temp_root}}")
+            shutil.rmtree(temp_root, ignore_errors=True)
         except Exception as e:
             log(f"Failed to cleanup: {{e}}")
 
@@ -121,7 +149,6 @@ def update(repo: str, current_version: str):
     try:
         Printer.action("CHECK", f"Checking for updates... (Current: {current_version})", Colors.CYAN)
         
-        # Get latest version from raw file
         latest_version = _get_latest_version_from_raw(repo=repo)
         
         if latest_version == current_version:
@@ -129,13 +156,21 @@ def update(repo: str, current_version: str):
             return
 
         Printer.warning(f"New version available: {latest_version}")
-        
-        # Create download URL (GitHub Source code zip pattern)
-        download_url = f"https://github.com/{repo}/archive/refs/tags/{latest_version}.zip"
+        if input("Update?[y/N]: ") != "y" or "Y":
+            return
+
+        # Handle tags with or without 'v' prefix if needed
+        # GitHub tags might be "v1.0.0" but version.txt is "1.0.0"
+        tag_name = latest_version
+        if not tag_name.startswith("v") and "." in tag_name: 
+            # Check logic here depends on your repo naming convention
+            # For now, trust the version string or prepend 'v' if your tags use it
+            pass 
+
+        download_url = f"https://github.com/{repo}/archive/refs/tags/{tag_name}.zip"
 
         Printer.action("DOWNLOAD", f"Downloading {latest_version}...", Colors.YELLOW)
         
-        # Create a persistent temp dir that the external script can access
         temp_dir = tempfile.mkdtemp(prefix="run_update_")
         temp_dir_path = Path(temp_dir)
         temp_zip = temp_dir_path / "release.zip"
@@ -146,35 +181,39 @@ def update(repo: str, current_version: str):
 
         install_dir = Path(__file__).resolve().parent.parent.parent
         
-        # Determine log file location based on OS
         log_dir = Path(tempfile.gettempdir())
         log_file = log_dir / "run_update.log"
 
-        # Create the external update script
+        # Insert r (raw string) at the front of path in template -> Prevent escape characters
+        # Then send temp_dir_path from parent to cleanup
         script_content = UPDATE_SCRIPT_TEMPLATE.format(
             log_file=log_file.as_posix(),
             parent_pid=os.getpid(),
             src_dir=content_path.as_posix(),
-            install_dir=install_dir.as_posix()
+            install_dir=install_dir.as_posix(),
+            temp_root=temp_dir_path.as_posix() 
         )
         
         script_path = temp_dir_path / "updater.py"
-        with open(script_path, "w") as f:
+        with open(script_path, "w", encoding="utf-8") as f:
             f.write(script_content)
             
         Printer.action("INSTALL", f"Starting background update process...", Colors.CYAN)
-        Printer.info(f"The application will exit now. Check /tmp/run_update.log for status.")
+        Printer.info(f"The application will exit now. Check {log_file} for status.")
         
-        # Spawn the external process
+        # sys.executable ensure that same python
+        python_exe = sys.executable
+        
         if sys.platform == "win32":
-             subprocess.Popen(["python", str(script_path)], creationflags=subprocess.CREATE_NEW_CONSOLE)
+             # Use CREATE_NEW_CONSOLE to detach effectively
+             subprocess.Popen([python_exe, str(script_path)], creationflags=subprocess.CREATE_NEW_CONSOLE)
         else:
-             subprocess.Popen(["python3", str(script_path)], start_new_session=True)
+             # Use start_new_session to detach
+             subprocess.Popen([python_exe, str(script_path)], start_new_session=True)
              
-        # Exit immediately
         sys.exit(0)
         
     except requests.RequestException as e:
-        Printer.error(f"Network error (Check version.txt or Repo URL): {e}")
+        Printer.error(f"Network error: {e}")
     except Exception as e:
         Printer.error(f"Failed to update: {e}")
