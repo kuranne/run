@@ -1,72 +1,27 @@
 #!/usr/bin/env python3
 
 import sys
-from argparse import ArgumentParser
 import shlex
 from pathlib import Path
 
 from util.output import Printer, Colors
-from util.errors import RunError, ConfigError, ExecutionError, CompilationError
+from util.errors import RunError, ConfigError
 from util.update import update
+from util.args import args as args_parser
 from util.security import SecurityManager
+
 from runner import CompilerRunner
 
 def main():
-    # Parser
-    parser = ArgumentParser(description="Professional Auto Compiler & Runner")
-    parser.add_argument("files", nargs="*", help="Files to compile and run")
-    
-    parser.add_argument("--keep", action="store_true", help="Keep the output binary(s)")
-    parser.add_argument("-m", "--multi", action="store_true", help="Compile multi-files")
-    parser.add_argument("-t", "--time", action="store_true", help="Time counter for execute binary")
-    parser.add_argument("-d", "--dry-run", action="store_true", help="Simulate execution without running commands")
-    parser.add_argument("-p", "--preset", type=str, help="Configuration preset (from Run.toml)")
-    parser.add_argument("-u", "--update", action="store_true", help="Update run to latest version from GitHub")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    parser.add_argument("--unsafe", action="store_true", help="Allow running as root")
-    parser.add_argument("--version", action="store_true", help=f"Versions of binary")
-    
-    parser.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files. Optional depth arg (default: infinite)")
-    parser.add_argument("-f", "--flags", type=str, default="", help='Compiler flags')
-    parser.add_argument("-a", "--argument", type=str, default="", help="Arguments to pass to the executed program")
-
-    # Process -f-flags without space
-    processed_args = []
-    i = 1
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg.startswith("-f") and len(arg) > 2:
-            processed_args.append("-f")
-            processed_args.append(arg[2:])
-        else:
-            processed_args.append(arg)
-        i += 1
-
-    args = parser.parse_args(processed_args)
-    
-    # Check Versions & Update
-    try:
-        version_file = Path(__file__).resolve().parent / "version.txt"
-        
-        with open(version_file, "r") as f:
-            __version__ = "".join(f.read().split())
-            if args.version:
-                Printer.info(f"Currently: {__version__}")
-                return 0
-
-            if args.update:
-                Printer.info(f"Currently: {__version__}")
-                update("kuranne/run", __version__)
-                return 0
-    
-    except FileNotFoundError:
-        Printer.warning("Not found version.txt in binary directory, please reinstall run")
-        return 1
+    args = args_parser()
     
     if args.debug:
         import logging
         logging.getLogger("run_kuranne").setLevel(logging.DEBUG)
         Printer.debug("Debug logging enabled")
+
+    if args.update:
+        update()
 
     # Security Check
     try:
@@ -74,7 +29,6 @@ def main():
     except ConfigError as e:
         Printer.error(str(e))
         return 1
-
 
     # Process operation and flag(s) -> dictionary of it
     operator_flags = {
