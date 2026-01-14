@@ -69,36 +69,45 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
     def _handle_single_file(self, fp: Path):
         """
         Handle execution flow for a single file.
+        Continues execution even if errors occur.
 
         Args:
             fp (Path): Path to the source file.
         """
-        ext = fp.suffix.lower()
-        
-        # Auto-detect language by shebang if no extension
-        if not ext and fp.is_file():
-            ext = self._detect_language_from_shebang(fp)
+        try:
+            ext = fp.suffix.lower()
+            
+            # Auto-detect language by shebang if no extension
+            if not ext and fp.is_file():
+                ext = self._detect_language_from_shebang(fp)
 
-        out_name = self.get_executable_path(fp)
+            out_name = self.get_executable_path(fp)
 
-        match ext:
-            case ".py":
-                self._handle_python_execution(fp)
-            case ".lua":
-                self._handle_lua_execution(fp)
-            case ".rs":
-                self._handle_rust_execution(fp)
-            case ".java":
-                self._handle_java_single_file(fp)
-            case _ if ext in self.c_family_ext:
-                self._handle_c_family_single_file(fp)
-            case _:
-                # Check for custom language configuration
-                lang_config = self.config.get_language_by_extension(ext)
-                if lang_config:
-                    self._handle_custom_language(fp, lang_config, out_name)
-                else:
-                    raise ConfigError(f"Unsupported extension: {ext}")
+            match ext:
+                case ".py":
+                    self._handle_python_execution(fp)
+                case ".lua":
+                    self._handle_lua_execution(fp)
+                case ".rs":
+                    self._handle_rust_execution(fp)
+                case ".java":
+                    self._handle_java_single_file(fp)
+                case _ if ext in self.c_family_ext:
+                    self._handle_c_family_single_file(fp)
+                case _:
+                    # Check for custom language configuration
+                    lang_config = self.config.get_language_by_extension(ext)
+                    if lang_config:
+                        self._handle_custom_language(fp, lang_config, out_name)
+                    else:
+                        raise ConfigError(f"Unsupported extension: {ext}")
+                        
+        except (ConfigError, ExecutionError, FileNotFoundError, OSError) as e:
+            # Log the error but continue processing other files
+            Printer.error(f"Failed to process {fp}: {e}")
+        except Exception as e:
+            # Catch any other unexpected errors and continue
+            Printer.error(f"Unexpected error processing {fp}: {e}")
 
     def _handle_multi_compile(self, paths: List[Path]):
         """
