@@ -7,9 +7,9 @@ def version(file_path: Path = fp) -> str:
     """
     Read the version in src/version.txt
 
-    Arg:
+    Args:
         file_path (Path): path to file    
-    Return:
+    Returns:
         str: data in the file
     """
     try:        
