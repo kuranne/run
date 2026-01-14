@@ -1,11 +1,7 @@
 from argparse import ArgumentParser
 import sys
 
-from util.version import version
-
-__version__ = version()
-
-def args():
+def args(__version__):
     """
     Parser Argument, recieve argument then parse them, by using argparse lib to manage.
     Return:

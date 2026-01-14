@@ -9,19 +9,22 @@ from util.errors import RunError, ConfigError
 from util.update import update
 from util.args import args as args_parser
 from util.security import SecurityManager
+from util.version import version
 
 from runner import CompilerRunner
 
 def main():
-    args = args_parser()
+    __version__ = version()
+    args = args_parser(__version__)
     
     if args.debug:
         import logging
         logging.getLogger("run_kuranne").setLevel(logging.DEBUG)
         Printer.debug("Debug logging enabled")
 
+    # Handle update function
     if args.update:
-        update()
+        update(repo="kuranne/run", version=__version__)
 
     # Security Check
     try:
