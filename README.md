@@ -5,7 +5,7 @@ Honesly, I lazied to compile then run for testing, so I made this tool.
 
 ## Current version
 
-Now version is `26.1.3`, hope you updated to latest version!
+Now version is `26.1.4`, hope you updated to latest version!
 
 ## Features
 
