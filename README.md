@@ -1,8 +1,7 @@
 # Auto Compiler & Runner
 
-A configurable runner. It handles compilation, execution, and cleanup automatically.
-
-I just lazy to compile then run, so I made this.
+A configurable runner. It handles compilation, execution, and cleanup automatically after executed.  
+Honesly, I lazied to compile then run for testing, so I made this tool.  
 
 ## Current version
 
@@ -15,25 +14,24 @@ Now version is `26.1.3`, hope you updated to latest version!
 - **Custom Language Support**: Add any language via `Run.toml` configuration.
 - **Project Config (`Run.toml`)**: Define custom runners and flag preset.
 - **Virtual Env Support**: Automatically detects `.venv` or `.env` and uses the local Python.
-- **Multi-File Support**: Easily link multiple C/C++/Java files.
-- **Dry Run**: Simulate execution to check commands without running them.
+- **Multi-File Support**: Can link multiple C/C++/Java files.
 - **TOML Config**: for each project, if define `Run.toml` inside, it will use it instead of default config.
+- **Dry Run**: Simulate execution to check commands without running them.
 - **Debug Logging**: Create log from compiling or running executable.  
 
 ## In Future Features (Maybe)
 
-### Feature Enhancements
-
-1. Add caching mechanism - Cache compilation results for unchanged files
-2. Implement parallel compilation - Support for building multiple files simultaneously
-3. Add language auto-detection improvements - Better heuristics for file type detection
-4. Implement proper cleanup on failure - Ensure all temporary files are cleaned up
+I have no plan yet... email me for your idea please.
 
 ## Installation
 
 ### Requirements
 
 - **Python 3.11+** (Required for TOML support)
+- **Git**
+- **Linux(POSIX base), MacOS, or Windows**
+- **Compiler and/or Interpreter** [Optional]
+- **Internet** (For downloading the repository)
 
 ### Linux / macOS
 
@@ -44,6 +42,12 @@ cd ~/.local/share/run_kuranne
 ```
 
 ### Windows (PowerShell)
+
+Before run this, ensure that you can run the script on PowerShell.
+
+```powershell
+Set-ExecutionPolicy RemoteSigned
+```
 
 ```powershell
 git clone https://github.com/kuranne/run.git "$HOME\AppData\Local\run_kuranne"
@@ -89,13 +93,13 @@ For C/C++ file(s), you may add linker flag(s) manually or create a preset and us
 run main.cpp -p debug
 ```
 
-**Auto-find and compile all C files in current dir:**
+**Auto-find and compile all must to compile first files in current dir:**
 
 ```bash
 run -L <depth>
 ```
 
-**Compile multiple Java files together:**
+**Compile multiple Java files together then run:**
 
 ```bash
 run Main.java Helper.java Utils.java -m
@@ -116,8 +120,13 @@ Create a `Run.toml` in your project root or in the script installation directory
 # Override default runners
 c = "clang"
 cpp = "clang++"
-# python = "python3"
+python = "python3"
+```
 
+### Preset
+Use this configure with `--preset <preset>` or `-p <preset>` to tell the binary use these flags:
+
+```toml
 [preset.debug]
 c = "-g -Wall -Wextra"
 cpp = "-g -Wall -Wextra -std=c++20"
@@ -162,24 +171,4 @@ type = "compiler"
 flags = ["-include-runtime", "-d"]
 ```
 
-The runner will compile first, then execute the binary automatically.
-
-### Custom Language Presets
-
-You can also define presets for your custom language:
-
-```toml
-[language.zig]
-extensions = [".zig"]
-runner = "zig"
-type = "compiler"
-flags = ["build-exe"]
-
-[preset.debug.zig]
-zig = "-O Debug"
-
-[preset.release.zig]
-zig = "-O ReleaseFast"
-```
-
-Then use: `run main.zig -p release`
+The runner will compile first, then execute the binary automatically.  
