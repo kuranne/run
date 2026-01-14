@@ -16,7 +16,7 @@ class BaseRunner:
     """
     def __init__(self, op_flags: Dict[str, Any], extra_flags: str = "", run_args: str = ""):
         """
-        Initialize the BaseRunner.
+        Initialize BaseRunner.
 
         Args:
             op_flags (Dict[str, Any]): Dictionary of operation flags (e.g., 'dry_run', 'preset').
@@ -45,13 +45,13 @@ class BaseRunner:
 
     def get_executable_path(self, source_path: Path) -> Path:
         """
-        Determine the executable path based on the source file and platform.
+        Determine executable path based on source file and platform.
 
         Args:
-            source_path (Path): Path to the source file.
+            source_path (Path): Path to source file.
 
         Returns:
-            Path: Path to the expected executable file.
+            Path: Path to expected executable file.
         """
         name = source_path.stem
         # Windows: .exe, POSIX: .out
@@ -127,6 +127,7 @@ class BaseRunner:
     def compile_and_run(self, files: List[str], multi: bool = False):
         """
         Main entry point to compile and run files.
+        Continues processing all files even if some encounter errors.
 
         Args:
             files (List[str]): List of file paths to process.
@@ -136,10 +137,18 @@ class BaseRunner:
         file_paths = [Path(f) for f in files]
         
         if multi:
-            self._handle_multi_compile(file_paths)
+            try:
+                self._handle_multi_compile(file_paths)
+            except (ConfigError, ExecutionError, FileNotFoundError, OSError) as e:
+                Printer.error(f"Multi-file compilation failed: {e}")
         else:
             for fp in file_paths:
-                self._handle_single_file(fp)
+                try:
+                    self._handle_single_file(fp)
+                except Exception as e:
+                    # This should not happen since _handle_single_file catches its own errors,
+                    # but as a fallback, catch any unexpected errors and continue
+                    Printer.error(f"Unexpected error processing {fp}: {e}")
 
     def cleanup(self):
         """Clean up generated binary/class files if --keep is not specified."""
