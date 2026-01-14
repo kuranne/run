@@ -156,7 +156,9 @@ def update(repo: str, current_version: str):
             return
 
         Printer.warning(f"New version available: {latest_version}")
-        
+        if input("Update?[y/N]: ") is not "y" or not "Y":
+            return
+
         # Handle tags with or without 'v' prefix if needed
         # GitHub tags might be "v1.0.0" but version.txt is "1.0.0"
         tag_name = latest_version
