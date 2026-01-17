@@ -156,7 +156,7 @@ def update(repo: str, current_version: str):
             return
 
         Printer.warning(f"New version available: {latest_version}")
-        if input("Update?[y/N]: ") != "y" or "Y":
+        if input("Update?[y/N]: ") not in ("y", "Y"):
             return
 
         # Handle tags with or without 'v' prefix if needed
