@@ -88,23 +88,22 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
 
             out_name = self.get_executable_path(fp)
 
-            match ext:
-                case ".py":
-                    self._handle_python_execution(fp)
-                case ".lua":
-                    self._handle_lua_execution(fp)
-                case ".rs":
-                    self._handle_rust_execution(fp)
-                case ".java":
-                    self._handle_java_single_file(fp)
-                case _ if ext in self.c_family_ext:
-                    self._handle_c_family_single_file(fp)
-                case _:
-                    # Check for custom language configuration
-                    lang_config = self.config.get_language_by_extension(ext)
-                    if lang_config:
-                        self._handle_custom_language(fp, lang_config, out_name)
-                    else:
+            lang_config = self.config.get_language_by_extension(ext)
+            if lang_config:
+                self._handle_custom_language(fp, lang_config, out_name)
+            else:
+                match ext:
+                    case ".py":
+                        self._handle_python_execution(fp)
+                    case ".lua":
+                        self._handle_lua_execution(fp)
+                    case ".rs":
+                        self._handle_rust_execution(fp)
+                    case ".java":
+                        self._handle_java_single_file(fp)
+                    case _ if ext in self.c_family_ext:
+                        self._handle_c_family_single_file(fp)
+                    case _:
                         raise ConfigError(f"Unsupported extension: {ext}")
                         
         except (ConfigError, ExecutionError, FileNotFoundError, OSError) as e:
