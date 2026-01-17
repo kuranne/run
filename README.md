@@ -1,11 +1,11 @@
 # Auto Compiler & Runner
 
 A configurable runner. It handles compilation, execution, and cleanup automatically after executed.  
-Honesly, I lazied to compile then run for testing, so I made this tool.  
+Honesly, I lazied to compile then run for testing, so I made this tool.
 
 ## Current version
 
-Now version is `26.1.4`, hope you updated to latest version!
+Now version is `26.1.5`, hope you updated to latest version!
 
 ## Features
 
@@ -17,11 +17,11 @@ Now version is `26.1.4`, hope you updated to latest version!
 - **Multi-File Support**: Can link multiple C/C++/Java files.
 - **TOML Config**: for each project, if define `Run.toml` inside, it will use it instead of default config.
 - **Dry Run**: Simulate execution to check commands without running them.
-- **Debug Logging**: Create log from compiling or running executable.  
+- **Debug Logging**: Create log from compiling or running executable.
 
 ## In Future Features (Maybe)
 
-I have no plan yet... email me for your idea please.
+- **Change preset format to use list instead of string**
 
 ## Installation
 
@@ -75,7 +75,8 @@ run <files> [flags]
 | `--debug`               | Create log after running                          |
 | `--unsafe`              | Allow running in root                             |
 | `--version`             | Check current version (local)                     |
-| `--update`              | Update  automaticly                               |
+| `--update`              | Update automaticly                                |
+| `--no-cache`            | Disable cache                                     |
 
 ### Examples
 
@@ -114,6 +115,7 @@ run main.cpp -p release -d
 ## Configuration (Run.toml)
 
 Create a `Run.toml` in your project root or in the script installation directory.
+You can also replace the default runner by `[language.<lang>]` section.
 
 ```toml
 [runner]
@@ -123,7 +125,31 @@ cpp = "clang++"
 python = "python3"
 ```
 
+or
+
+```toml
+[language.c]
+extensions = [".c"]
+runner = "clang"
+type = "compiler"
+```
+
+```toml
+[language.cpp]
+extensions = [".cpp", ".cc"]
+runner = "clang++"
+type = "compiler"
+```
+
+```toml
+[language.python]
+extensions = [".py"]
+runner = "python3"
+type = "interpreter"
+```
+
 ### Preset
+
 Use this configure with `--preset <preset>` or `-p <preset>` to tell the binary use these flags:
 
 ```toml
@@ -159,16 +185,23 @@ Then run your script:
 run script.rb
 ```
 
-### Compiled Languages
-
-For compiled languages (like Kotlin, Zig, D), set `type = "compiler"`:
+### Example
 
 ```toml
-[language.kotlin]
-extensions = [".kt", ".kts"]
-runner = "kotlinc"
+[language.zenc]
+extensions = [".zc"]
+runner = "zc"
+subcommand = "build"
 type = "compiler"
-flags = ["-include-runtime", "-d"]
+flags = ["--cc", "clang"]
+arguments = ["arg1", "arg2"]
 ```
 
-The runner will compile first, then execute the binary automatically.  
+If you declared the language in toml, you can also use preset flag(s) like default supported language:
+
+```toml
+[preset.release]
+zenc = "-O3"
+```
+
+The runner will compile first, then execute the binary automatically.
