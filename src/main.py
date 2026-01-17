@@ -40,7 +40,8 @@ def main():
         "keep" : args.keep,
         "time" : args.time,
         "dry_run": args.dry_run,
-        "preset": args.preset
+        "preset": args.preset,
+        "no_cache": args.no_cache
     }
 
     try:

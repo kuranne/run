@@ -16,16 +16,24 @@ class CFamilyHandler:
         Compile a single source file to object file.
         Returns path to object file if successful, None otherwise.
         """
-        # Use cache directory for object files
-        obj_file = cache.get_object_path(source)
+        if cache:
+            # Use cache directory for object files
+            obj_file = cache.get_object_path(source)
+        else:
+            # No cache: use source directory with different extension to avoid conflict
+            # Or just use the standard object extension in a unique way?
+            # Using .o in same dir is fine, but we must ensure it's cleaned up.
+            # We prefix to avoid accidental overwrites of user files?
+            # Let's keep it simple: source.o
+            obj_file = source.with_suffix(".o") if self.is_posix else source.with_suffix(".obj")
+            
         if self.is_posix:
-             # Ensure extension is correct for platform if needed, though suffix check handles it
              pass 
         else:
              obj_file = obj_file.with_suffix(".obj")
 
         # Check cache
-        if not cache.is_changed(source) and obj_file.exists():
+        if cache and not cache.is_changed(source) and obj_file.exists():
             # Cache hit
             return obj_file
 
@@ -35,9 +43,11 @@ class CFamilyHandler:
         
         try:
             self.run_command(cmd, compiling=True)
-            # We DONT add to output_files because we want to persist them in cache
-            # self.output_files.append(obj_file) 
-            cache.update_cache(source)
+            # We DONT add to output_files because:
+            # 1. If cached, we want to persist them in cache
+            # 2. If no-cache, we return the path and add to output_files in the caller
+            if cache:
+                cache.update_cache(source)
             return obj_file
         except Exception:
             return None
@@ -107,6 +117,9 @@ class CFamilyHandler:
                     obj_path = future.result()
                     if obj_path:
                         object_files.append(obj_path)
+                        # If no cache, we need to ensure these object files are cleaned up
+                        if self.cache is None:
+                            self.output_files.append(obj_path)
                     else:
                         failed = True
                 except Exception as e:

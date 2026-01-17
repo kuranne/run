@@ -22,6 +22,7 @@ def args(__version__):
     parser.add_argument("-u", "--update", action="store_true", help="Update run to latest version from GitHub")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--unsafe", action="store_true", help="Allow running as root")
+    parser.add_argument("--no-cache", action="store_true", help="Disable cache")
 
     # Handle version checker
     parser.add_argument("--version", action="version", version=__version__, help=f"Check version of the binary")
