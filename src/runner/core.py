@@ -34,7 +34,12 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
         self.c_family_ext = {'.c', '.cpp', '.cc'}
         self.c_family_header_ext = {'.h', '.hpp'}
         self.java_ext = {'.java'}
-        self.cache = CacheManager()
+        
+        if self.flags.get("no_cache", False):
+            self.cache = None
+            Printer.debug("Cache disabled via --no-cache")
+        else:
+            self.cache = CacheManager()
 
     def find_source_files(self, path: Path, max_depth: Optional[int] = None) -> List[str]:
         """

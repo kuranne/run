@@ -21,11 +21,11 @@ class CacheManager:
         self._load_cache()
         
         # Ensure objects dir exists
-        if not self.objs_dir.exists():
-            try:
-                self.objs_dir.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                pass
+        # if not self.objs_dir.exists():
+        #     try:
+        #         self.objs_dir.mkdir(parents=True, exist_ok=True)
+        #     except OSError:
+        #         pass
 
     def get_object_path(self, source_path: Path) -> Path:
         """
@@ -35,6 +35,14 @@ class CacheManager:
         # We use hash of absolute path to create a unique filename
         # e.g. source.c -> objs/hash_source.o
         path_hash = hashlib.md5(str(source_path.absolute()).encode()).hexdigest()
+        
+        # Ensure objects dir exists lazily
+        if not self.objs_dir.exists():
+            try:
+                self.objs_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+                
         return self.objs_dir / f"{path_hash}_{source_path.name}.o"
 
     def _load_cache(self):
@@ -49,6 +57,22 @@ class CacheManager:
 
     def _save_cache(self):
         """Save cache to disk."""
+        if not self.cache_data:
+            # If cache is empty, try to remove cache file and directory
+            if self.cache_file.exists():
+                try:
+                    self.cache_file.unlink()
+                except OSError:
+                    pass
+            
+            # If directory is empty, remove it
+            if self.cache_dir.exists() and not any(self.cache_dir.iterdir()):
+                try:
+                    self.cache_dir.rmdir()
+                except OSError:
+                    pass
+            return
+            
         if not self.cache_dir.exists():
             try:
                 self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -100,5 +124,12 @@ class CacheManager:
         if self.cache_file.exists():
             try:
                 self.cache_file.unlink()
+            except OSError:
+                pass
+        
+        # If directory is empty, remove it
+        if self.cache_dir.exists() and not any(self.cache_dir.iterdir()):
+            try:
+                self.cache_dir.rmdir()
             except OSError:
                 pass
