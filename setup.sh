@@ -15,18 +15,8 @@ echo "${CYAN}Setting up virtual environment...${NC}"
 if [[ ! -d ./.venv ]]; then
     python3 -m venv .venv
 else
-    echo -n "Founded .venv in installed directory, want to reinstall venv?[y/N]: "
-    read res
-    if [[ $res =~ ^[Yy]$ ]]; then
-        echo -n "run rm -rf .venv ?[y/N]: "
-        read res
-        if [[ $res =~ ^[Yy]$ ]]; then
-            rm -rf .venv
-            python3 -m venv .venv
-        else
-            echo "Cancelled reinstalling"
-        fi
-    fi
+    rm -rf .venv
+    python3 -m venv .venv
 fi
 source ./.venv/bin/activate
 
