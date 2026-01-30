@@ -17,10 +17,25 @@ class Config:
         self.data: Dict[str, Any] = {}
         projects_directory = Path(__file__).resolve().parent.parent.parent
         
+        # Check Current workspace instread, up to 3 levels (stop when found .git)
+        current = Path.cwd()
+        for i in range(4):  # 0=current, 1=p, 2=pp, 3=ppp
+            target = current / "Run.toml"
+            if target.exists():
+                config_path = target
+                break
+            
+            if (current / ".git").exists():
+                break
+                
+            if current == current.parent:
+                break
+            current = current.parent
+
         # Search paths: 1. Current Dir, 2. Script Dir
         search_paths = [
             Path.cwd() / "Run.toml",
-            projects_directory / "Run.toml"
+            current / "Run.toml"
         ]
         
         config_path = None
