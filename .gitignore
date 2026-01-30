@@ -5,6 +5,7 @@
 .venv/
 __pycache__/
 .tool-versions
+.pytest_cache/
 
 # script
 run
