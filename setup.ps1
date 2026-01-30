@@ -19,7 +19,7 @@ if (!(Test-Path ".venv")) {
 
 #--- Install Dependencies ---#
 Write-Host "Installing dependencies..." -ForegroundColor Cyan
-.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\pip install .
 
 #--- Create Wrapper ---#
 Write-Host "Creating run.cmd wrapper..." -ForegroundColor Cyan

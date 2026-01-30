@@ -1,0 +1,13 @@
+[project]
+name = "run"
+version = "26.1.5"
+description = "A configurable runner for compilation, execution, and cleanup."
+authors = [
+    { name = "kuranne" }
+]
+dependencies = [
+    "requests==2.32.5"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}

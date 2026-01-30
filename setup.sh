@@ -22,7 +22,7 @@ source ./.venv/bin/activate
 
 #--- Install Dependencies ---#
 echo "${CYAN}Installing dependencies...${NC}"
-pip install -r requirements.txt
+pip install .
 
 #--- Create Wrapper Script ---#
 echo "${CYAN}Creating runner script...${NC}"
