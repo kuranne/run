@@ -22,7 +22,7 @@ from pathlib import Path
 def log(msg):
     try:
         with open(r"{log_file}", "a", encoding="utf-8") as f:
-            f.write(str(msg) + "\n")
+            f.write(str(msg) + "\\n")
     except:
         pass
 
@@ -48,7 +48,7 @@ def update_pyproject_version(path, version):
         content = path.read_text(encoding="utf-8")
         # Standard pyproject.toml has version = "x.y.z"
         # We use re.MULTILINE to match from start of line
-        new_content = re.sub(r'(^version\s*=\s*")([^"]*)(")', rf'\g<1>{{version}}\g<3>', content, flags=re.MULTILINE)
+        new_content = re.sub(r'(^version\\s*=\\s*")([^"]*)(")', rf'\\g<1>{{version}}\\g<3>', content, flags=re.MULTILINE)
         if new_content != content:
             path.write_text(new_content, encoding="utf-8")
             log(f"Updated pyproject.toml version to {{version}}")
