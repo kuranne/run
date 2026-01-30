@@ -15,6 +15,7 @@ import sys
 import shutil
 import time
 import subprocess
+import json
 from pathlib import Path
 
 def log(msg):
@@ -28,18 +29,17 @@ def force_remove(path):
     if not path.exists(): return
     try:
         if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
+            # Fix read-only files before removing
+            def unlink_readonly(func, path, excinfo):
+                os.chmod(path, 0o777)
+                func(path)
+            shutil.rmtree(path, onerror=unlink_readonly)
         else:
+            os.chmod(path, 0o777) if os.name != 'nt' else None
             os.remove(path)
     except Exception as e:
         log(f"Error removing {{path}}: {{e}}")
-        # On Windows, sometimes file is locked briefly, retry once
-        time.sleep(0.5)
-        try:
-            if path.is_dir(): shutil.rmtree(path)
-            else: os.remove(path)
-        except:
-            pass
+        time.sleep(1)
 
 def main():
     log("Starting update process...")
@@ -168,6 +168,11 @@ def update(repo: str, current_version: str):
             pass 
 
         download_url = f"https://github.com/{repo}/archive/refs/tags/{tag_name}.zip"
+
+        check = requests.head(download_url, allow_redirects=True)
+        if check.status_code == 404 and not tag_name.startswith("v"):
+            tag_name = f"v{latest_version}"
+            download_url = f"https://github.com/{repo}/archive/refs/tags/{tag_name}.zip"
 
         Printer.action("DOWNLOAD", f"Downloading {latest_version}...", Colors.YELLOW)
         
