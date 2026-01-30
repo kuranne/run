@@ -16,12 +16,13 @@ import shutil
 import time
 import subprocess
 import json
+import re
 from pathlib import Path
 
 def log(msg):
     try:
         with open(r"{log_file}", "a", encoding="utf-8") as f:
-            f.write(str(msg) + "\\n")
+            f.write(str(msg) + "\n")
     except:
         pass
 
@@ -40,6 +41,21 @@ def force_remove(path):
     except Exception as e:
         log(f"Error removing {{path}}: {{e}}")
         time.sleep(1)
+
+def update_pyproject_version(path, version):
+    if not path.exists(): return
+    try:
+        content = path.read_text(encoding="utf-8")
+        # Standard pyproject.toml has version = "x.y.z"
+        # We use re.MULTILINE to match from start of line
+        new_content = re.sub(r'(^version\s*=\s*")([^"]*)(")', rf'\g<1>{{version}}\g<3>', content, flags=re.MULTILINE)
+        if new_content != content:
+            path.write_text(new_content, encoding="utf-8")
+            log(f"Updated pyproject.toml version to {{version}}")
+        else:
+            log("pyproject.toml version line not found or already correct.")
+    except Exception as e:
+        log(f"Failed to update pyproject.toml version: {{e}}")
 
 def main():
     log("Starting update process...")
@@ -80,6 +96,9 @@ def main():
                 shutil.copy2(item, dest)
         
         log("Files copied successfully.")
+
+        # Explicitly update version in pyproject.toml (safeguard)
+        update_pyproject_version(install_dir / "pyproject.toml", "{latest_version}")
         
         # Run setup
         setup_script = install_dir / ("setup.ps1" if os.name == "nt" else "setup.sh")
@@ -116,13 +135,24 @@ if __name__ == "__main__":
 """
 
 def _get_latest_version_from_raw(repo: str, branch: str = "main") -> str:
-    """Fetch version string from a raw file in the repository."""
-    raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/src/version.txt"
+    """Fetch version string from pyproject.toml in the repository."""
+    raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/pyproject.toml"
     
     response = requests.get(raw_url, timeout=5)
     response.raise_for_status()
     
-    return response.text.strip()
+    # Parse pyproject.toml from the response text
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomldecoder as tomllib
+
+    try:
+        data = tomllib.loads(response.text)
+        return data.get("project", {}).get("version")
+    except Exception as e:
+        raise ValueError(f"Failed to parse pyproject.toml from {raw_url}: {e}")
+
 
 def _download_file(url: str, dest_path: Path):
     """Download a file from a URL to a specified path."""
@@ -196,7 +226,8 @@ def update(repo: str, current_version: str):
             parent_pid=os.getpid(),
             src_dir=content_path.as_posix(),
             install_dir=install_dir.as_posix(),
-            temp_root=temp_dir_path.as_posix() 
+            temp_root=temp_dir_path.as_posix(),
+            latest_version=latest_version
         )
         
         script_path = temp_dir_path / "updater.py"
