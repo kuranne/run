@@ -42,20 +42,12 @@ def force_remove(path):
         log(f"Error removing {{path}}: {{e}}")
         time.sleep(1)
 
-def update_pyproject_version(path, version):
-    if not path.exists(): return
+def refresh_pyproject_toml(path, content):
     try:
-        content = path.read_text(encoding="utf-8")
-        # Standard pyproject.toml has version = "x.y.z"
-        # We use re.MULTILINE to match from start of line
-        new_content = re.sub(r'(^version\\s*=\\s*")([^"]*)(")', rf'\\g<1>{{version}}\\g<3>', content, flags=re.MULTILINE)
-        if new_content != content:
-            path.write_text(new_content, encoding="utf-8")
-            log(f"Updated pyproject.toml version to {{version}}")
-        else:
-            log("pyproject.toml version line not found or already correct.")
+        path.write_text(content, encoding="utf-8")
+        log(f"Refreshed pyproject.toml content.")
     except Exception as e:
-        log(f"Failed to update pyproject.toml version: {{e}}")
+        log(f"Failed to refresh pyproject.toml: {{e}}")
 
 def main():
     log("Starting update process...")
@@ -97,8 +89,8 @@ def main():
         
         log("Files copied successfully.")
 
-        # Explicitly update version in pyproject.toml (safeguard)
-        update_pyproject_version(install_dir / "pyproject.toml", "{latest_version}")
+        # Explicitly refresh full pyproject.toml (safeguard)
+        refresh_pyproject_toml(install_dir / "pyproject.toml", json.loads(r'{remote_pyproject_content_json}'))
         
         # Run setup
         setup_script = install_dir / ("setup.ps1" if os.name == "nt" else "setup.sh")
@@ -134,12 +126,14 @@ if __name__ == "__main__":
     main()
 """
 
-def _get_latest_version_from_raw(repo: str, branch: str = "main") -> str:
-    """Fetch version string from pyproject.toml in the repository."""
+def _get_remote_pyproject_data(repo: str, branch: str = "main") -> tuple[str, str]:
+    """Fetch version and full content from pyproject.toml in the repository."""
     raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/pyproject.toml"
     
     response = requests.get(raw_url, timeout=5)
     response.raise_for_status()
+    
+    content = response.text
     
     # Parse pyproject.toml from the response text
     if sys.version_info >= (3, 11):
@@ -148,8 +142,9 @@ def _get_latest_version_from_raw(repo: str, branch: str = "main") -> str:
         import tomldecoder as tomllib
 
     try:
-        data = tomllib.loads(response.text)
-        return data.get("project", {}).get("version")
+        data = tomllib.loads(content)
+        version = data.get("project", {}).get("version")
+        return version, content
     except Exception as e:
         raise ValueError(f"Failed to parse pyproject.toml from {raw_url}: {e}")
 
@@ -179,7 +174,7 @@ def update(repo: str, current_version: str):
     try:
         Printer.action("CHECK", f"Checking for updates... (Current: {current_version})", Colors.CYAN)
         
-        latest_version = _get_latest_version_from_raw(repo=repo)
+        latest_version, remote_content = _get_remote_pyproject_data(repo=repo)
         
         if latest_version == current_version:
             Printer.action("UPDATE", "You are already on the latest version.")
@@ -227,7 +222,8 @@ def update(repo: str, current_version: str):
             src_dir=content_path.as_posix(),
             install_dir=install_dir.as_posix(),
             temp_root=temp_dir_path.as_posix(),
-            latest_version=latest_version
+            latest_version=latest_version,
+            remote_pyproject_content_json=json.dumps(remote_content)
         )
         
         script_path = temp_dir_path / "updater.py"
