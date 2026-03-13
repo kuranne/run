@@ -154,14 +154,14 @@ Use this configure with `--preset <preset>` or `-p <preset>` to tell the binary 
 
 ```toml
 [preset.debug]
-c = "-g -Wall -Wextra"
-cpp = "-g -Wall -Wextra -std=c++20"
-rust = "-g"
+c = ["-g", "-Wall", "-Wextra"]
+cpp = ["-g", "-Wall", "-Wextra", "-std=c++20"]
+rust = ["-g"]
 
 [preset.release]
-c = "-O3"
-cpp = "-O3 -std=c++20"
-rust = "-C opt-level=3"
+c = ["-O3"]
+cpp = ["-O3", "-std=c++20"]
+rust = ["-C", "opt-level=3"]
 ```
 
 ## Custom Languages
@@ -201,7 +201,7 @@ If you declared the language in toml, you can also use preset flag(s) like defau
 
 ```toml
 [preset.release]
-zenc = "-O3"
+zenc = ["-O3"]
 ```
 
 The runner will compile first, then execute the binary automatically.

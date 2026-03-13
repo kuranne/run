@@ -113,8 +113,13 @@ class Config:
             List[str]: List of flags.
         """
         if not preset_name: return []
-        flags = self.data.get("preset", {}).get(preset_name, {}).get(lang, "")
-        return shlex.split(flags) if flags else []
+        flags_data = self.data.get("preset", {}).get(preset_name, {}).get(lang, [])
+        
+        if isinstance(flags_data, list):
+            return flags_data
+        elif isinstance(flags_data, str):
+            return shlex.split(flags_data)
+        return []
     
     def get_custom_languages(self) -> Dict[str, Any]:
         """
