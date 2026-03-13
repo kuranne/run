@@ -145,7 +145,7 @@ class BaseRunner:
             for fp in file_paths:
                 try:
                     self._handle_single_file(fp)
-                except Exception as e:
+                except (ConfigError, ExecutionError, FileNotFoundError, OSError) as e:
                     # This should not happen since _handle_single_file catches its own errors,
                     # but as a fallback, catch any unexpected errors and continue
                     Printer.error(f"Unexpected error processing {fp}: {e}")
