@@ -5,12 +5,13 @@ Honesly, I lazied to compile then run for testing, so I made this tool.
 
 ## Current version
 
-Now version is `26.3.0`, hope you updated to latest version!
+Now version is `26.3.1`, hope you updated to latest version!
 
 ## Features
 
 - **Auto-Detection**: detailed execution info with colored output.
 - **Smart Compilation**: Automatically compiles C/C++/Rust before running.
+- **Run.toml**: config file, must be in XDG or `~/.config` for **macOS/Linux** and `%APPDATA%\run_kuranne\Run.toml` for **Windows**
 - **Custom Language Support**: Add any language via `Run.toml` configuration.
 - **Project Config (`Run.toml`)**: Define custom runners and flag preset.
 - **Virtual Env Support**: Automatically detects `.venv` or `.env` and uses the local Python.
