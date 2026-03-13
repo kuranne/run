@@ -17,6 +17,8 @@ class JavaHandler:
             Optional[str]: Name of the main class, or None if not found.
         """
         try:
+            from util.errors import ExecutionError
+
             with open(java_file, 'r') as f:
                 content = f.read()
                 
@@ -26,20 +28,20 @@ class JavaHandler:
                 if package_match:
                     package_name = package_match.group(1) + "."
 
-                # Look for public class declaration
+                # Look for public class declaration and main method
+                public_class_search = re.search(r'public\s+class\s+(\w+)', content)
+                if not public_class_search:
+                    raise ExecutionError(f"Could not find main class in {java_file}")
+                    
+                public_static_void_main_search = re.search(r'class\s+(\w+)\s*\{[^}]*public\s+static\s+void\s+main', content, re.DOTALL)
+                if not public_static_void_main_search:
+                    raise ExecutionError(f"Could not find main method in file {java_file}")
                 
-                # Match: public class ClassName
-                match = re.search(r'public\s+class\s+(\w+)', content)
-                if match:
-                    return package_name + match.group(1)
-                # Fallback: try to find any class with main method
-                match = re.search(r'class\s+(\w+)\s*\{[^}]*public\s+static\s+void\s+main', content, re.DOTALL)
-                if match:
-                    return package_name + match.group(1)
-        except Exception as e:
+                if public_class_search and public_static_void_main_search:
+                    return package_name + public_static_void_main_search.group(1)
+        except (Exception, ExecutionError) as e:
             # This is a bit lower level error, maybe just logging is fine, but lets conform
-            from util.errors import ExecutionError
-            raise ExecutionError(f"Error reading Java file: {e}")
+            raise ExecutionError(f"Error while reading Java file: {e}")
         return None
 
     def _handle_java_single_file(self, fp: Path):
@@ -110,21 +112,21 @@ class JavaHandler:
         self.run_command(cmd, compiling=True)
         
         # Extract main class name from the first file
+        from util.errors import ExecutionError
         main_class = self._extract_java_main_class(sources[0])
-        if main_class:
-            # Track new or modified .class files for cleanup
-            for d in parent_dirs:
-                for p in d.glob("*.class"):
-                    try:
-                        mtime = p.stat().st_mtime
-                        if p not in before_state or mtime > before_state[p]:
-                            self.output_files.append(p)
-                    except FileNotFoundError:
-                        pass
-            
-            # Run the main class
-            cmd = ["java", main_class] + self.run_args
-            self.run_command(cmd)
-        else:
-            from util.errors import ExecutionError
-            raise ExecutionError(f"Could not find main class in {sources[0]}")
+        if not main_class:
+            raise ExecutionError(f"Error while executing {sources[0]}")
+        # Track new or modified .class files for cleanup
+        for d in parent_dirs:
+            for p in d.glob("*.class"):
+                try:
+                    mtime = p.stat().st_mtime
+                    if p not in before_state or mtime > before_state[p]:
+                        self.output_files.append(p)
+                except FileNotFoundError:
+                    pass
+        
+        # Run the main class
+        cmd = ["java", main_class] + self.run_args
+        self.run_command(cmd)
+    

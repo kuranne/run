@@ -77,19 +77,16 @@ def main():
             return 0
 
         # 4. No files, No Cargo -> Fallback to Input
-        try:
-            print(f"{Colors.YELLOW}[ INPUT ] No file given, enter file(s) name: {Colors.RESET}", end="")
-            val = input().strip()
-            if val: 
-                args.files = shlex.split(val)
-                runner.compile_and_run(args.files, args.multi)
-        except (EOFError, KeyboardInterrupt):
-            return 1
-        finally:
-            runner.cleanup()
-            
+        print(f"{Colors.YELLOW}[ INPUT ] No file given, enter file(s) name: {Colors.RESET}", end="")
+        val = input().strip()
+        if val: 
+            args.files = shlex.split(val)
+            runner.compile_and_run(args.files, args.multi)
+    
+        runner.cleanup()
         return 0
-
+    except (EOFError, KeyboardInterrupt):
+        return 0
     except RunError as e:
         Printer.error(str(e))
         return 1
@@ -99,7 +96,7 @@ def main():
             import traceback
             traceback.print_exc()
         return 1
-
+    
 if __name__ == "__main__":
     exit_code = main()
     sys.exit(exit_code)

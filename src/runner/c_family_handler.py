@@ -26,11 +26,6 @@ class CFamilyHandler:
             # We prefix to avoid accidental overwrites of user files?
             # Let's keep it simple: source.o
             obj_file = source.with_suffix(".o") if self.is_posix else source.with_suffix(".obj")
-            
-        if self.is_posix:
-             pass 
-        else:
-             obj_file = obj_file.with_suffix(".obj")
 
         # Check cache
         if cache and not cache.is_changed(source) and obj_file.exists():
