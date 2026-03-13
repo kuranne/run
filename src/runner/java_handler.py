@@ -26,20 +26,23 @@ class JavaHandler:
                 if package_match:
                     package_name = package_match.group(1) + "."
 
-                # Look for public class declaration
+                # Look for public class declaration and main method
+                public_class_search = re.search(r'public\s+class\s+(\w+)', content)
+                if not public_class_search:
+                    from util.errors import ExecutionError
+                    raise ExecutionError(f"Could not find main class in {java_file}")
+                    
+                public_static_void_main_search = re.search(r'class\s+(\w+)\s*\{[^}]*public\s+static\s+void\s+main', content, re.DOTALL)
+                if not public_static_void_main_search:
+                    from util.errors import ExecutionError
+                    raise ExecutionError(f"Could not find main method in file {java_file}")
                 
-                # Match: public class ClassName
-                match = re.search(r'public\s+class\s+(\w+)', content)
-                if match:
-                    return package_name + match.group(1)
-                # Fallback: try to find any class with main method
-                match = re.search(r'class\s+(\w+)\s*\{[^}]*public\s+static\s+void\s+main', content, re.DOTALL)
-                if match:
-                    return package_name + match.group(1)
+                if public_class_search and public_static_void_main_search:
+                    return package_name + public_static_void_main_search.group(1)
         except Exception as e:
             # This is a bit lower level error, maybe just logging is fine, but lets conform
             from util.errors import ExecutionError
-            raise ExecutionError(f"Error reading Java file: {e}")
+            raise ExecutionError(f"Error while reading Java file: {e}")
         return None
 
     def _handle_java_single_file(self, fp: Path):
@@ -127,4 +130,4 @@ class JavaHandler:
             self.run_command(cmd)
         else:
             from util.errors import ExecutionError
-            raise ExecutionError(f"Could not find main class in {sources[0]}")
+            raise ExecutionError(f"Error while executing {sources[0]}")

@@ -6,7 +6,7 @@ from typing import List, Dict, Optional, Any
 from pathlib import Path
 from util.config import Config
 from util.output import Printer, Colors
-from util.errors import ExecutionError, CompilationError
+from util.errors import ExecutionError, CompilationError, ConfigError
 from util.security import SecurityManager
 
 class BaseRunner:
@@ -152,7 +152,7 @@ class BaseRunner:
 
     def cleanup(self):
         """Clean up generated binary/class files if --keep is not specified."""
-        if not self.flags["keep"]:
+        if not self.flags.get("keep", False):
             for f in self.output_files:
                 if self.dry_run:
                      Printer.action("DRY-RUN", f"Would delete: {f}", Colors.YELLOW)
