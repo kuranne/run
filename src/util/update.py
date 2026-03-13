@@ -8,6 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 from util.output import Printer, Colors
+import json
 
 UPDATE_SCRIPT_TEMPLATE = """
 import os
