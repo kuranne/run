@@ -1,5 +1,6 @@
 import sys
 import shlex
+import os
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from util.output import Printer
@@ -12,35 +13,52 @@ except ImportError:
 class Config:
     """Configuration manager for the runner, handling TOML config loading and retrieval."""
 
+    def _get_global_config_dir(self) -> Path:
+        """
+        Get global config directory for run configuration.
+        Follows platform conventions using XDG on Linux/macOS and APPDATA on Windows.
+
+        Returns:
+            Path: Global configuration directory path.
+        """
+        if sys.platform == "win32":
+            # Windows: %APPDATA%\run_kuranne
+            appdata = os.getenv("APPDATA")
+            if appdata:
+                return Path(appdata) / "run_kuranne"
+            else:
+                return Path.home() / "AppData" / "Roaming" / "run_kuranne"
+        else:
+            # Linux/macOS: Follow XDG config home standard
+            xdg_config_home = os.getenv("XDG_CONFIG_HOME")
+            if xdg_config_home:
+                return Path(xdg_config_home) / "run_kuranne"
+            else:
+                return Path.home() / ".config" / "run_kuranne"
+
     def __init__(self):
         """Initialize the Config manager, loading Run.toml from detected paths."""
         self.data: Dict[str, Any] = {}
-        projects_directory = Path(__file__).resolve().parent.parent.parent
+        config_path = None
         
-        # Check Current workspace instread, up to 3 levels (stop when found .git)
+        # 1. Search in current workspace (up to 4 levels)
         current = Path.cwd()
-        for i in range(4):  # 0=current, 1=p, 2=pp, 3=ppp
+        for i in range(4):  # 0=current, 1=parent, 2=grandparent, 3=great-grandparent
             target = current / "Run.toml"
             if target.exists():
                 config_path = target
                 break
-                
+            
             if current == current.parent:
                 break
             current = current.parent
 
+        # 2. If not found in workspace, check global config directory
         if not config_path:
-            # Search paths: 1. Current Dir, 2. Script Dir
-            search_paths = [
-                Path.cwd() / "Run.toml",
-                current / "Run.toml"
-            ]
-
-            config_path = None
-            for p in search_paths:
-                if p.exists():
-                    config_path = p
-                    break
+            global_config_dir = self._get_global_config_dir()
+            global_config_file = global_config_dir / "Run.toml"
+            if global_config_file.exists():
+                config_path = global_config_file
         
         if config_path:
             try:
