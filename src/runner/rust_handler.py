@@ -1,9 +1,11 @@
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 from util.output import Printer
-import tomllib
 
 class RustHandler:
+    def __init__(self):
+        self.data: Dict[str, Any] = {}
+
     """
     Mixin class handling Cargo/Rust specific operations.
     """
@@ -39,24 +41,15 @@ class RustHandler:
             Optional[str]: Package name if found, else None.
         """
         try:
-            with open(toml_path, 'r', encoding='utf-8') as f:
-                in_package = False
-                for line in f:
-                    line = line.strip()
-                    if line == "[package]":
-                        in_package = True
-                        continue
-                    if line.startswith("[") and line.endswith("]"):
-                        in_package = False
-                    
-                    if in_package and line.startswith("name"):
-                        # name = "project_name"
-                        parts = line.split('=')
-                        if len(parts) >= 2:
-                            return parts[1].strip().strip('"').strip("'")
-        except Exception:
-            pass
-        return None
+            import tomllib
+        except ImportError:
+            from util.output import Printer
+            Printer.error("Python 3.11+ requires for tomllib")
+            return None
+        
+        self.data = tomllib.load(toml_path)
+        name = self.data.get("package", {}).get("name", str)
+        return name if name else None
 
     def run_cargo_mode(self, toml_path: Optional[Path] = None):
         """
