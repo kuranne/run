@@ -1,4 +1,5 @@
 from pathlib import Path
+from util.errors import ConfigError
 import subprocess as spc
 
 class ScriptHandler:
@@ -21,14 +22,8 @@ class ScriptHandler:
                 if first_line.startswith("#!"):
                     if "python" in first_line:
                         return ".py"
-                    elif "bash" in first_line or "sh" in first_line:
-                        # We don't have sh runner explicit, but...
-                        # Maybe we can support shell scripts via generic runner?
-                        # For now just detecting python is a good start.
-                        pass
-                    elif "ruby" in first_line:
-                         # If we had ruby support...
-                         pass
+                    else:
+                        raise ConfigError("No support yet for this script language")
         except Exception:
             pass
         return ""

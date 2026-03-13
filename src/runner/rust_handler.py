@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional
 from util.output import Printer
+import tomllib
 
 class RustHandler:
     """
@@ -98,3 +99,29 @@ class RustHandler:
                  cmd += ["--"] + self.run_args
                  
             self.run_command(cmd)
+
+    def _handle_rust_execution(self, fp: Path):
+        """
+        Handle Rust file execution.
+        Checks if file is part of a Cargo project, otherwise compiles directly with rustc.
+
+        Args:
+            fp (Path): Path to the Rust source file.
+        """
+        # Check if this is part of a Cargo project
+        cargo_toml = self._find_cargo_toml(fp)
+        
+        if cargo_toml:
+            # Use cargo to run the project
+            self.run_cargo_mode(cargo_toml)
+        else:
+            # Single file compilation with rustc
+            compiler = self.config.get_runner("rust", "rustc")
+            out_name = self.get_executable_path(fp)
+            
+            preset_flags = self.config.get_preset_flags(self.preset, "rust")
+            cmd = [compiler] + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
+            
+            self.run_command(cmd, compiling=True)
+            self.output_files.append(out_name)
+            self._execute_binary(out_name)
