@@ -9,3 +9,6 @@ __pycache__/
 
 # script
 run
+
+# other
+run.egg-info/

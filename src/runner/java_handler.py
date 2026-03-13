@@ -52,6 +52,15 @@ class JavaHandler:
         compiler = self.config.get_runner("java", "javac")
         preset_flags = self.config.get_preset_flags(self.preset, "java")
         
+        # Record state of .class files before compilation
+        parent_dir = fp.parent
+        before_state = {}
+        for p in parent_dir.glob("*.class"):
+            try:
+                before_state[p] = p.stat().st_mtime
+            except FileNotFoundError:
+                pass
+
         # Compile the Java file
         cmd = [compiler] + self.extra_flags + preset_flags + [str(fp)]
         
@@ -61,8 +70,15 @@ class JavaHandler:
         # Extract main class and run
         main_class = self._extract_java_main_class(fp)
         if main_class:
-            class_file = fp.with_suffix('.class')
-            self.output_files.append(class_file)
+            # Track newly created or modified .class files for cleanup
+            for p in parent_dir.glob("*.class"):
+                try:
+                    mtime = p.stat().st_mtime
+                    if p not in before_state or mtime > before_state[p]:
+                        self.output_files.append(p)
+                except FileNotFoundError:
+                    pass
+
             self.run_command(["java", main_class] + self.run_args)
         else:
             from util.errors import ExecutionError
@@ -78,6 +94,16 @@ class JavaHandler:
         compiler = self.config.get_runner("java", "javac")
         preset_flags = self.config.get_preset_flags(self.preset, "java")
         
+        # Record class files state across all involved directories
+        parent_dirs = set(src.parent for src in sources)
+        before_state = {}
+        for d in parent_dirs:
+            for p in d.glob("*.class"):
+                try:
+                    before_state[p] = p.stat().st_mtime
+                except FileNotFoundError:
+                    pass
+
         # Compile all Java files
         cmd = [compiler] + self.extra_flags + preset_flags + [str(s) for s in sources]
         
@@ -86,10 +112,15 @@ class JavaHandler:
         # Extract main class name from the first file
         main_class = self._extract_java_main_class(sources[0])
         if main_class:
-            # Add .class files to cleanup
-            for src in sources:
-                class_file = src.with_suffix('.class')
-                self.output_files.append(class_file)
+            # Track new or modified .class files for cleanup
+            for d in parent_dirs:
+                for p in d.glob("*.class"):
+                    try:
+                        mtime = p.stat().st_mtime
+                        if p not in before_state or mtime > before_state[p]:
+                            self.output_files.append(p)
+                    except FileNotFoundError:
+                        pass
             
             # Run the main class
             cmd = ["java", main_class] + self.run_args
