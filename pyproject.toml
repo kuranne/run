@@ -1,6 +1,6 @@
 [project]
 name = "run"
-version = "26.3.1"
+version = "26.3.2"
 description = "A configurable runner for compilation, execution, and cleanup."
 authors = [
     { name = "kuranne" }
