@@ -33,7 +33,10 @@ class BaseRunner:
         
         # Config & Others
         self.config = Config()
+        excludes = self.config.get_exclude()
         self.output_files: List[Path] = []
+        self.exclude_exts: List[str] = ['.toml', '.lock'] + excludes.get("extensions", [])
+        self.exclude_files: List[str] = ['.git', '.gitignore'] + excludes.get("files", [])
 
         # Clean flags from extra quotes and split into list
         clean_flags = extra_flags.strip().strip('"').strip("'")

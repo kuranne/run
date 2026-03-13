@@ -80,11 +80,20 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             fp (Path): Path to the source file.
         """
         try:
+            name = fp.name
+
+            if name in self.exclude_files:
+                Printer.action("SKIP", f"{name} is in exclude files", Colors.GRAY)
+                return
+
             ext = fp.suffix.lower()
-            
             # Auto-detect language by shebang if no extension
             if not ext and fp.is_file():
                 ext = self._detect_language_from_shebang(fp)
+            
+            if ext in self.exclude_exts:
+                Printer.action("SKIP", f"{ext} file is exclude extensions", Colors.GRAY)
+                return
 
             out_name = self.get_executable_path(fp)
 
