@@ -5,7 +5,7 @@ Honesly, I lazied to compile then run for testing, so I made this tool.
 
 ## Current version
 
-Now version is `26.3.1`, hope you updated to latest version!
+Now version is `26.3.2`, hope you updated to latest version!
 
 ## Features
 
@@ -206,3 +206,15 @@ zenc = ["-O3"]
 ```
 
 The runner will compile first, then execute the binary automatically.
+
+### Exclude files and extensions
+
+If you want to run * but don't need to run all of files, write this in `Run.toml`:  
+
+```toml
+[exclude]
+files = ["target", "private.example"]
+extensions = [".py", ".md"]
+```
+
+Runner will ignore them.  
