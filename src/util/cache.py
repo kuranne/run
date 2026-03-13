@@ -19,13 +19,6 @@ class CacheManager:
         self.cache_file = self.cache_dir / "cache.json"
         self.cache_data: Dict[str, str] = {}
         self._load_cache()
-        
-        # Ensure objects dir exists
-        # if not self.objs_dir.exists():
-        #     try:
-        #         self.objs_dir.mkdir(parents=True, exist_ok=True)
-        #     except OSError:
-        #         pass
 
     def get_object_path(self, source_path: Path) -> Path:
         """

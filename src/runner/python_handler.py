@@ -1,4 +1,5 @@
 from pathlib import Path
+from util.errors import RunError
 
 class PythonHandler:
     """
@@ -26,8 +27,15 @@ class PythonHandler:
                     from util.output import Printer
                     Printer.info(f"Using venv: {venv}")
                     return str(py_path)
-        
-        return "python" if not self.is_posix else "python3"
+
+        from shutil import which
+        possible_exec = ["python", "python3"]
+        for exe in possible_exec:
+            py_path = which(exe)
+            if py_path:
+                return py_path
+        else:
+            raise RunError("Not found python runtime path.")
 
     def _handle_python_execution(self, fp: Path):
         """
@@ -36,5 +44,9 @@ class PythonHandler:
         Args:
             fp (Path): Path to the Python source file.
         """
-        prog = self._get_python_executable()
+        try:
+            prog = self._get_python_executable()
+        except RunError:
+            return
+
         self.run_command([prog, str(fp)] + self.run_args)

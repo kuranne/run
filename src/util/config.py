@@ -24,25 +24,23 @@ class Config:
             if target.exists():
                 config_path = target
                 break
-            
-            if (current / ".git").exists():
-                break
                 
             if current == current.parent:
                 break
             current = current.parent
 
-        # Search paths: 1. Current Dir, 2. Script Dir
-        search_paths = [
-            Path.cwd() / "Run.toml",
-            current / "Run.toml"
-        ]
-        
-        config_path = None
-        for p in search_paths:
-            if p.exists():
-                config_path = p
-                break
+        if not config_path:
+            # Search paths: 1. Current Dir, 2. Script Dir
+            search_paths = [
+                Path.cwd() / "Run.toml",
+                current / "Run.toml"
+            ]
+
+            config_path = None
+            for p in search_paths:
+                if p.exists():
+                    config_path = p
+                    break
         
         if config_path:
             try:
