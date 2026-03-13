@@ -4,7 +4,7 @@ from util.output import Printer
 
 class RustHandler:
     def __init__(self):
-        self.data: Dict[str, Any] = {}
+        self.cargo_toml_data: Dict[str, Any] = {}
 
     """
     Mixin class handling Cargo/Rust specific operations.
@@ -47,8 +47,8 @@ class RustHandler:
             Printer.error("Python 3.11+ requires for tomllib")
             return None
         
-        self.data = tomllib.load(toml_path)
-        name = self.data.get("package", {}).get("name", str)
+        self.cargo_toml_data = tomllib.load(toml_path)
+        name = self.cargo_toml_data.get("package", {}).get("name", str)
         return name if name else None
 
     def run_cargo_mode(self, toml_path: Optional[Path] = None):

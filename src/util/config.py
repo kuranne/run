@@ -177,4 +177,12 @@ class Config:
             bool: True if configured, False otherwise.
         """
         return self.get_language_by_extension(ext) is not None
-        
+    
+    def get_exclude(self) -> Optional[Dict[str, Any]]:
+        """
+        Get exclude extensions.
+
+        Returns:
+            Optional[Dict[str, Any]]: list of exclude extensions or []
+        """
+        return self.data.get("exclude", {})
