@@ -7,9 +7,6 @@ class CFamilyHandler:
     """
     Mixin class handling C/C++ specific operations.
     """
-    def __init__(self):
-        self.c_family_ext = {'.c', '.cpp', '.cc'}
-        self.c_family_header_ext = {'.h', '.hpp'}
 
     def _compile_object_file(self, compiler: str, source: Path, extra_cmd: List[str], cache) -> Optional[Path]:
         """
@@ -62,9 +59,22 @@ class CFamilyHandler:
         preset_flags = self.config.get_preset_flags(self.preset, lang)
 
         out_name = self.get_executable_path(fp)
+        
+        # Check cache before compiling
+        if self.cache and not self.cache.is_changed(fp) and out_name.exists():
+            from util.output import Printer
+            Printer.info(f"Using cached binary: {out_name}")
+            self._execute_binary(out_name)
+            return
+        
         cmd = [compiler] + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
         
         self.run_command(cmd, compiling=True)
+        
+        # Update cache after successful compilation
+        if self.cache:
+            self.cache.update_cache(fp)
+        
         self.output_files.append(out_name)
         self._execute_binary(out_name)
 

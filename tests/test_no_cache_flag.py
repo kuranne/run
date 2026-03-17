@@ -59,16 +59,13 @@ class TestNoCacheFlag(unittest.TestCase):
             print("Run 1 failed:", res.stderr)
         
         cache_dir = Path(".run_cache")
-        if not cache_dir.exists():
-            print("Run 1 Output:\n", res.stdout)
-            print("Run 1 Error:\n", res.stderr)
-            
-        self.assertTrue(cache_dir.exists())
+        cache_file = cache_dir / "cache.json"
         
-        # Get mtime of object file in cache
-        objs = list(cache_dir.glob("objs/*.o"))
-        self.assertTrue(len(objs) > 0)
-        old_mtime = objs[0].stat().st_mtime
+        # Cache file should exist for single-file compilation
+        self.assertTrue(cache_file.exists(), f"Cache file should exist after normal run (cache_dir={cache_dir}, exists={cache_dir.exists()})")
+        
+        # Get mtime of cache file
+        old_mtime = cache_file.stat().st_mtime
         
         # 2. Modify source
         import time
@@ -80,20 +77,13 @@ class TestNoCacheFlag(unittest.TestCase):
         res = spc.run(cmd, capture_output=True, text=True)
         self.assertIn("Hello Modified", res.stdout)
         
-        # Assert cache object NOT updated (or at least we didn't use it)
-        # Actually, since we bypass cache, the cache dir might remain stale. 
-        # But crucially, we verified "Hello Modified" ran, so it definitely recompiled.
-        # And since we didn't update cache, the object in cache should match OLD source?
-        # Unless we inadvertently updated it? The logic says if cache=None, we don't call update_cache.
-        # So check mtime of cached object should be same as before?
-        
-        new_objs = list(cache_dir.glob("objs/*.o"))
-        if new_objs: # It's possible cache key changed if path hash changed? No, path is same.
-            # But wait, we recompiled. Did we touch cache object?
-            # c_family_handler: if cache matches, return. If not, compile.
-            # But with --no-cache, cache is None. So we compile to LOCAL .o file.
-            # The cached .o file in .run_cache/objs should be UNTOUCHED.
-            self.assertEqual(new_objs[0].stat().st_mtime, old_mtime, "Cached object should not be modified by --no-cache run")
+        # Cache file should NOT be updated when running with --no-cache
+        new_cache_file = cache_dir / "cache.json"
+        if new_cache_file.exists():
+            new_mtime = new_cache_file.stat().st_mtime
+            # Cache file should not be updated (or at least we didn't use cache)
+            # Actually with --no-cache, we ignore the cache completely, so it shouldn't change
+            self.assertEqual(new_mtime, old_mtime, "Cache file should not be modified by --no-cache run")
 
 if __name__ == '__main__':
     unittest.main()

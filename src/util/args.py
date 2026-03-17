@@ -23,6 +23,15 @@ def args(__version__):
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument("--unsafe", action="store_true", help="Allow running as root")
     parser.add_argument("--no-cache", action="store_true", help="Disable cache")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Silence compiler output and logs")
+    parser.add_argument("-w", "--watch", action="store_true", help="Watch mode: re-compile and run on file change")
+
+    # Values
+    parser.add_argument("-T", "--timeout", type=float, help="Timeout in seconds for execution")
+    parser.add_argument("-i", "--stdin", type=str, help="Read stdin from file")
+    parser.add_argument("-e", "--env", action="append", default=[], help="Set environment variable (e.g. PORT=8080)")
+    parser.add_argument("-o", "--out-dir", type=str, help="Output directory for compiled binaries")
+    parser.add_argument("-c", "--compiler", type=str, help="Compiler override (e.g., clang++)")
 
     # Handle version checker
     parser.add_argument("--version", action="version", version=__version__, help=f"Check version of the binary")
