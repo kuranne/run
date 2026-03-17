@@ -3,9 +3,6 @@ from typing import Optional, Dict, Any
 from util.output import Printer
 
 class RustHandler:
-    def __init__(self):
-        self.cargo_toml_data: Dict[str, Any] = {}
-
     """
     Mixin class handling Cargo/Rust specific operations.
     """
