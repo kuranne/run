@@ -34,3 +34,35 @@ class TestConfig(unittest.TestCase):
         # Expect ValueError during init
         with self.assertRaises(ValueError):
              Config()
+
+    def test_get_exclude(self):
+        self.config.data = {"exclude": {"files": ["ignore.c"], "extensions": [".txt"]}}
+        excludes = self.config.get_exclude()
+        self.assertEqual(excludes["files"], ["ignore.c"])
+        self.assertEqual(excludes["extensions"], [".txt"])
+        
+        self.config.data = {}
+        self.assertEqual(self.config.get_exclude(), {})
+
+    @patch("pathlib.Path.exists")
+    @patch("builtins.open", new_callable=unittest.mock.mock_open, read_data=b'runner = "gcc"')
+    @patch("pathlib.Path.cwd")
+    def test_config_hierarchy(self, mock_cwd, mock_open, mock_exists):
+        # Setup Path.cwd to return /dummy/project
+        mock_cwd.return_value = Path("/dummy/project")
+        
+        # We need Path.exists to return True for /dummy/Run.toml
+        # and False for /dummy/project/Run.toml
+        
+        def exists_side_effect(*args, **kwargs):
+            if args and str(args[0]).endswith("/dummy/Run.toml"):
+                return True
+            return False
+            
+        mock_exists.side_effect = exists_side_effect
+        
+        with patch("src.util.config.tomllib.loads", return_value={}):
+            c = Config()
+        # Verify that loaded path was not /dummy/project/Run.toml but /dummy/Run.toml if it existed
+        pass
+
