@@ -83,7 +83,8 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             name = fp.name
 
             if name in self.exclude_files:
-                Printer.action("SKIP", f"{name} is in exclude files", Colors.GRAY)
+                if not self.flags.get("quiet", False):
+                    Printer.action("SKIP", f"{name} is in exclude files", Colors.GRAY)
                 return
 
             ext = fp.suffix.lower()
@@ -92,7 +93,8 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
                 ext = self._detect_language_from_shebang(fp)
             
             if ext in self.exclude_exts:
-                Printer.action("SKIP", f"{ext} file is exclude extensions", Colors.GRAY)
+                if not self.flags.get("quiet", False):
+                    Printer.action("SKIP", f"{ext} file is exclude extensions", Colors.GRAY)
                 return
 
             out_name = self.get_executable_path(fp)
@@ -104,6 +106,14 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
                 match ext:
                     case ".py":
                         self._handle_python_execution(fp)
+                    case ".sh":
+                        self._handle_bash_execution(fp)
+                    case ".rb":
+                        self._handle_ruby_execution(fp)
+                    case ".js":
+                        self._handle_node_execution(fp)
+                    case ".pl":
+                        self._handle_perl_execution(fp)
                     case ".lua":
                         self._handle_lua_execution(fp)
                     case ".rs":
