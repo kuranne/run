@@ -107,3 +107,25 @@ class TestCompilerRunner(unittest.TestCase):
              link_call = mock_run.call_args_list[-1]
              args = link_call[0][0]
              self.assertIn("-LinkFlag", args, "Preset flags missing from link command")
+
+    @patch("src.runner.core.Printer.action")
+    def test_exclude_files(self, mock_print):
+        self.runner.exclude_files = ["exclude_me.c"]
+        self.runner.exclude_exts = []
+        
+        # Test a file that is in exclude_files
+        path = Path("exclude_me.c")
+        self.runner._handle_single_file(path)
+        
+        mock_print.assert_called_with("SKIP", "exclude_me.c is in exclude files", unittest.mock.ANY)
+
+    @patch("src.runner.core.Printer.action")
+    def test_exclude_exts(self, mock_print):
+        self.runner.exclude_files = []
+        self.runner.exclude_exts = [".md"]
+        
+        # Test a file with excluded extension
+        path = Path("readme.md")
+        self.runner._handle_single_file(path)
+        
+        mock_print.assert_called_with("SKIP", ".md file is exclude extensions", unittest.mock.ANY)
