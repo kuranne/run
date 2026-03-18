@@ -6,7 +6,7 @@ Honestly, I was too lazy to compile then run for testing, so I made this tool to
 
 ## Current version
 
-Version `26.3.2` - with multi-language script support and improved configuration management!
+Version `26.3.3` - new argrument! and improve code.
 
 ## Features
 
