@@ -41,50 +41,110 @@ def main():
         "time" : args.time,
         "dry_run": args.dry_run,
         "preset": args.preset,
-        "no_cache": args.no_cache
+        "no_cache": args.no_cache,
+        "quiet": args.quiet,
+        "watch": args.watch,
+        "timeout": args.timeout,
+        "stdin": args.stdin,
+        "env": args.env,
+        "out_dir": args.out_dir,
+        "compiler": args.compiler
     }
 
     try:
-        # Init runner
-        runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=args.argument)
+        def run_once() -> list[str]:
+            runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=args.argument)
+            
+            # 1. Check if files provided
+            if args.files:
+                try:
+                    runner.compile_and_run(args.files, args.multi)
+                finally:
+                    runner.cleanup()
+                return args.files
 
-        # 1. Check if files provided
-        if args.files:
-            try:
-                runner.compile_and_run(args.files, args.multi)
-            finally:
-                runner.cleanup()
+            # 2. Check for -L auto-link mode
+            if args.link_auto is not None:
+                depth = args.link_auto if args.link_auto != -1 else None
+                src_files = runner.find_source_files(Path("."), max_depth=depth)
+                if not src_files:
+                    raise ConfigError(f"No supported source files found via -L auto-search (depth={depth}).")
+                Printer.info(f"Auto-found {len(src_files)} source files: {src_files}")
+                try:
+                    runner.compile_and_run(src_files, multi=True)
+                finally:
+                    runner.cleanup()
+                return src_files
+
+            # 3. No files provided -> Check for implicit Cargo Project
+            if Path("Cargo.toml").exists():
+                runner.run_cargo_mode(Path("Cargo.toml"))
+                return ["Cargo.toml"] + [str(p) for p in Path("src").rglob("*") if p.is_file()]
+
+            # 4. No files, No Cargo -> Fallback to Input
+            print(f"{Colors.YELLOW}[ INPUT ] No file given, enter file(s) name: {Colors.RESET}", end="")
+            val = input().strip()
+            if val: 
+                args.files = shlex.split(val)
+                try:
+                    runner.compile_and_run(args.files, args.multi)
+                finally:
+                    runner.cleanup()
+                return args.files
+            
+            return []
+
+        if args.watch:
+            import time
+            Printer.info("Watch mode enabled. Waiting for file changes...")
+            print("-" * 40)
+            last_mtimes = {}
+            first_run = True
+            watch_files = []
+            
+            while True:
+                if first_run:
+                    try:
+                        watch_files = run_once() or []
+                    except Exception as e:
+                        Printer.error(f"Error: {e}")
+                    
+                    for f in watch_files:
+                        p = Path(f)
+                        if p.exists():
+                            last_mtimes[str(p)] = p.stat().st_mtime
+                    first_run = False
+                    continue
+                
+                changed = False
+                current_mtimes = {}
+                for f in watch_files:
+                    p = Path(f)
+                    if p.exists():
+                        mtime = p.stat().st_mtime
+                        current_mtimes[str(p)] = mtime
+                        if str(p) not in last_mtimes or last_mtimes[str(p)] < mtime:
+                            changed = True
+                            
+                if changed:
+                    print("\n" + "-" * 40)
+                    Printer.info("File change detected. Restarting...")
+                    try:
+                        watch_files = run_once() or watch_files
+                    except Exception as e:
+                        Printer.error(f"Error: {e}")
+                    
+                    # Update mtimes
+                    for f in watch_files:
+                        p = Path(f)
+                        if p.exists():
+                            last_mtimes[str(p)] = p.stat().st_mtime
+                            
+                time.sleep(1.0)
             return 0
-
-        # 2. Check for -L auto-link mode
-        # If -L is present, args.link_auto will be either -1 (if no value provided) or the int value
-        if args.link_auto is not None:
-            depth = args.link_auto if args.link_auto != -1 else None
-            src_files = runner.find_source_files(Path("."), max_depth=depth)
-            if not src_files:
-                raise ConfigError(f"No supported source files found via -L auto-search (depth={depth}).")
-            Printer.info(f"Auto-found {len(src_files)} source files: {src_files}")
-            try:
-                runner.compile_and_run(src_files, multi=True)
-            finally:
-                runner.cleanup()
+        else:
+            run_once()
             return 0
-
-        # 3. No files provided -> Check for implicit Cargo Project
-        if Path("Cargo.toml").exists():
-            # Auto-detect cargo project
-            runner.run_cargo_mode(Path("Cargo.toml"))
-            return 0
-
-        # 4. No files, No Cargo -> Fallback to Input
-        print(f"{Colors.YELLOW}[ INPUT ] No file given, enter file(s) name: {Colors.RESET}", end="")
-        val = input().strip()
-        if val: 
-            args.files = shlex.split(val)
-            runner.compile_and_run(args.files, args.multi)
-    
-        runner.cleanup()
-        return 0
     except (EOFError, KeyboardInterrupt):
         return 0
     except RunError as e:

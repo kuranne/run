@@ -58,7 +58,15 @@ class BaseRunner:
         """
         name = source_path.stem
         # Windows: .exe, POSIX: .out
-        return Path(f"{name}.exe" if not self.is_posix else f"./{name}.out")
+        exe_name = f"{name}.exe" if not self.is_posix else f"./{name}.out"
+        
+        out_dir = self.flags.get("out_dir")
+        if out_dir:
+            out_path = Path(out_dir)
+            out_path.mkdir(parents=True, exist_ok=True)
+            return out_path / exe_name.lstrip("./")
+        
+        return Path(exe_name)
 
     def run_command(self, cmd: List[str], use_shell: bool = False, compiling: bool = False) -> bool:
         """
@@ -86,15 +94,50 @@ class BaseRunner:
         # Check for suspicious flags (if needed, but might be annoying for compilers)
         # SecurityManager.check_suspicious_flags(cmd)
 
-        Printer.action(tag, cmd_str)
+        if not self.flags.get("quiet", False):
+            Printer.action(tag, cmd_str)
         
         env = SecurityManager.sanitize_execution_env()
+        
+        # Apply custom environment variables
+        for e in self.flags.get("env", []):
+            if "=" in e:
+                k, v = e.split("=", 1)
+                env[k] = v
 
         start_time = time.perf_counter()
+        
+        # Setup stdin
+        stdin_file = None
+        stdin_path = self.flags.get("stdin")
+        if not compiling and stdin_path:
+            try:
+                stdin_file = open(stdin_path, "r")
+            except Exception as e:
+                Printer.error(f"Failed to open stdin file {stdin_path}: {e}")
+
+        # Setup quiet mode for compiler
+        stdout_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
+        stderr_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
+
+        timeout = self.flags.get("timeout") if not compiling else None
+
         try:
-            result = spc.run(cmd, check=False, shell=use_shell, env=env)
+            result = spc.run(
+                cmd, 
+                check=False, 
+                shell=use_shell, 
+                env=env,
+                stdin=stdin_file,
+                stdout=stdout_dest,
+                stderr=stderr_dest,
+                timeout=timeout
+            )
             
-            if self.flags.get("time", False):
+            if stdin_file:
+                stdin_file.close()
+                
+            if self.flags.get("time", False) and not compiling:
                 Printer.time(time.perf_counter() - start_time)
             
             if result.returncode != 0:
@@ -104,7 +147,13 @@ class BaseRunner:
                     raise ExecutionError(f"Execution failed with exit code {result.returncode}")
             return True
             
+        except spc.TimeoutExpired:
+            if stdin_file:
+                stdin_file.close()
+            raise ExecutionError(f"Execution timed out after {timeout} seconds.")
         except FileNotFoundError:
+            if stdin_file:
+                stdin_file.close()
             raise ExecutionError(f"Command '{cmd[0]}' not found.")
         
     def _compile_c_family(self, fp: Path):
@@ -115,7 +164,14 @@ class BaseRunner:
             fp (Path): Path to the source file.
         """
         lang = "c" if fp.suffix == ".c" else "cpp"
-        compiler = self.config.get_runner(lang, "gcc" if lang == "c" else "g++")
+        
+        # Override compiler if requested
+        compiler_override = self.flags.get("compiler")
+        if compiler_override:
+            compiler = compiler_override
+        else:
+            compiler = self.config.get_runner(lang, "gcc" if lang == "c" else "g++")
+            
         out_name = self.get_executable_path(fp)
         
         preset_flags = self.config.get_preset_flags(self.preset, lang)
@@ -123,9 +179,9 @@ class BaseRunner:
         
         # run_command raises exception on failure, so we don't need if check here anymore
         # but kept for flow clarity or if we catch it later
-        self.run_command(cmd, compiling=True)
-        self.output_files.append(out_name)
-        self._execute_binary(out_name)
+        if self.run_command(cmd, compiling=True):
+            self.output_files.append(out_name)
+            self._execute_binary(out_name)
 
     def compile_and_run(self, files: List[str], multi: bool = False):
         """
