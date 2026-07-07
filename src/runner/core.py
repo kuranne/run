@@ -44,6 +44,7 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
     def find_source_files(self, path: Path, max_depth: Optional[int] = None) -> List[str]:
         """
         Recursively find C/C++/Java source files with optional max depth.
+        Ignores hidden folders and common build/cache directories.
 
         Args:
             path (Path): Starting directory.
@@ -53,22 +54,30 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             List[str]: List of found source file paths.
         """
         files = []
-
         ext = self.c_family_ext.union(self.java_ext)
         
-        # 0 means just the current directory (no recursion into subdirs)
-        # 1 means current + 1 level deep
+        # Directories to completely skip during lookup
+        ignore_dirs = {'.git', '.venv', 'venv', 'env', 'node_modules', '.run_cache', 'build', 'target', '__pycache__'}
         
         start_level = len(path.absolute().parts)
         
-        for p in path.rglob("*"):
-            if max_depth is not None:
-                current_level = len(p.parent.absolute().parts)
-                if current_level - start_level > max_depth:
-                    continue
+        for root, dirs, filenames in os.walk(path):
+            # Prune ignored and hidden directories from os.walk in-place
+            dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith('.')]
+            
+            current_level = len(Path(root).absolute().parts)
+            if max_depth is not None and (current_level - start_level > max_depth):
+                dirs[:] = []  # Don't descend further
+                continue
                 
-            if p.is_file() and p.suffix in ext:
-                files.append(str(p))
+            for filename in filenames:
+                if filename in self.exclude_files:
+                    continue
+                    
+                p = Path(root) / filename
+                if p.suffix in ext and p.suffix not in self.exclude_exts:
+                    files.append(str(p))
+                    
         return files
 
     def _handle_single_file(self, fp: Path):
