@@ -95,7 +95,7 @@ run <files> [flags]
 | `--argument <args>` | `-a <args>` | Arguments to pass to the executable/script |
 | `--keep` | | Keep compiled binaries (don't delete after run) |
 | `--no-cache` | | Disable build caching |
-| `--debug` | | Enable verbose debug logging |
+| `-v`, `-vv` | | Enable verbose debug logging (-v) or trace with stack traces (-vv) |
 | `--unsafe` | | Allow running as root (⚠️ dangerous) |
 | `--update` | `-u` | Update from a local .zip file placed in the project root |
 | `--version` | | Show installed version |
@@ -395,7 +395,7 @@ Or delete `~/.cache/run_kuranne/` directory manually and rebuild.
 **Solution**:
 
 - Use `--dry-run` to verify commands
-- Check `--debug` output for detailed information
+- Check `-v` or `-vv` output for detailed information
 - Use `--keep` to preserve binaries for inspection
 
 ## Performance Tips
