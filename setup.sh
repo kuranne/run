@@ -37,9 +37,9 @@ EOF
 chmod +x "$RUN_SCRIPT"
 
 #--- Symlink ---#
-echo "${CYAN}Symlinking to ~/bin...${NC}"
-mkdir -p ${HOME}/bin
-ln -sf "$RUN_SCRIPT" ${HOME}/bin/run
+echo "${CYAN}Symlinking to ~/.local/bin...${NC}"
+mkdir -p ${HOME}/.local/bin
+ln -sf "$RUN_SCRIPT" ${HOME}/.local/bin/run
 
 #--- Clear & Clean ---#
 echo "${GREEN}Setup complete!${NC}"
