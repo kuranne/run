@@ -57,7 +57,7 @@ cd "$HOME\AppData\Local\run_kuranne"
 .\setup.ps1
 ```
 
-_Note: This will set up a local virtual environment and add a `run` command to your PATH._
+_Note: This will set up a local virtual environment and symlink the `run` command to `~/.local/bin` (Linux/macOS) or your PATH._
 
 ## Usage
 
@@ -96,8 +96,15 @@ run <files> [flags]
 | `--no-cache` | | Disable build caching |
 | `--debug` | | Enable verbose debug logging |
 | `--unsafe` | | Allow running as root (⚠️ dangerous) |
-| `--update` | `-u` | Update to latest version automatically |
+| `--update` | `-u` | Update from a local .zip file placed in the project root |
 | `--version` | | Show installed version |
+
+### Updating
+
+To update the runner to a newer version:
+1. Download the repository `.zip` file from GitHub.
+2. Place the `.zip` file in the project root directory (e.g., `~/.local/share/run_kuranne`).
+3. Run `run --update` (or `run -u`). The tool will automatically extract the zip, replace the files, and clean up.
 
 ### Usage Examples
 
@@ -364,7 +371,7 @@ python = "/usr/bin/python3.11"  # full path
 run file.cpp --no-cache  # Skip cache this time
 ```
 
-Or delete `.run_cache/` directory manually and rebuild.
+Or delete `~/.cache/run_kuranne/` directory manually and rebuild.
 
 ### Issue: Binary not found after compilation
 

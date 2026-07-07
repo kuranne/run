@@ -14,7 +14,16 @@ class CacheManager:
     """
     
     def __init__(self, project_root: Path = Path(".")):
-        self.cache_dir = project_root / ".run_cache"
+        project_root = project_root.absolute()
+        project_hash = hashlib.md5(str(project_root).encode()).hexdigest()
+        
+        if sys.platform == "win32":
+            base_cache = Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        else:
+            xdg_cache_home = os.getenv("XDG_CACHE_HOME")
+            base_cache = Path(xdg_cache_home) if xdg_cache_home else Path.home() / ".cache"
+            
+        self.cache_dir = base_cache / "run_kuranne" / project_hash
         self.objs_dir = self.cache_dir / "objs"
         self.cache_file = self.cache_dir / "cache.json"
         self.cache_data: Dict[str, str] = {}
