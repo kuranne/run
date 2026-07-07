@@ -6,7 +6,7 @@ Honestly, I was too lazy to compile then run for testing, so I made this tool to
 
 ## Current version
 
-Version `26.3.3` - new argrument! and improve code.
+Version `0.0.1` - Initial open-source release with optimized multi-file detection and XDG compliance.
 
 ## Features
 
