@@ -1,4 +1,3 @@
-import requests
 import os
 import sys
 import zipfile
@@ -8,7 +7,6 @@ import subprocess
 import time
 from pathlib import Path
 from util.output import Printer, Colors
-import json
 
 UPDATE_SCRIPT_TEMPLATE = """
 import os
@@ -16,8 +14,6 @@ import sys
 import shutil
 import time
 import subprocess
-import json
-import re
 from pathlib import Path
 
 def log(msg):
@@ -43,13 +39,6 @@ def force_remove(path):
         log(f"Error removing {{path}}: {{e}}")
         time.sleep(1)
 
-def refresh_pyproject_toml(path, content):
-    try:
-        path.write_text(content, encoding="utf-8")
-        log(f"Refreshed pyproject.toml content.")
-    except Exception as e:
-        log(f"Failed to refresh pyproject.toml: {{e}}")
-
 def main():
     log("Starting update process...")
     
@@ -72,6 +61,7 @@ def main():
     src_dir = Path(r"{src_dir}")
     install_dir = Path(r"{install_dir}")
     temp_root = Path(r"{temp_root}")
+    zip_file_path = Path(r"{zip_file_path}")
     
     try:
         log(f"Copying files from {{src_dir}} to {{install_dir}}")
@@ -89,9 +79,6 @@ def main():
                 shutil.copy2(item, dest)
         
         log("Files copied successfully.")
-
-        # Explicitly refresh full pyproject.toml (safeguard)
-        refresh_pyproject_toml(install_dir / "pyproject.toml", json.loads(r'{remote_pyproject_content_json}'))
         
         # Run setup
         setup_script = install_dir / ("setup.ps1" if os.name == "nt" else "setup.sh")
@@ -110,10 +97,17 @@ def main():
                 log("Setup completed successfully.")
             except subprocess.CalledProcessError as e:
                 log(f"Setup script returned error: {{e}} (Update files likely preserved)")
+                
+        # Remove the downloaded zip file after successful update
+        if zip_file_path.exists():
+            try:
+                os.remove(zip_file_path)
+                log(f"Removed source zip file: {{zip_file_path}}")
+            except Exception as e:
+                log(f"Failed to remove zip file: {{e}}")
         
     except Exception as e:
         log(f"CRITICAL UPDATE FAILED: {{e}}")
-        # Optional: Try to rollback here if you had a backup
         sys.exit(1)
     finally:
         # Cleanup temp dir explicitly
@@ -127,37 +121,6 @@ if __name__ == "__main__":
     main()
 """
 
-def _get_remote_pyproject_data(repo: str, branch: str = "main") -> tuple[str, str]:
-    """Fetch version and full content from pyproject.toml in the repository."""
-    raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/pyproject.toml"
-    
-    response = requests.get(raw_url, timeout=5)
-    response.raise_for_status()
-    
-    content = response.text
-    
-    # Parse pyproject.toml from the response text
-    if sys.version_info >= (3, 11):
-        import tomllib
-    else:
-        import tomldecoder as tomllib
-
-    try:
-        data = tomllib.loads(content)
-        version = data.get("project", {}).get("version")
-        return version, content
-    except Exception as e:
-        raise ValueError(f"Failed to parse pyproject.toml from {raw_url}: {e}")
-
-
-def _download_file(url: str, dest_path: Path):
-    """Download a file from a URL to a specified path."""
-    with requests.get(url, stream=True) as r:
-        r.raise_for_status()
-        with open(dest_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
-
 def _extract_zip(zip_path: Path, extract_to: Path) -> Path:
     """Extract a zip file and return the path to the content."""
     with zipfile.ZipFile(zip_path, 'r') as zip_ref:
@@ -170,61 +133,46 @@ def _extract_zip(zip_path: Path, extract_to: Path) -> Path:
 
 def update(repo: str, current_version: str):
     """
-    Update the runner by checking version.txt and downloading the source zip.
+    Update the runner by extracting a manually downloaded zip file in the root.
     """
     try:
-        Printer.action("CHECK", f"Checking for updates... (Current: {current_version})", Colors.CYAN)
-        
-        latest_version, remote_content = _get_remote_pyproject_data(repo=repo)
-        
-        if latest_version == current_version:
-            Printer.action("UPDATE", "You are already on the latest version.")
-            return
-
-        Printer.warning(f"New version available: {latest_version}")
-        if input("Update?[y/N]: ") not in ("y", "Y"):
-            return
-
-        # Handle tags with or without 'v' prefix if needed
-        # GitHub tags might be "v1.0.0" but version.txt is "1.0.0"
-        tag_name = latest_version
-        if not tag_name.startswith("v") and "." in tag_name: 
-            # Check logic here depends on your repo naming convention
-            # For now, trust the version string or prepend 'v' if your tags use it
-            pass 
-
-        download_url = f"https://github.com/{repo}/archive/refs/tags/{tag_name}.zip"
-
-        check = requests.head(download_url, allow_redirects=True)
-        if check.status_code == 404 and not tag_name.startswith("v"):
-            tag_name = f"v{latest_version}"
-            download_url = f"https://github.com/{repo}/archive/refs/tags/{tag_name}.zip"
-
-        Printer.action("DOWNLOAD", f"Downloading {latest_version}...", Colors.YELLOW)
-        
-        temp_dir = tempfile.mkdtemp(prefix="run_update_")
-        temp_dir_path = Path(temp_dir)
-        temp_zip = temp_dir_path / "release.zip"
-        extract_path = temp_dir_path / "extracted"
-        
-        _download_file(download_url, temp_zip)
-        content_path = _extract_zip(temp_zip, extract_path)
-
         install_dir = Path(__file__).resolve().parent.parent.parent
         
+        # Look for a .zip file in the install_dir
+        zip_files = list(install_dir.glob("*.zip"))
+        
+        if not zip_files:
+            Printer.error(f"No .zip file found in the project root ({install_dir}).")
+            Printer.info("Please download the repository .zip file from GitHub and place it in the project root, then run update again.")
+            return
+            
+        if len(zip_files) > 1:
+            Printer.warning(f"Multiple .zip files found in {install_dir}.")
+            Printer.info(f"Using the first one found: {zip_files[0].name}")
+            
+        zip_path = zip_files[0]
+        
+        Printer.action("UPDATE", f"Found zip file: {zip_path.name}", Colors.CYAN)
+        if input("Extract and update? [y/N]: ") not in ("y", "Y"):
+            return
+            
+        temp_dir = tempfile.mkdtemp(prefix="run_update_")
+        temp_dir_path = Path(temp_dir)
+        extract_path = temp_dir_path / "extracted"
+        
+        Printer.action("EXTRACT", f"Extracting {zip_path.name}...", Colors.YELLOW)
+        content_path = _extract_zip(zip_path, extract_path)
+
         log_dir = Path(tempfile.gettempdir())
         log_file = log_dir / "run_update.log"
 
-        # Insert r (raw string) at the front of path in template -> Prevent escape characters
-        # Then send temp_dir_path from parent to cleanup
         script_content = UPDATE_SCRIPT_TEMPLATE.format(
             log_file=log_file.as_posix(),
             parent_pid=os.getpid(),
             src_dir=content_path.as_posix(),
             install_dir=install_dir.as_posix(),
             temp_root=temp_dir_path.as_posix(),
-            latest_version=latest_version,
-            remote_pyproject_content_json=json.dumps(remote_content)
+            zip_file_path=zip_path.as_posix()
         )
         
         script_path = temp_dir_path / "updater.py"
@@ -234,19 +182,14 @@ def update(repo: str, current_version: str):
         Printer.action("INSTALL", f"Starting background update process...", Colors.CYAN)
         Printer.info(f"The application will exit now. Check {log_file} for status.")
         
-        # sys.executable ensure that same python
         python_exe = sys.executable
         
         if sys.platform == "win32":
-             # Use CREATE_NEW_CONSOLE to detach effectively
              subprocess.Popen([python_exe, str(script_path)], creationflags=subprocess.CREATE_NEW_CONSOLE)
         else:
-             # Use start_new_session to detach
              subprocess.Popen([python_exe, str(script_path)], start_new_session=True)
              
         sys.exit(0)
         
-    except requests.RequestException as e:
-        Printer.error(f"Network error: {e}")
     except Exception as e:
         Printer.error(f"Failed to update: {e}")
