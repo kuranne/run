@@ -191,7 +191,7 @@ Project-level configuration overrides global settings.
 Create `Run.toml` in your project root:
 
 ```toml
-[runner]
+[runners]
 # Override default compiler/interpreter commands
 c = "clang"
 cpp = "clang++"
@@ -205,37 +205,44 @@ java = "javac"
 Override default language behavior or add custom language support:
 
 ```toml
-[language.c]
+[[languages]]
+name = "c"
 extensions = [".c"]
 runner = "clang"
 type = "compiler"
 
-[language.cpp]
+[[languages]]
+name = "cpp"
 extensions = [".cpp", ".cc", ".cxx"]
 runner = "clang++"
 type = "compiler"
 
-[language.rust]
+[[languages]]
+name = "rust"
 extensions = [".rs"]
 runner = "cargo"
 type = "compiler"
 
-[language.python]
+[[languages]]
+name = "python"
 extensions = [".py"]
 runner = "python3"
 type = "interpreter"
 
-[language.bash]
+[[languages]]
+name = "bash"
 extensions = [".sh"]
 runner = "bash"
 type = "interpreter"
 
-[language.ruby]
+[[languages]]
+name = "ruby"
 extensions = [".rb"]
 runner = "ruby"
 type = "interpreter"
 
-[language.javascript]
+[[languages]]
+name = "javascript"
 extensions = [".js"]
 runner = "node"
 type = "interpreter"
@@ -246,19 +253,19 @@ type = "interpreter"
 Define compile flags for different build profiles:
 
 ```toml
-[preset.debug]
+[presets.debug]
 c = ["-g", "-Wall", "-Wextra"]
 cpp = ["-g", "-Wall", "-Wextra", "-std=c++20"]
 rust = ["-g"]
 java = ["-g"]
 
-[preset.release]
+[presets.release]
 c = ["-O3", "-Wall"]
 cpp = ["-O3", "-Wall", "-std=c++20"]
 rust = ["-C", "opt-level=3"]
 java = ["-O"]
 
-[preset.strict]
+[presets.strict]
 c = ["-Wall", "-Wextra", "-Werror"]
 cpp = ["-Wall", "-Wextra", "-Werror", "-std=c++20"]
 ```
@@ -268,25 +275,28 @@ cpp = ["-Wall", "-Wextra", "-Werror", "-std=c++20"]
 Add support for any programming language by defining it in `Run.toml`:
 
 ```toml
-[language.kotlin]
+[[languages]]
+name = "kotlin"
 extensions = [".kt"]
 runner = "kotlinc"
 type = "compiler"
 
 # With preset support
-[preset.debug]
+[presets.debug]
 kotlin = ["-nowarn"]
 ```
 
 Or for interpreted languages (don't forget to set `type = "interpreter"`):
 
 ```toml
-[language.perl]
+[[languages]]
+name = "perl"
 extensions = [".pl"]
 runner = "perl"
 type = "interpreter"
 
-[language.lua]
+[[languages]]
+name = "lua"
 extensions = [".lua"]
 runner = "lua"
 type = "interpreter"
@@ -297,9 +307,9 @@ type = "interpreter"
 Skip certain files or extensions when using wildcard compilation:
 
 ```toml
-[exclude]
-files = ["test_private.cpp", "benchmark.cpp"]
-extensions = [".md", ".txt"]
+[core]
+exclude_files = ["test_private.cpp", "benchmark.cpp"]
+exclude_extensions = [".md", ".txt"]
 ```
 
 When using `-L` or `-m`, files matching these patterns will be ignored.
