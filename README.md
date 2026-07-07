@@ -16,7 +16,8 @@ Version `26.3.3` - new argrument! and improve code.
 - **Global Configuration**: Store `Run.toml` in XDG config directory (`~/.config/run_kuranne/`) or Windows APPDATA
 - **Project-Level Override**: Project-specific `Run.toml` takes precedence over global config
 - **Virtual Environment Support**: Auto-detects `.venv` or `.env` and uses local Python
-- **Multi-File Compilation**: Compile multiple C/C++/Java files together with intelligent dependency tracking
+- **Multi-File Compilation**: Compile multiple C/C++/Java files together. Includes **CPM (C Project Manager)** to intelligently detect your `main()` entry point regardless of file order!
+- **Lightning Fast Lookup**: The `--link-auto` (`-L`) scanner aggressively ignores heavy directories (like `.git`, `node_modules`, `.venv`) for instant file discovery.
 - **Custom Language Support**: Add any language via `Run.toml` configuration
 - **Build Presets**: Define compile-time flags for different build profiles (debug, release, etc.)
 - **Caching**: Intelligent build cache for faster recompilation (can be disabled with `--no-cache`)

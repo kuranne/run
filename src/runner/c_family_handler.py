@@ -88,7 +88,11 @@ class CFamilyHandler:
         """
         headers = [p for p in all_paths if p.suffix in self.c_family_header_ext]
         
-        main_source = sources[0]
+        from runner.cpm import CPM
+        main_source = CPM.get_main_file(sources)
+        if not main_source:
+            from util.errors import ExecutionError
+            raise ExecutionError("Could not find a 'main' function in any of the provided C/C++ files.")
         ext = main_source.suffix.lower()
         lang = "c" if ext == ".c" else "cpp"
         default_compiler = "gcc" if lang == "c" else "g++"
