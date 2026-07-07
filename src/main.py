@@ -17,7 +17,7 @@ def main():
     __version__ = version()
     args = args_parser(__version__)
     
-    if args.debug:
+    if args.verbose >= 1:
         import logging
         logging.getLogger("run_kuranne").setLevel(logging.DEBUG)
         Printer.debug("Debug logging enabled")
@@ -152,7 +152,7 @@ def main():
         return 1
     except Exception as e:
         Printer.error(f"Unexpected error: {e}")
-        if args.debug:
+        if args.verbose >= 2:
             import traceback
             traceback.print_exc()
         return 1
