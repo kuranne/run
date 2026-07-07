@@ -81,19 +81,27 @@ class Config:
         if not self.data:
             return
 
-        # check 'runner'
-        if "runner" in self.data:
-             if not isinstance(self.data["runner"], dict):
-                 raise ValueError("'runner' section must be a table (dict)")
+        if "runners" in self.data and not isinstance(self.data["runners"], dict):
+            raise ValueError("'runners' section must be a table (dict)")
 
-        # check 'language'
-        if "language" in self.data:
-            if not isinstance(self.data["language"], dict):
-                 raise ValueError("'language' section must be a table (dict)")
+        if "presets" in self.data and not isinstance(self.data["presets"], dict):
+            raise ValueError("'presets' section must be a table (dict)")
             
-            for name, config in self.data["language"].items():
+        if "core" in self.data and not isinstance(self.data["core"], dict):
+            raise ValueError("'core' section must be a table (dict)")
+
+        if "languages" in self.data:
+            if not isinstance(self.data["languages"], list):
+                raise ValueError("'languages' section must be an array of tables ([[languages]])")
+            
+            for config in self.data["languages"]:
                 if not isinstance(config, dict):
-                    raise ValueError(f"Language '{name}' config must be a table")
+                    raise ValueError("Language config must be a table")
+                
+                if "name" not in config:
+                    raise ValueError("Language config missing required 'name' field")
+                    
+                name = config.get("name")
                 
                 if "extensions" not in config:
                     raise ValueError(f"Language '{name}' missing required 'extensions' list")
@@ -107,29 +115,19 @@ class Config:
     def get_runner(self, lang: str, default: str) -> str:
         """
         Get the runner command for a specific language.
-
-        Args:
-            lang (str): Language key (e.g., 'c', 'cpp', 'python').
-            default (str): Default runner to use if not found.
-
-        Returns:
-            str: The runner command.
         """
-        return self.data.get("runner", {}).get(lang, default)
+        # Fallback to old "runner" table if someone still uses it temporarily
+        runners = self.data.get("runners", self.data.get("runner", {}))
+        return runners.get(lang, default)
     
     def get_preset_flags(self, preset_name: Optional[str], lang: str) -> List[str]:
         """
         Get compiler/interpreter flags for a specific preset and language.
-
-        Args:
-            preset_name (Optional[str]): Name of the preset (e.g., 'debug', 'release').
-            lang (str): Language key.
-
-        Returns:
-            List[str]: List of flags.
         """
         if not preset_name: return []
-        flags_data = self.data.get("preset", {}).get(preset_name, {}).get(lang, [])
+        # Support both old 'preset' and new 'presets'
+        presets = self.data.get("presets", self.data.get("preset", {}))
+        flags_data = presets.get(preset_name, {}).get(lang, [])
         
         if isinstance(flags_data, list):
             return flags_data
@@ -140,49 +138,45 @@ class Config:
     def get_custom_languages(self) -> Dict[str, Any]:
         """
         Returns all custom language configurations.
-
-        Returns:
-            Dict[str, Any]: Dictionary of language configurations.
         """
-        return self.data.get("language", {})
+        langs = {}
+        # Support old format mapping for backwards compatibility if needed, but prioritize new format
+        if "language" in self.data and isinstance(self.data["language"], dict):
+            for name, config in self.data["language"].items():
+                langs[name] = {"name": name, **config}
+                
+        # New format [[languages]]
+        if "languages" in self.data and isinstance(self.data["languages"], list):
+            for config in self.data["languages"]:
+                langs[config["name"]] = config
+                
+        return langs
     
     def get_language_by_extension(self, ext: str) -> Optional[Dict[str, Any]]:
         """
         Find language configuration by file extension.
-
-        Args:
-            ext (str): File extension (e.g., '.kt', '.zig').
-
-        Returns:
-            Optional[Dict[str, Any]]: Language configuration dictionary including name, or None if not found.
         """
         languages = self.get_custom_languages()
         for lang_name, lang_config in languages.items():
             extensions = lang_config.get("extensions", [])
             if ext in extensions:
-                return {
-                    "name": lang_name,
-                    **lang_config
-                }
+                return lang_config
         return None
     
     def is_custom_language_configured(self, ext: str) -> bool:
         """
         Check if a file extension has a custom language configuration.
-
-        Args:
-            ext (str): File extension.
-
-        Returns:
-            bool: True if configured, False otherwise.
         """
         return self.get_language_by_extension(ext) is not None
     
     def get_exclude(self) -> Optional[Dict[str, Any]]:
         """
-        Get exclude extensions.
-
-        Returns:
-            Optional[Dict[str, Any]]: list of exclude extensions or []
+        Get exclude extensions and files.
         """
-        return self.data.get("exclude", {})
+        core = self.data.get("core", {})
+        old_exclude = self.data.get("exclude", {})
+        
+        return {
+            "files": core.get("exclude_files", old_exclude.get("files", [])),
+            "extensions": core.get("exclude_extensions", old_exclude.get("extensions", []))
+        }
