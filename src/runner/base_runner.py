@@ -6,7 +6,7 @@ from typing import List, Dict, Optional, Any
 from pathlib import Path
 from util.config import Config
 from util.output import Printer, Colors
-from util.errors import ExecutionError, CompilationError, ConfigError
+from util.errors import ExecutionError, CompilationError
 from util.security import SecurityManager
 
 class BaseRunner:
@@ -57,16 +57,15 @@ class BaseRunner:
             Path: Path to expected executable file.
         """
         name = source_path.stem
-        # Windows: .exe, POSIX: .out
-        exe_name = f"{name}.exe" if not self.is_posix else f"./{name}.out"
+        filename = f"{name}.exe" if not self.is_posix else f"{name}.out"
         
         out_dir = self.flags.get("out_dir")
         if out_dir:
             out_path = Path(out_dir)
             out_path.mkdir(parents=True, exist_ok=True)
-            return out_path / exe_name.lstrip("./")
+            return out_path / filename
         
-        return Path(exe_name)
+        return Path(f"./{filename}" if self.is_posix else filename)
 
     def run_command(self, cmd: List[str], use_shell: bool = False, compiling: bool = False) -> bool:
         """

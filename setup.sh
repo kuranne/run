@@ -1,17 +1,10 @@
-#--- Python Setup ---#
-# Colors
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-echo "${CYAN}Checking for python3...${NC}"
-[[ $(command -v python3) ]] || { echo "${RED}Can't execute python3${NC}"; exit 1; }
+echo "-- Checking for python3..."
+command -v python3 >/dev/null 2>&1 || { echo "[ ERROR ] Can't execute python3"; exit 1; }
 
 # Check Python Version (>= 3.11)
-python3 -c "import sys; exit(0) if sys.version_info >= (3, 11) else exit(1)" || { echo "${RED}Python 3.11+ required${NC}"; exit 1; }
+python3 -c "import sys; exit(0) if sys.version_info >= (3, 11) else exit(1)" || { echo "[ ERROR ] Python 3.11+ required"; exit 1; }
 
-echo "${CYAN}Setting up virtual environment...${NC}"
+echo "-- Setting up virtual environment..."
 if [[ ! -d ./.venv ]]; then
     python3 -m venv .venv
 else
@@ -20,27 +13,32 @@ else
 fi
 source ./.venv/bin/activate
 
-#--- Install Dependencies ---#
-echo "${CYAN}Installing dependencies...${NC}"
+# --- Install Dependencies --- #
+echo "-- Installing dependencies..."
 pip install .
 
-#--- Create Wrapper Script ---#
-echo "${CYAN}Creating runner script...${NC}"
+# --- Create Wrapper Script --- #
+echo "-- Creating runner script..."
 CURRENT_DIR=$(pwd)
 RUN_SCRIPT="${CURRENT_DIR}/run"
 
 cat <<EOF > "$RUN_SCRIPT"
-#!/bin/bash
+#!/usr/bin/env bash
 exec "${CURRENT_DIR}/.venv/bin/python" "${CURRENT_DIR}/src/main.py" "\$@"
 EOF
 
 chmod +x "$RUN_SCRIPT"
 
 #--- Symlink ---#
-echo "${CYAN}Symlinking to ~/.local/bin...${NC}"
-mkdir -p ${HOME}/.local/bin
-ln -sf "$RUN_SCRIPT" ${HOME}/.local/bin/run
+echo "-- Installing script into bin"
+
+DEFAULT_BIN_PATH="$HOME/.local/bin"
+if [[ ! -z $XDG_BIN_HOME ]]; then
+    DEFAULT_BIN_PATH=$XDG_BIN_HOME
+fi
+mkdir -p "$DEFAULT_BIN_PATH"
+ln -sf "$RUN_SCRIPT" "$DEFAULT_BIN_PATH/run"
 
 #--- Clear & Clean ---#
-echo "${GREEN}Setup complete!${NC}"
+echo "[ SUCCESS ] Setup complete!"
 echo "You can now use 'run' command."

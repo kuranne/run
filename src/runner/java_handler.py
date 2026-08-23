@@ -37,7 +37,10 @@ class JavaHandler:
 
     def _handle_multi_java(self, sources: List[Path]):
         """
-        Handle multi-file Java compilation.
+        Handle multi-file Java compilation and execution.
+
+        Args:
+            sources (List[Path]): List of Java source files.
         """
         compiler = self.config.get_runner("java", "javac")
         preset_flags = self.config.get_preset_flags(self.preset, "java")
@@ -50,10 +53,11 @@ class JavaHandler:
         cmd = [compiler] + self.extra_flags + preset_flags + [str(s) for s in sources]
         self.run_command(cmd, compiling=True)
         
-        # Extract main class name from the first file
-        main_class = JPM.get_main_class(sources[0])
+        # Extract main class from the file containing the main method
+        main_source = JPM.get_main_file(sources) or sources[0]
+        main_class = JPM.get_main_class(main_source)
         if not main_class:
-            raise ExecutionError(f"Could not extract main class from {sources[0]}")
+            raise ExecutionError(f"Could not extract main class from {main_source}")
             
         # Track new or modified .class files for cleanup
         self.output_files.extend(JPM.get_new_class_files(parent_dirs, before_state))

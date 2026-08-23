@@ -1,7 +1,5 @@
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-import re
-import concurrent.futures
 import os
 from util.output import Printer, Colors
 from util.errors import ConfigError, ExecutionError
