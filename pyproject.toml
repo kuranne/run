@@ -5,8 +5,15 @@ description = "A configurable runner for compilation, execution, and cleanup."
 authors = [
     { name = "kuranne" }
 ]
-dependencies = [
-    "requests==2.32.5"
+dependencies = []
+
+[project.scripts]
+run = "main:main"
+run-cli = "main:main"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
 ]
 
 [tool.setuptools]

@@ -97,15 +97,17 @@ run <files> [flags]
 | `--no-cache` | | Disable build caching |
 | `-v`, `-vv` | | Enable verbose debug logging (-v) or trace with stack traces (-vv) |
 | `--unsafe` | | Allow running as root (⚠️ dangerous) |
-| `--update` | `-u` | Update from a local .zip file placed in the project root |
 | `--version` | | Show installed version |
 
 ### Updating
 
-To update the runner to a newer version:
-1. Download the repository `.zip` file from GitHub.
-2. Place the `.zip` file in the project root directory (e.g., `~/.local/share/run_kuranne`).
-3. Run `run --update` (or `run -u`). The tool will automatically extract the zip, replace the files, and clean up.
+To update `run` to the latest version:
+
+```bash
+cd ~/.local/share/run_kuranne  # Or your cloned directory
+git pull
+./setup.sh                    # On Windows: .\setup.ps1
+```
 
 ### Usage Examples
 

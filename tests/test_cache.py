@@ -27,3 +27,19 @@ def test_cache_clear(tmp_path):
     
     manager.clear()
     assert manager.is_changed(test_file)
+
+def test_cache_header_dependency(tmp_path):
+    manager = CacheManager(project_root=tmp_path)
+    header = tmp_path / "helper.h"
+    header.write_text("int get_val() { return 1; }")
+
+    source = tmp_path / "main.c"
+    source.write_text('#include "helper.h"\nint main() { return get_val(); }')
+
+    assert manager.is_changed(source) is True
+    manager.update_cache(source)
+    assert manager.is_changed(source) is False
+
+    # Modify header file only
+    header.write_text("int get_val() { return 2; }")
+    assert manager.is_changed(source) is True
