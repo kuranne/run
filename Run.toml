@@ -1,44 +1,106 @@
+# ==============================================================================
 # Auto Compiler & Runner Configuration (Run.toml)
+#
+# Config search priority:
+# 1. Project directory (current working directory up to 4 parent levels)
+# 2. Global directory:
+#    - Linux / macOS: ~/.config/run_kuranne/Run.toml ($XDG_CONFIG_HOME)
+#    - Windows: %APPDATA%\run_kuranne\Run.toml
+# ==============================================================================
 
+# ------------------------------------------------------------------------------
+# [core]
+# Global file discovery and filtering settings applied across all runners.
+# ------------------------------------------------------------------------------
 [core]
-# Global settings
-# exclude_files = ["test_private.cpp", "benchmark.cpp"]
-# exclude_extensions = [".md", ".txt"]
+# exclude_files (List[str]): Specific file names to skip when compiling or scanning with -L / -m.
+# exclude_files = ["test_private.cpp", "benchmark.cpp", "temp.c"]
 
+# exclude_extensions (List[str]): File extensions to skip during directory scans.
+# Note: '.toml' and '.lock' are excluded by default.
+# exclude_extensions = [".md", ".txt", ".json", ".yaml", ".bak"]
+
+# ------------------------------------------------------------------------------
+# [runners]
+# Override default compiler or interpreter binary used for built-in languages.
+# Default binaries:
+# - c: "gcc"
+# - cpp: "g++"
+# - rust: "rustc"
+# - java: "javac"
+# - python: "python" / "python3" (or active virtual environment)
+# ------------------------------------------------------------------------------
 [runners]
-# Override default compilers and/or interpreters
 # c = "clang"
 # cpp = "clang++"
 # rust = "rustc"
+# java = "javac"
+# python = "python3"
 
+# ------------------------------------------------------------------------------
+# [presets.<name>]
+# Define reusable build flag presets activated via CLI flag: -p <name> / --preset <name>.
+# Each preset maps a language name to a list of compiler/interpreter flags.
+# ------------------------------------------------------------------------------
+
+# Debug build preset (run <file> -p debug)
 [presets.debug]
-# Compile flags for debug preset
-# c = ["-g", "-Wall", "-Wextra"]
-# cpp = ["-g", "-Wall", "-Wextra", "-std=c++20"]
+# c = ["-g", "-Wall", "-Wextra", "-O0"]
+# cpp = ["-g", "-Wall", "-Wextra", "-std=c++20", "-O0"]
 # rust = ["-g"]
+# java = ["-g"]
 
+# Release build preset (run <file> -p release)
 [presets.release]
-# Compile flags for release preset
-# c = ["-O3"]
-# cpp = ["-O3", "-std=c++20"]
+# c = ["-O3", "-march=native", "-DNDEBUG"]
+# cpp = ["-O3", "-std=c++20", "-march=native", "-DNDEBUG"]
 # rust = ["-C", "opt-level=3"]
+# java = ["-O"]
 
-# Custom language support (Array of Tables)
+# Strict checking preset (run <file> -p strict)
+[presets.strict]
+# c = ["-Wall", "-Wextra", "-Wpedantic", "-Werror"]
+# cpp = ["-Wall", "-Wextra", "-Wpedantic", "-Werror", "-std=c++20"]
+
+# ------------------------------------------------------------------------------
+# [[languages]]
+# Array of Tables for adding new language support or replacing built-in behavior.
+#
+# Available fields:
+# - name (str, required): Unique language name (used for preset matching).
+# - extensions (List[str], required): File extensions mapped to this language.
+# - runner (str, required): Executable command or compiler/interpreter path.
+# - subcommand (str, optional): Subcommand passed before flags (e.g., 'run', 'cc').
+# - type (str, optional): 'interpreter' (run directly) or 'compiler' (compile then execute). Default: 'interpreter'.
+# - flags (List[str], optional): Flags appended during compilation or execution.
+# - arguments (List[str], optional): Arguments passed to the target program when executed.
+# ------------------------------------------------------------------------------
+
+# Example 1: Interpreted custom language (e.g., C# with dotnet script or dotnet run)
 # [[languages]]
 # name = "csharp"
 # extensions = [".cs"]
 # runner = "dotnet"
 # subcommand = "run"
-# type = "interpreter"              # "interpreter" (run directly) or "compiler" (compile then run)
-# flags = ["<flags>"]               # Example compile-time flags
-# arguments = ["<argument>"]
+# type = "interpreter"
+# flags = ["--project"]
+# arguments = []
 
-# Replace default language support
+# Example 2: Compiled custom language (e.g., Kotlin with kotlinc)
+# [[languages]]
+# name = "kotlin"
+# extensions = [".kt"]
+# runner = "kotlinc"
+# type = "compiler"
+# flags = ["-include-runtime"]
+# arguments = []
+
+# Example 3: Override built-in C compiler with Zig cc
 # [[languages]]
 # name = "c"
 # extensions = [".c"]
 # runner = "zig"
 # subcommand = "cc"
 # type = "compiler"
-# flags = ["-Wall", "-Wextra"]
+# flags = ["-Wall", "-Wextra", "-O2"]
 # arguments = []
