@@ -9,6 +9,7 @@ from util.errors import RunError, ConfigError
 from util.args import args as args_parser
 from util.security import SecurityManager
 from util.version import version
+from util.init_config import ConfigInitializer
 
 from runner import CompilerRunner, TaskRunner, ProjectRunner
 
@@ -20,6 +21,11 @@ def main():
         import logging
         logging.getLogger("run_kuranne").setLevel(logging.DEBUG)
         Printer.debug("Debug logging enabled")
+
+    # Handle --init
+    if args.init:
+        success = ConfigInitializer.init_config(Path("."))
+        return 0 if success else 1
 
     # Security Check
     try:

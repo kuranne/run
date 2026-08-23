@@ -20,6 +20,7 @@ def args(__version__):
     parser.add_argument("-d", "--dry-run", action="store_true", help="Simulate execution without running commands")
     parser.add_argument("-p", "--preset", type=str, help="Configuration preset (from Run.toml)")
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Verbose mode (-v for debug, -vv for trace)")
+    parser.add_argument("-I", "--init", action="store_true", help="Initialize Run.toml for the current project")
     parser.add_argument("--unsafe", action="store_true", help="Allow running as root")
     parser.add_argument("--no-cache", action="store_true", help="Disable cache")
     parser.add_argument("-q", "--quiet", action="store_true", help="Silence compiler output and logs")

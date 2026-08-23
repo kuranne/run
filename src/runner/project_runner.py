@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, Tuple, List
 from util.config import Config
 from util.output import Printer, Colors
 from util.errors import ExecutionError, ConfigError
+from util.substitutions import VariableSubstitutor
 
 class TaskRunner:
     """
@@ -44,6 +45,10 @@ class TaskRunner:
         task_cmd = tasks.get(name)
         if not task_cmd:
             raise ConfigError(f"Task '{name}' not found in Run.toml.")
+
+        out_dir = runner_ref.flags.get("out_dir") if hasattr(runner_ref, "flags") else None
+        var_ctx = VariableSubstitutor.build_file_context(out_dir=out_dir)
+        task_cmd = VariableSubstitutor.substitute_string(task_cmd, var_ctx)
 
         Printer.action("TASK", f"{name}: {task_cmd}", Colors.CYAN)
         
@@ -114,10 +119,21 @@ class ProjectRunner:
 
         Printer.info(f"Detected project '{proj_name}' via {manifest_path.name}")
 
+        out_dir = runner_ref.flags.get("out_dir") if hasattr(runner_ref, "flags") else None
+        var_ctx = VariableSubstitutor.build_file_context(file_path=manifest_path, out_dir=out_dir)
+
         # Check for two-step build + run
         build_step = proj_cfg.get("build")
+        if build_step:
+            build_step = VariableSubstitutor.substitute_string(build_step, var_ctx)
+        
         run_step = proj_cfg.get("run")
+        if run_step:
+            run_step = VariableSubstitutor.substitute_string(run_step, var_ctx)
+
         command_step = proj_cfg.get("command")
+        if command_step:
+            command_step = VariableSubstitutor.substitute_string(command_step, var_ctx)
 
         if build_step and run_step:
             # Step 1: Build
