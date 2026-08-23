@@ -6,7 +6,7 @@ Honestly, I was too lazy to compile then run for testing, so I made this tool to
 
 ## Current version
 
-Version `0.0.1` - Initial open-source release with optimized multi-file detection and XDG compliance.
+Version `0.0.2` - Hot Fix patch!
 
 ## Features
 
