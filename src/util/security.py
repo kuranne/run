@@ -1,7 +1,7 @@
 import os
 import sys
-from typing import List, Dict, Optional
-from util.output import Printer, Colors
+from typing import List, Dict
+from util.output import Printer
 from util.errors import ConfigError
 
 class SecurityManager:
@@ -28,10 +28,8 @@ class SecurityManager:
             if allow_root:
                 Printer.warning(f"{msg} Proceeding due to override.")
             else:
-                 # We raise generic error to be caught in main, or just sys.exit
-                 # Raising ConfigError seems appropriate as it's a configuration/environment issue
-                 Printer.error(msg)
-                 raise ConfigError("Execution as root is blocked. Use --unsafe to override (not yet implemented).")
+                Printer.error(msg)
+                raise ConfigError("Execution as root is blocked. Use --unsafe to override.")
 
     @staticmethod
     def sanitize_execution_env() -> Dict[str, str]:
@@ -43,10 +41,8 @@ class SecurityManager:
             Dict[str, str]: Copy of os.environ with sensitive keys removed/sanitized.
         """
         env = os.environ.copy()
-        # For a general purpose runner, we usually pass through everything.
-        # But we might want to strip LD_PRELOAD just in case.
-        if "LD_PRELOAD" in env:
-            del env["LD_PRELOAD"]
+        for var in ("LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH"):
+            env.pop(var, None)
         return env
 
     @staticmethod

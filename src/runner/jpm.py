@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Set, Dict
 
 class JPM:
     """
@@ -20,6 +20,29 @@ class JPM:
             return java_file.stem
         except Exception:
             return None
+
+    @staticmethod
+    def get_main_file(sources: List[Path]) -> Optional[Path]:
+        """
+        Scan a list of Java source files and return the one containing the main method.
+        Returns None if no main method is found.
+        """
+        main_pattern = re.compile(r'public\s+static\s+void\s+main\s*\(\s*String')
+        
+        for src in sources:
+            try:
+                with open(src, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    
+                # Strip comments
+                content = re.sub(r'//.*?\n|/\*.*?\*/', '', content, flags=re.DOTALL)
+                
+                if main_pattern.search(content):
+                    return src
+            except Exception:
+                continue
+                
+        return None
 
     @staticmethod
     def record_class_files(directories: set) -> dict:

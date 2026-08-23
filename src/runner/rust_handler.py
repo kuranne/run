@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 from util.output import Printer
 
 class RustHandler:
@@ -29,7 +29,7 @@ class RustHandler:
 
     def _get_cargo_package_name(self, toml_path: Path) -> Optional[str]:
         """
-        Simple parsing to get package name from Cargo.toml.
+        Parse package name from Cargo.toml.
 
         Args:
             toml_path (Path): Path to Cargo.toml.
@@ -40,13 +40,17 @@ class RustHandler:
         try:
             import tomllib
         except ImportError:
-            from util.output import Printer
-            Printer.error("Python 3.11+ requires for tomllib")
+            Printer.error("Python 3.11+ required for tomllib")
             return None
         
-        self.cargo_toml_data = tomllib.load(toml_path)
-        name = self.cargo_toml_data.get("package", {}).get("name", str)
-        return name if name else None
+        try:
+            with open(toml_path, "rb") as f:
+                self.cargo_toml_data = tomllib.load(f)
+            name = self.cargo_toml_data.get("package", {}).get("name")
+            return str(name) if name else None
+        except Exception as e:
+            Printer.error(f"Failed to read {toml_path}: {e}")
+            return None
 
     def run_cargo_mode(self, toml_path: Optional[Path] = None):
         """

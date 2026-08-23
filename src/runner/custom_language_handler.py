@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+import shlex
 
 class CustomLanguageHandler:
     """
@@ -17,6 +17,9 @@ class CustomLanguageHandler:
         from util.errors import ConfigError
         lang_name = lang_config.get("name", "unknown")
         runner = lang_config.get("runner")
+        if not runner:
+            raise ConfigError(f"No runner specified for language: {lang_name}")
+
         subcommand = lang_config.get("subcommand")
         lang_type = lang_config.get("type", "interpreter")
         flags = lang_config.get("flags", []) # List
@@ -24,10 +27,7 @@ class CustomLanguageHandler:
         execute_args = lang_config.get("arguments", [])
         run_cmd = [runner]
         if subcommand:
-            run_cmd.extend(subcommand.split())
-        
-        if not runner:
-             raise ConfigError(f"No runner specified for language: {lang_name}")
+            run_cmd.extend(shlex.split(subcommand))
         
         if lang_type == "interpreter":
             # Run directly like Python, Ruby, etc.

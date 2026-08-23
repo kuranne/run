@@ -28,3 +28,36 @@ def test_record_and_get_new_class_files(tmp_path):
     
     assert class1 not in new_files
     assert class2 in new_files
+
+def test_get_main_file_java(tmp_path):
+    helper = tmp_path / "Helper.java"
+    helper.write_text("public class Helper { public void run() {} }")
+
+    app = tmp_path / "App.java"
+    app.write_text("""
+    public class App {
+        public static void main(String[] args) {
+            System.out.println("Hello");
+        }
+    }
+    """)
+
+    assert JPM.get_main_file([helper, app]) == app
+    assert JPM.get_main_file([app, helper]) == app
+
+def test_get_main_file_varargs_and_comments(tmp_path):
+    app = tmp_path / "App.java"
+    app.write_text("""
+    /* public static void main(String[] args) {} */
+    // public static void main(String[] args) {}
+    public class App {
+        public static void main(String... args) {
+        }
+    }
+    """)
+    assert JPM.get_main_file([app]) == app
+
+def test_get_main_file_none(tmp_path):
+    helper = tmp_path / "Helper.java"
+    helper.write_text("public class Helper {}")
+    assert JPM.get_main_file([helper]) is None
