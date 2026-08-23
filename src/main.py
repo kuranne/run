@@ -10,7 +10,7 @@ from util.args import args as args_parser
 from util.security import SecurityManager
 from util.version import version
 
-from runner import CompilerRunner
+from runner import CompilerRunner, TaskRunner, ProjectRunner
 
 def main():
     __version__ = version()
@@ -49,7 +49,14 @@ def main():
         def run_once() -> list[str]:
             runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=args.argument)
             
-            # 1. Check if files provided
+            # 1. Check if first argument is a defined Task from [tasks]
+            if args.files and TaskRunner.is_task(args.files[0], runner.config):
+                task_name = args.files[0]
+                task_extra_args = args.files[1:]
+                TaskRunner.run_task(task_name, runner.config, task_extra_args, runner)
+                return [str(p) for p in Path(".").glob("*") if p.is_file()]
+
+            # 2. Check if files provided
             if args.files:
                 try:
                     runner.compile_and_run(args.files, args.multi)
@@ -57,7 +64,7 @@ def main():
                     runner.cleanup()
                 return args.files
 
-            # 2. Check for -L auto-link mode
+            # 3. Check for -L auto-link mode
             if args.link_auto is not None:
                 depth = args.link_auto if args.link_auto != -1 else None
                 src_files = runner.find_source_files(Path("."), max_depth=depth)
@@ -70,12 +77,13 @@ def main():
                     runner.cleanup()
                 return src_files
 
-            # 3. No files provided -> Check for implicit Cargo Project
-            if Path("Cargo.toml").exists():
-                runner.run_cargo_mode(Path("Cargo.toml"))
-                return ["Cargo.toml"] + [str(p) for p in Path("src").rglob("*") if p.is_file()]
+            # 4. No files provided -> Check for detected project manifest (Cargo, Go, CMake, Zig, etc.)
+            detected = ProjectRunner.detect_project(Path("."), runner.config)
+            if detected:
+                ProjectRunner.run_project(detected, runner, extra_flags=runner.extra_flags, run_args=runner.run_args)
+                return ProjectRunner.get_watch_files(detected[2])
 
-            # 4. No files, No Cargo -> Fallback to Input
+            # 5. No files, No Project -> Fallback to Input
             print(f"{Colors.YELLOW}[ INPUT ] No file given, enter file(s) name: {Colors.RESET}", end="")
             val = input().strip()
             if val: 

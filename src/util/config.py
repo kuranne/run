@@ -90,6 +90,12 @@ class Config:
         if "core" in self.data and not isinstance(self.data["core"], dict):
             raise ValueError("'core' section must be a table (dict)")
 
+        if "tasks" in self.data and not isinstance(self.data["tasks"], dict):
+            raise ValueError("'tasks' section must be a table (dict)")
+
+        if "projects" in self.data and not isinstance(self.data["projects"], dict):
+            raise ValueError("'projects' section must be a table (dict)")
+
         if "languages" in self.data:
             if not isinstance(self.data["languages"], list):
                 raise ValueError("'languages' section must be an array of tables ([[languages]])")
@@ -120,6 +126,53 @@ class Config:
         runners = self.data.get("runners", self.data.get("runner", {}))
         return runners.get(lang, default)
     
+    def get_tasks(self) -> Dict[str, str]:
+        """
+        Get custom tasks from configuration.
+        """
+        tasks = self.data.get("tasks", {})
+        return tasks if isinstance(tasks, dict) else {}
+
+    def get_projects(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get project manifest detectors, with user overrides/custom definitions taking priority.
+        """
+        merged = {}
+        user_projects = self.data.get("projects", {})
+        if isinstance(user_projects, dict):
+            for name, cfg in user_projects.items():
+                if isinstance(cfg, dict):
+                    merged[name] = cfg
+
+        default_projects = {
+            "cargo": {
+                "file": "Cargo.toml",
+                "command": "cargo run -q"
+            },
+            "go": {
+                "file": "go.mod",
+                "command": "go run ."
+            },
+            "zig": {
+                "file": "build.zig",
+                "command": "zig build run"
+            },
+            "cmake": {
+                "file": "CMakeLists.txt",
+                "build": "cmake -B build && cmake --build build",
+                "run": "./build/app"
+            },
+            "make": {
+                "file": "Makefile",
+                "command": "make"
+            }
+        }
+        for name, cfg in default_projects.items():
+            if name not in merged:
+                merged[name] = cfg
+
+        return merged
+
     def get_preset_flags(self, preset_name: Optional[str], lang: str) -> List[str]:
         """
         Get compiler/interpreter flags for a specific preset and language.
