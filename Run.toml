@@ -21,6 +21,40 @@
 # exclude_extensions = [".md", ".txt", ".json", ".yaml", ".bak"]
 
 # ------------------------------------------------------------------------------
+# [tasks]
+# Custom command shortcuts and aliases (e.g., 'run test', 'run build').
+# Extra CLI arguments after the task name are forwarded to the task command.
+# ------------------------------------------------------------------------------
+[tasks]
+# test = "pytest tests/ -v"
+# bench = "cargo bench"
+# build = "cmake -B build && cmake --build build"
+# clean = "rm -rf build target .run_cache"
+
+# ------------------------------------------------------------------------------
+# [projects.<name>]
+# Generic project manifest detectors. When 'run' is invoked without arguments,
+# it automatically scans for these manifest files and runs the project.
+# Built-in defaults: cargo (Cargo.toml), go (go.mod), zig (build.zig), cmake (CMakeLists.txt), make (Makefile).
+# ------------------------------------------------------------------------------
+
+# Example 1: CMake project runner (build then run)
+# [projects.cmake]
+# file = "CMakeLists.txt"
+# build = "cmake -B build && cmake --build build"
+# run = "./build/app"
+
+# Example 2: Gradle project runner
+# [projects.gradle]
+# file = "build.gradle"
+# command = "./gradlew run"
+
+# Example 3: Node.js / NPM project runner
+# [projects.node]
+# file = "package.json"
+# command = "npm start"
+
+# ------------------------------------------------------------------------------
 # [runners]
 # Override default compiler or interpreter binary used for built-in languages.
 # Default binaries:

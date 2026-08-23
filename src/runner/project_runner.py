@@ -1,0 +1,177 @@
+import os
+import shlex
+from pathlib import Path
+from typing import Dict, Any, Optional, Tuple, List
+from util.config import Config
+from util.output import Printer, Colors
+from util.errors import ExecutionError, ConfigError
+
+class TaskRunner:
+    """
+    Handles execution of custom tasks defined in [tasks] of Run.toml.
+    """
+
+    @staticmethod
+    def is_task(name: str, config: Config) -> bool:
+        """
+        Check if name matches a defined task.
+
+        Args:
+            name (str): Potential task name.
+            config (Config): Project configuration.
+
+        Returns:
+            bool: True if task exists.
+        """
+        tasks = config.get_tasks()
+        return name in tasks
+
+    @staticmethod
+    def run_task(name: str, config: Config, extra_args: List[str], runner_ref: Any) -> bool:
+        """
+        Execute a defined task.
+
+        Args:
+            name (str): Task name.
+            config (Config): Project configuration.
+            extra_args (List[str]): Additional CLI arguments passed to task.
+            runner_ref (Any): BaseRunner reference.
+
+        Returns:
+            bool: True if task executed successfully.
+        """
+        tasks = config.get_tasks()
+        task_cmd = tasks.get(name)
+        if not task_cmd:
+            raise ConfigError(f"Task '{name}' not found in Run.toml.")
+
+        Printer.action("TASK", f"{name}: {task_cmd}", Colors.CYAN)
+        
+        # Check if task uses shell operators (&&, ||, ;, |)
+        use_shell = any(op in task_cmd for op in ("&&", "||", ";", "|"))
+        
+        if use_shell:
+            full_cmd = task_cmd
+            if extra_args:
+                full_cmd += " " + " ".join(shlex.quote(a) for a in extra_args)
+            return runner_ref.run_command([full_cmd], use_shell=True)
+        else:
+            cmd = shlex.split(task_cmd) + extra_args
+            return runner_ref.run_command(cmd)
+
+class ProjectRunner:
+    """
+    Generic project manifest detector and runner based on [projects] in Run.toml.
+    """
+
+    @staticmethod
+    def detect_project(start_dir: Path, config: Config) -> Optional[Tuple[str, Dict[str, Any], Path]]:
+        """
+        Scan starting directory and parent hierarchy for known project manifests.
+
+        Args:
+            start_dir (Path): Starting directory path.
+            config (Config): Project configuration.
+
+        Returns:
+            Optional[Tuple[str, Dict[str, Any], Path]]: (project_type, config_dict, manifest_path).
+        """
+        projects = config.get_projects()
+        current = start_dir.absolute()
+
+        # Check current and up to 3 parent directories
+        for _ in range(4):
+            for proj_name, proj_cfg in projects.items():
+                manifest_file = proj_cfg.get("file")
+                if manifest_file:
+                    manifest_path = current / manifest_file
+                    if manifest_path.exists():
+                        return proj_name, proj_cfg, manifest_path
+            if current == current.parent:
+                break
+            current = current.parent
+
+        return None
+
+    @staticmethod
+    def run_project(project_info: Tuple[str, Dict[str, Any], Path], runner_ref: Any,
+                    extra_flags: Optional[List[str]] = None, run_args: Optional[List[str]] = None) -> bool:
+        """
+        Execute detected project build and run logic.
+
+        Args:
+            project_info (Tuple): (project_type, config_dict, manifest_path).
+            runner_ref (Any): BaseRunner reference.
+            extra_flags (Optional[List[str]]): Compiler/build flags.
+            run_args (Optional[List[str]]): Runtime arguments.
+
+        Returns:
+            bool: True if execution succeeded.
+        """
+        proj_name, proj_cfg, manifest_path = project_info
+        extra_flags = extra_flags or []
+        run_args = run_args or []
+
+        Printer.info(f"Detected project '{proj_name}' via {manifest_path.name}")
+
+        # Check for two-step build + run
+        build_step = proj_cfg.get("build")
+        run_step = proj_cfg.get("run")
+        command_step = proj_cfg.get("command")
+
+        if build_step and run_step:
+            # Step 1: Build
+            build_use_shell = any(op in build_step for op in ("&&", "||", ";", "|"))
+            if build_use_shell:
+                build_cmd = [build_step]
+            else:
+                build_cmd = shlex.split(build_step) + extra_flags
+            
+            if not runner_ref.run_command(build_cmd, use_shell=build_use_shell, compiling=True):
+                return False
+
+            # Step 2: Run
+            run_use_shell = any(op in run_step for op in ("&&", "||", ";", "|"))
+            if run_use_shell:
+                full_run = run_step
+                if run_args:
+                    full_run += " " + " ".join(shlex.quote(a) for a in run_args)
+                return runner_ref.run_command([full_run], use_shell=True)
+            else:
+                run_cmd = shlex.split(run_step) + run_args
+                return runner_ref.run_command(run_cmd)
+
+        elif command_step:
+            use_shell = any(op in command_step for op in ("&&", "||", ";", "|"))
+            if use_shell:
+                full_cmd = command_step
+                if extra_flags:
+                    full_cmd += " " + " ".join(shlex.quote(f) for f in extra_flags)
+                if run_args:
+                    full_cmd += " " + " ".join(shlex.quote(a) for a in run_args)
+                return runner_ref.run_command([full_cmd], use_shell=True)
+            else:
+                cmd = shlex.split(command_step) + extra_flags + run_args
+                return runner_ref.run_command(cmd)
+        else:
+            raise ConfigError(f"Project '{proj_name}' must define 'command' or both 'build' and 'run'.")
+
+    @staticmethod
+    def get_watch_files(manifest_path: Path) -> List[str]:
+        """
+        Get files to watch for this project.
+
+        Args:
+            manifest_path (Path): Path to manifest.
+
+        Returns:
+            List[str]: List of file paths to watch.
+        """
+        watch_list = [str(manifest_path)]
+        proj_dir = manifest_path.parent
+        src_dir = proj_dir / "src"
+        if src_dir.exists() and src_dir.is_dir():
+            for p in src_dir.rglob("*"):
+                if p.is_file():
+                    watch_list.append(str(p))
+        return watch_list
