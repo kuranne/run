@@ -11,12 +11,14 @@ from .java_handler import JavaHandler
 from .c_family_handler import CFamilyHandler
 from .script_handler import ScriptHandler
 from .custom_language_handler import CustomLanguageHandler
+from .handler_interface import ExecutionContext
+from .registry import HandlerRegistry
 
 class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler, 
                      CFamilyHandler, ScriptHandler, CustomLanguageHandler):
     """
     Main runner class that handles compilation and execution logic for various languages.
-    Inherits from BaseRunner and all language-specific handlers.
+    Inherits from BaseRunner and language-specific handlers.
     """
     def __init__(self, op_flags: Dict[str, Any], extra_flags: str = "", run_args: str = ""):
         """
@@ -28,7 +30,6 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             run_args (str): Arguments to pass to the executed program.
         """
         super().__init__(op_flags, extra_flags, run_args)
-        # Initialize CFamilyHandler attributes
         self.c_family_ext = {'.c', '.cpp', '.cc'}
         self.c_family_header_ext = {'.h', '.hpp'}
         self.java_ext = {'.java'}
@@ -38,6 +39,22 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             Printer.debug("Cache disabled via --no-cache")
         else:
             self.cache = CacheManager()
+
+        self.registry = HandlerRegistry(custom_handler=self)
+
+    def _get_context(self) -> ExecutionContext:
+        """Create current execution context."""
+        return ExecutionContext(
+            flags=self.flags,
+            extra_flags=self.extra_flags,
+            run_args=self.run_args,
+            preset=self.preset,
+            config=self.config,
+            cache=self.cache,
+            output_files=self.output_files,
+            is_posix=self.is_posix,
+            runner_ref=self
+        )
 
     def find_source_files(self, path: Path, max_depth: Optional[int] = None) -> List[str]:
         """
@@ -53,19 +70,15 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
         """
         files = []
         ext = self.c_family_ext.union(self.java_ext)
-        
-        # Directories to completely skip during lookup
         ignore_dirs = {'.git', '.venv', 'venv', 'env', 'node_modules', '.run_cache', 'build', 'target', '__pycache__'}
-        
         start_level = len(path.absolute().parts)
         
         for root, dirs, filenames in os.walk(path):
-            # Prune ignored and hidden directories from os.walk in-place
             dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith('.')]
             
             current_level = len(Path(root).absolute().parts)
             if max_depth is not None and (current_level - start_level > max_depth):
-                dirs[:] = []  # Don't descend further
+                dirs[:] = []
                 continue
                 
             for filename in filenames:
@@ -95,7 +108,6 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
                 return
 
             ext = fp.suffix.lower()
-            # Auto-detect language by shebang if no extension
             if not ext and fp.is_file():
                 ext = self._detect_language_from_shebang(fp)
             
@@ -133,20 +145,30 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
                         raise ConfigError(f"Unsupported extension: {ext}")
                         
         except (ConfigError, ExecutionError, FileNotFoundError, OSError) as e:
-            # Log the error but continue processing other files
             Printer.error(f"Failed to process {fp}: {e}")
         except Exception as e:
-            # Catch any other unexpected errors and continue
             Printer.error(f"Unexpected error processing {fp}: {e}")
 
     def _handle_multi_compile(self, paths: List[Path]):
         """
         Handle multi-file compilation by detecting language type.
+        Custom languages from config take highest priority.
 
         Args:
             paths (List[Path]): List of all source files.
         """
-        # Detect language type from files
+        if not paths:
+            return
+
+        # 1. Custom language check
+        first_ext = paths[0].suffix.lower()
+        lang_config = self.config.get_language_by_extension(first_ext)
+        if lang_config:
+            out_name = self.get_executable_path(paths[0])
+            self._execute_custom_multi(paths, lang_config, out_name, self._get_context())
+            return
+
+        # 2. Built-in multi-file check (C/C++ or Java)
         c_sources = [p for p in paths if p.suffix in self.c_family_ext]
         java_sources = [p for p in paths if p.suffix in self.java_ext]
         
@@ -163,13 +185,12 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
 
         Args:
             bin_path (Path): Path to the binary.
-            args (List): List of arguments.
+            args (List[str]): List of arguments.
         """
         target = str(bin_path) if self.is_posix else str(bin_path.absolute())
 
-        # Ensure ./ for POSIX relative paths
         if self.is_posix and not target.startswith('/') and not target.startswith('./'):
-             target = f"./{target}"
+            target = f"./{target}"
         
         cmd = [target] + args + self.run_args
         self.run_command(cmd)

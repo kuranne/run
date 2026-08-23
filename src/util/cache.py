@@ -2,19 +2,20 @@ import hashlib
 import json
 import os
 import sys
+import re
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Set
 
-from util.output import Printer, Colors
-from util.errors import RunError
+from util.output import Printer
 
 class CacheManager:
     """
-    Manages build caching using MD5 checksums.
-    Stores cache data in .run_cache/cache.json relative to the project root or current dir.
+    Manages build caching using composite MD5 checksums.
+    Stores cache data in ~/.cache/run_kuranne/<hash>/cache.json.
     """
     
     def __init__(self, project_root: Path = Path(".")):
+        """Initialize CacheManager for the given project root."""
         project_root = project_root.absolute()
         project_hash = hashlib.md5(str(project_root).encode()).hexdigest()
         
@@ -35,11 +36,8 @@ class CacheManager:
         Get a unique path for the object file in the cache directory.
         Uses MD5 of output path to ensure uniqueness.
         """
-        # We use hash of absolute path to create a unique filename
-        # e.g. source.c -> objs/hash_source.o
         path_hash = hashlib.md5(str(source_path.absolute()).encode()).hexdigest()
         
-        # Ensure objects dir exists lazily
         if not self.objs_dir.exists():
             try:
                 self.objs_dir.mkdir(parents=True, exist_ok=True)
@@ -61,14 +59,12 @@ class CacheManager:
     def _save_cache(self):
         """Save cache to disk."""
         if not self.cache_data:
-            # If cache is empty, try to remove cache file and directory
             if self.cache_file.exists():
                 try:
                     self.cache_file.unlink()
                 except OSError:
                     pass
             
-            # If directory is empty, remove it
             if self.cache_dir.exists() and not any(self.cache_dir.iterdir()):
                 try:
                     self.cache_dir.rmdir()
@@ -80,16 +76,16 @@ class CacheManager:
             try:
                 self.cache_dir.mkdir(parents=True, exist_ok=True)
             except OSError:
-                return # Cannot create cache dir, ignore
+                return
         
         try:
             with open(self.cache_file, "w") as f:
                 json.dump(self.cache_data, f, indent=2)
         except IOError:
-            pass # Failed to save, ignore
+            pass
 
     def get_file_hash(self, file_path: Path) -> str:
-        """Calculate MD5 hash of a file."""
+        """Calculate MD5 hash of a single file."""
         if not file_path.exists():
             return ""
         
@@ -102,13 +98,64 @@ class CacheManager:
         except OSError:
             return ""
 
+    def _get_c_includes(self, file_path: Path, visited: Optional[Set[Path]] = None) -> List[Path]:
+        """
+        Recursively extract local header dependencies (#include "...") for C/C++ files.
+        """
+        if visited is None:
+            visited = set()
+        
+        includes = []
+        if file_path in visited or not file_path.exists():
+            return includes
+        visited.add(file_path)
+
+        c_exts = {'.c', '.cpp', '.cc', '.h', '.hpp', '.cxx', '.hxx'}
+        if file_path.suffix.lower() not in c_exts:
+            return includes
+
+        include_pattern = re.compile(r'#\s*include\s*"([^"]+)"')
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            for match in include_pattern.finditer(content):
+                inc_rel = match.group(1)
+                inc_path = (file_path.parent / inc_rel).resolve()
+                if inc_path.exists() and inc_path not in visited:
+                    includes.append(inc_path)
+                    includes.extend(self._get_c_includes(inc_path, visited))
+        except Exception:
+            pass
+
+        return includes
+
+    def get_composite_hash(self, file_path: Path) -> str:
+        """
+        Calculate composite MD5 hash of a file and its local header dependencies.
+        """
+        if not file_path.exists():
+            return ""
+        
+        hash_md5 = hashlib.md5()
+        self_hash = self.get_file_hash(file_path)
+        hash_md5.update(self_hash.encode())
+
+        c_exts = {'.c', '.cpp', '.cc'}
+        if file_path.suffix.lower() in c_exts:
+            includes = self._get_c_includes(file_path)
+            for inc in sorted(includes, key=lambda p: str(p)):
+                inc_hash = self.get_file_hash(inc)
+                hash_md5.update(f"{inc.name}:{inc_hash}".encode())
+
+        return hash_md5.hexdigest()
+
     def is_changed(self, file_path: Path) -> bool:
         """
-        Check if a file has changed since last cache update.
+        Check if a file or its dependencies have changed since last cache update.
         Returns True if changed or not in cache, False otherwise.
         """
         key = str(file_path.absolute())
-        current_hash = self.get_file_hash(file_path)
+        current_hash = self.get_composite_hash(file_path)
         
         if key not in self.cache_data:
             return True
@@ -118,7 +165,7 @@ class CacheManager:
     def update_cache(self, file_path: Path):
         """Update the cache entry for a file."""
         key = str(file_path.absolute())
-        self.cache_data[key] = self.get_file_hash(file_path)
+        self.cache_data[key] = self.get_composite_hash(file_path)
         self._save_cache()
 
     def clear(self):
@@ -130,7 +177,6 @@ class CacheManager:
             except OSError:
                 pass
         
-        # If directory is empty, remove it
         if self.cache_dir.exists() and not any(self.cache_dir.iterdir()):
             try:
                 self.cache_dir.rmdir()
