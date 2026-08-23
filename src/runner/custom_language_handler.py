@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 import shlex
 from util.errors import ConfigError
+from util.substitutions import VariableSubstitutor
 from .handler_interface import LanguageHandler, ExecutionContext
 
 class CustomLanguageHandler(LanguageHandler):
@@ -43,11 +44,16 @@ class CustomLanguageHandler(LanguageHandler):
         if not runner:
             raise ConfigError(f"No runner specified for language: {lang_name}")
 
+        var_ctx = VariableSubstitutor.build_file_context(file_path=fp, out_path=out_name, out_dir=ctx.flags.get("out_dir") if ctx.flags else None)
+        runner = VariableSubstitutor.substitute_string(runner, var_ctx)
         subcommand = lang_config.get("subcommand")
+        if subcommand:
+            subcommand = VariableSubstitutor.substitute_string(subcommand, var_ctx)
+
         lang_type = lang_config.get("type", "interpreter")
-        flags = lang_config.get("flags", [])
+        flags = VariableSubstitutor.substitute_list(lang_config.get("flags", []), var_ctx)
         preset_flags = ctx.config.get_preset_flags(ctx.preset, lang_name) if ctx.config else []
-        execute_args = lang_config.get("arguments", [])
+        execute_args = VariableSubstitutor.substitute_list(lang_config.get("arguments", []), var_ctx)
         
         run_cmd = [runner]
         if subcommand:
@@ -71,11 +77,16 @@ class CustomLanguageHandler(LanguageHandler):
         if not runner:
             raise ConfigError(f"No runner specified for language: {lang_name}")
 
+        var_ctx = VariableSubstitutor.build_file_context(file_path=paths[0] if paths else None, out_path=out_name, out_dir=ctx.flags.get("out_dir") if ctx.flags else None)
+        runner = VariableSubstitutor.substitute_string(runner, var_ctx)
         subcommand = lang_config.get("subcommand")
+        if subcommand:
+            subcommand = VariableSubstitutor.substitute_string(subcommand, var_ctx)
+
         lang_type = lang_config.get("type", "interpreter")
-        flags = lang_config.get("flags", [])
+        flags = VariableSubstitutor.substitute_list(lang_config.get("flags", []), var_ctx)
         preset_flags = ctx.config.get_preset_flags(ctx.preset, lang_name) if ctx.config else []
-        execute_args = lang_config.get("arguments", [])
+        execute_args = VariableSubstitutor.substitute_list(lang_config.get("arguments", []), var_ctx)
 
         run_cmd = [runner]
         if subcommand:

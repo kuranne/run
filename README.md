@@ -93,6 +93,7 @@ run <files> [flags]
 | `--time` | `-t` | Measure and display execution time |
 | `--flags <flags>` | `-f <flags>` | Pass extra compiler/interpreter flags (use `-f="-Wall"` or `-f "-Wall"`) |
 | `--argument <args>` | `-a <args>` | Arguments to pass to the executable/script |
+| `--init` | `-I` | Initialize tailored `Run.toml` for the current project |
 | `--keep` | | Keep compiled binaries (don't delete after run) |
 | `--no-cache` | | Disable build caching |
 | `-v`, `-vv` | | Enable verbose debug logging (-v) or trace with stack traces (-vv) |
