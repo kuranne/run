@@ -25,6 +25,7 @@ def args(__version__):
     parser.add_argument("--no-cache", action="store_true", help="Disable cache")
     parser.add_argument("-q", "--quiet", action="store_true", help="Silence compiler output and logs")
     parser.add_argument("-w", "--watch", action="store_true", help="Watch mode: re-compile and run on file change")
+    parser.add_argument("-f", "--force", action="store_true", help="Force continue on errors without interactive prompts")
 
     # Values
     parser.add_argument("-T", "--timeout", type=float, help="Timeout in seconds for execution")
@@ -38,30 +39,32 @@ def args(__version__):
     
     # Others
     parser.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files. Optional depth arg (default: infinite)")
-    parser.add_argument("-f", "--flags", type=str, default="", help='Compiler flags')
+    parser.add_argument("-F", "--flags", type=str, default="", help='Compiler flags')
     parser.add_argument("-a", "--argument", type=str, default="", help="Arguments to pass to the executed program")
 
-    # Process args manually before parsing
     processed_args = []
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
         
-        # Fristly: Parse run -f-Wall -> -f=-Wall
-        if arg.startswith("-f") and len(arg) > 2:
-            processed_args.append(f"-f={arg[2:]}")
-            
-        # Secondary: Parse space but start with - ex. run -f "-Wall"
-        elif arg == "-f" and i + 1 < len(sys.argv):
-            next_arg = sys.argv[i+1]
-            
-            # If the next arg is -: will force with =
+        if arg.startswith("-F") and len(arg) > 2 and not arg.startswith("-F="):
+            processed_args.append(f"-F={arg[2:]}")
+        elif arg.startswith("-a") and len(arg) > 2 and not arg.startswith("-a="):
+            processed_args.append(f"-a={arg[2:]}")
+        elif arg in ("-F", "--flags") and i + 1 < len(sys.argv):
+            next_arg = sys.argv[i + 1]
             if next_arg.startswith("-"):
-                processed_args.append(f"-f={next_arg}")
+                processed_args.append(f"--flags={next_arg}")
                 i += 1
             else:
                 processed_args.append(arg)
-                
+        elif arg in ("-a", "--argument") and i + 1 < len(sys.argv):
+            next_arg = sys.argv[i + 1]
+            if next_arg.startswith("-"):
+                processed_args.append(f"--argument={next_arg}")
+                i += 1
+            else:
+                processed_args.append(arg)
         else:
             processed_args.append(arg)
             

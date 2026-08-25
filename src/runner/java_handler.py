@@ -32,7 +32,8 @@ class JavaHandler:
         self.output_files.extend(JPM.get_new_class_files(parent_dir, before_state))
 
         # Execute
-        self.run_command(["java", main_class] + self.run_args)
+        cp = str(fp.parent) if str(fp.parent) != "." else "."
+        self.run_command(["java", "-cp", cp, main_class] + self.run_args)
 
 
     def _handle_multi_java(self, sources: List[Path]):
@@ -62,5 +63,8 @@ class JavaHandler:
         # Track new or modified .class files for cleanup
         self.output_files.extend(JPM.get_new_class_files(parent_dirs, before_state))
         
-        # Run the main class
-        self.run_command(["java", main_class] + self.run_args)
+        # Run the main class with classpath included
+        sep = ";" if not self.is_posix else ":"
+        cp_list = [str(d) for d in parent_dirs] + ["."]
+        cp = sep.join(dict.fromkeys(cp_list))
+        self.run_command(["java", "-cp", cp, main_class] + self.run_args)

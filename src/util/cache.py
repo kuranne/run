@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import re
+import threading
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Set
 
@@ -16,6 +17,7 @@ class CacheManager:
     
     def __init__(self, project_root: Path = Path(".")):
         """Initialize CacheManager for the given project root."""
+        self._lock = threading.Lock()
         project_root = project_root.absolute()
         project_hash = hashlib.md5(str(project_root).encode()).hexdigest()
         
@@ -58,31 +60,32 @@ class CacheManager:
 
     def _save_cache(self):
         """Save cache to disk."""
-        if not self.cache_data:
-            if self.cache_file.exists():
-                try:
-                    self.cache_file.unlink()
-                except OSError:
-                    pass
-            
-            if self.cache_dir.exists() and not any(self.cache_dir.iterdir()):
-                try:
-                    self.cache_dir.rmdir()
-                except OSError:
-                    pass
-            return
-            
-        if not self.cache_dir.exists():
-            try:
-                self.cache_dir.mkdir(parents=True, exist_ok=True)
-            except OSError:
+        with self._lock:
+            if not self.cache_data:
+                if self.cache_file.exists():
+                    try:
+                        self.cache_file.unlink()
+                    except OSError:
+                        pass
+                
+                if self.cache_dir.exists() and not any(self.cache_dir.iterdir()):
+                    try:
+                        self.cache_dir.rmdir()
+                    except OSError:
+                        pass
                 return
-        
-        try:
-            with open(self.cache_file, "w") as f:
-                json.dump(self.cache_data, f, indent=2)
-        except IOError:
-            pass
+                
+            if not self.cache_dir.exists():
+                try:
+                    self.cache_dir.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    return
+            
+            try:
+                with open(self.cache_file, "w") as f:
+                    json.dump(self.cache_data, f, indent=2)
+            except IOError:
+                pass
 
     def get_file_hash(self, file_path: Path) -> str:
         """Calculate MD5 hash of a single file."""
@@ -118,7 +121,8 @@ class CacheManager:
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
-            for match in include_pattern.finditer(content):
+            clean_content = re.sub(r'//.*?\n|/\*.*?\*/', '', content, flags=re.DOTALL)
+            for match in include_pattern.finditer(clean_content):
                 inc_rel = match.group(1)
                 inc_path = (file_path.parent / inc_rel).resolve()
                 if inc_path.exists() and inc_path not in visited:
@@ -157,28 +161,31 @@ class CacheManager:
         key = str(file_path.absolute())
         current_hash = self.get_composite_hash(file_path)
         
-        if key not in self.cache_data:
-            return True
-        
-        return self.cache_data[key] != current_hash
+        with self._lock:
+            if key not in self.cache_data:
+                return True
+            return self.cache_data[key] != current_hash
 
     def update_cache(self, file_path: Path):
         """Update the cache entry for a file."""
         key = str(file_path.absolute())
-        self.cache_data[key] = self.get_composite_hash(file_path)
+        comp_hash = self.get_composite_hash(file_path)
+        with self._lock:
+            self.cache_data[key] = comp_hash
         self._save_cache()
 
     def clear(self):
         """Clear all cache."""
-        self.cache_data = {}
-        if self.cache_file.exists():
-            try:
-                self.cache_file.unlink()
-            except OSError:
-                pass
-        
-        if self.cache_dir.exists() and not any(self.cache_dir.iterdir()):
-            try:
-                self.cache_dir.rmdir()
-            except OSError:
-                pass
+        with self._lock:
+            self.cache_data = {}
+            if self.cache_file.exists():
+                try:
+                    self.cache_file.unlink()
+                except OSError:
+                    pass
+            
+            if self.cache_dir.exists() and not any(self.cache_dir.iterdir()):
+                try:
+                    self.cache_dir.rmdir()
+                except OSError:
+                    pass

@@ -46,7 +46,9 @@ class PythonHandler:
         """
         try:
             prog = self._get_python_executable()
-        except RunError:
+        except RunError as e:
+            from util.output import Printer
+            Printer.error(str(e))
             return
 
         self.run_command([prog, str(fp)] + self.run_args)
