@@ -91,7 +91,8 @@ run <files> [flags]
 | `--link-auto [depth]` | `-L [depth]` | Auto-find and compile source files (specify depth or leave empty for unlimited) |
 | `--dry-run` | `-d` | Preview commands without executing them |
 | `--time` | `-t` | Measure and display execution time |
-| `--flags <flags>` | `-f <flags>` | Pass extra compiler/interpreter flags (use `-f="-Wall"` or `-f "-Wall"`) |
+| `--flags <flags>` | `-F <flags>` | Pass extra compiler/interpreter flags (use `-F="-Wall"` or `-F "-Wall"`) |
+| `--force` | `-f` | Force continue on errors / non-interactive mode |
 | `--argument <args>` | `-a <args>` | Arguments to pass to the executable/script |
 | `--init` | `-I` | Initialize tailored `Run.toml` for the current project |
 | `--keep` | | Keep compiled binaries (don't delete after run) |
@@ -145,7 +146,7 @@ run main.cpp helper.cpp utils.cpp -m
 **Compile with custom flags:**
 
 ```bash
-run program.c -f="-Wall -O2"
+run program.c -F="-Wall -O2"
 ```
 
 **Auto-find and compile all C++ files in current directory:**

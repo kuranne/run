@@ -44,6 +44,7 @@ def main():
         "no_cache": args.no_cache,
         "quiet": args.quiet,
         "watch": args.watch,
+        "force": args.force,
         "timeout": args.timeout,
         "stdin": args.stdin,
         "env": args.env,
@@ -52,6 +53,38 @@ def main():
     }
 
     try:
+        def check_user_continue(timeout: float = 1.0) -> bool:
+            """
+            Check non-blockingly if user pressed 'c' or enter to trigger a rebuild.
+
+            Args:
+                timeout (float): Max seconds to wait for input.
+
+            Returns:
+                bool: True if user triggered a continue action.
+            """
+            if not sys.stdin.isatty():
+                import time
+                time.sleep(timeout)
+                return False
+
+            if sys.platform != "win32":
+                import select
+                rlist, _, _ = select.select([sys.stdin], [], [], timeout)
+                if rlist:
+                    line = sys.stdin.readline().strip().lower()
+                    return line in ("c", "continue", "")
+                return False
+            else:
+                import msvcrt, time
+                start = time.time()
+                while time.time() - start < timeout:
+                    if msvcrt.kbhit():
+                        ch = msvcrt.getch().decode("utf-8", errors="ignore").strip().lower()
+                        return ch in ("c", "\r", "\n", "")
+                    time.sleep(0.05)
+                return False
+
         def run_once() -> list[str]:
             runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=args.argument)
             
@@ -104,13 +137,14 @@ def main():
 
         if args.watch:
             import time
-            Printer.info("Watch mode enabled. Waiting for file changes...")
+            Printer.info("Watch mode enabled. Waiting for file changes (press 'c' to retry)...")
             print("-" * 40)
             last_mtimes = {}
             first_run = True
-            watch_files = []
+            watch_files = list(args.files) if args.files else []
 
             def get_watch_targets(active_files: list[str]) -> set:
+                """Resolve target files and headers to monitor for changes."""
                 targets = set(Path(f) for f in active_files if f)
                 for cfg_name in ("Run.toml", "Cargo.toml"):
                     cfg = Path(cfg_name)
@@ -127,7 +161,9 @@ def main():
             while True:
                 if first_run:
                     try:
-                        watch_files = run_once() or []
+                        res = run_once()
+                        if res:
+                            watch_files = res
                     except Exception as e:
                         Printer.error(f"Error: {e}")
                     
@@ -146,19 +182,23 @@ def main():
                             changed = True
                             last_mtimes[str(p)] = mtime
                             
+                if not changed:
+                    if check_user_continue(1.0):
+                        changed = True
+
                 if changed:
                     print("\n" + "-" * 40)
-                    Printer.info("File change detected. Restarting...")
+                    Printer.info("Restarting...")
                     try:
-                        watch_files = run_once() or watch_files
+                        res = run_once()
+                        if res:
+                            watch_files = res
                     except Exception as e:
                         Printer.error(f"Error: {e}")
                     
                     for p in get_watch_targets(watch_files):
                         if p.exists():
                             last_mtimes[str(p)] = p.stat().st_mtime
-                            
-                time.sleep(1.0)
             return 0
         else:
             run_once()

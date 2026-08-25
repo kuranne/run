@@ -121,9 +121,11 @@ class BaseRunner:
 
         timeout = self.flags.get("timeout") if not compiling else None
 
+        target_cmd = cmd_str if use_shell and isinstance(cmd, list) else cmd
+
         try:
             result = spc.run(
-                cmd, 
+                target_cmd, 
                 check=False, 
                 shell=use_shell, 
                 env=env,
@@ -153,7 +155,8 @@ class BaseRunner:
         except FileNotFoundError:
             if stdin_file:
                 stdin_file.close()
-            raise ExecutionError(f"Command '{cmd[0]}' not found.")
+            cmd_name = cmd[0] if isinstance(cmd, list) and cmd else str(cmd)
+            raise ExecutionError(f"Command '{cmd_name}' not found.")
         
     def _compile_c_family(self, fp: Path):
         """

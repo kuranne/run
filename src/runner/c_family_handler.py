@@ -35,11 +35,6 @@ class CFamilyHandler:
         
         try:
             self.run_command(cmd, compiling=True)
-            # We DONT add to output_files because:
-            # 1. If cached, we want to persist them in cache
-            # 2. If no-cache, we return the path and add to output_files in the caller
-            if cache:
-                cache.update_cache(source)
             return obj_file
         except Exception:
             return None
@@ -126,7 +121,8 @@ class CFamilyHandler:
                     obj_path = future.result()
                     if obj_path:
                         object_files.append(obj_path)
-                        # If no cache, we need to ensure these object files are cleaned up
+                        if self.cache:
+                            self.cache.update_cache(src)
                         if self.cache is None:
                             self.output_files.append(obj_path)
                     else:
