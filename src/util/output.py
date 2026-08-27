@@ -53,7 +53,7 @@ class Printer:
     def time(seconds: float):
         """Print execution time."""
         # Direct print for time to avoid logger format, or we can use a helper
-        print(f"{Colors.GRAY}  -> Took {seconds:.3f}s{Colors.RESET}")
+        print(f"{Colors.YELLOW}  -> Took {seconds:.3f}s{Colors.RESET}")
 
     @staticmethod
     def error(message: str):

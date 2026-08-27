@@ -6,7 +6,7 @@ from typing import List, Dict, Optional, Any
 from pathlib import Path
 from util.config import Config
 from util.output import Printer, Colors
-from util.errors import ExecutionError, CompilationError
+from util.errors import ExecutionError, CompilationError, ConfigError
 from util.security import SecurityManager
 
 class BaseRunner:
