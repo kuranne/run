@@ -143,11 +143,14 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
                         self._handle_c_family_single_file(fp)
                     case _:
                         raise ConfigError(f"Unsupported extension: {ext}")
+            return True
                         
         except (ConfigError, ExecutionError, FileNotFoundError, OSError) as e:
             Printer.error(f"Failed to process {fp}: {e}")
+            return False
         except Exception as e:
             Printer.error(f"Unexpected error processing {fp}: {e}")
+            return False
 
     def _handle_multi_compile(self, paths: List[Path]):
         """
@@ -187,6 +190,10 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             bin_path (Path): Path to the binary.
             args (List[str]): List of arguments.
         """
+        if self.flags.get("build_only"):
+            Printer.action("BUILD", f"Binary generated successfully: {bin_path}", Colors.GREEN)
+            return
+
         target = str(bin_path) if self.is_posix else str(bin_path.absolute())
 
         if self.is_posix and not target.startswith('/') and not target.startswith('./'):

@@ -17,6 +17,15 @@ def main():
     __version__ = version()
     args = args_parser(__version__)
     
+    # Handle --no-color
+    if args.no_color:
+        Colors.disable()
+
+    # Handle --doctor
+    if args.doctor:
+        from util.doctor import Doctor
+        return Doctor.diagnose()
+
     if args.verbose >= 1:
         import logging
         logging.getLogger("run_kuranne").setLevel(logging.DEBUG)
@@ -24,7 +33,7 @@ def main():
 
     import os
 
-    # Handle -C / --directory
+    # Handle --directory / --cwd
     if args.directory:
         target_dir = Path(args.directory)
         if not target_dir.is_dir():
@@ -54,7 +63,8 @@ def main():
     # Process operation and flag(s) -> dictionary of it
     operator_flags = {
         "multi" : args.multi,
-        "keep" : args.keep,
+        "keep" : args.keep or args.build_only,
+        "build_only": args.build_only,
         "time" : args.time,
         "memory" : args.mem,
         "dry_run": args.dry_run,
@@ -64,6 +74,8 @@ def main():
         "watch": args.watch,
         "force": args.force,
         "jobs": args.jobs,
+        "expect": args.expect,
+        "test_dir": args.test_dir,
         "timeout": args.timeout,
         "stdin": args.stdin,
         "env": args.env,
@@ -107,6 +119,18 @@ def main():
         def run_once() -> list[str]:
             runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=args.argument)
             
+            # Check if --test-dir is provided
+            if args.test_dir:
+                from runner.test_runner import TestcasesRunner
+                if not args.files:
+                    raise ConfigError("A source file must be specified with --test-dir (e.g. run solution.cpp --test-dir ./tests/)")
+                target = Path(args.files[0])
+                try:
+                    TestcasesRunner.run_tests(runner, Path(args.test_dir), target)
+                finally:
+                    runner.cleanup()
+                return args.files
+
             # 1. Check if first argument is a defined Task from [tasks]
             if args.files and TaskRunner.is_task(args.files[0], runner.config):
                 task_name = args.files[0]

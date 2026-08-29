@@ -11,28 +11,20 @@ def test_args_basic(monkeypatch):
     assert parsed.time == True
 
 def test_args_flags_parsing(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-F-Wall'])
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--flags=-Wall'])
     parsed = args("1.0.0")
     assert parsed.flags == '-Wall'
     
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-F', '-Wall'])
-    parsed = args("1.0.0")
-    assert parsed.flags == '-Wall'
-
     monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--flags', '-O3'])
     parsed = args("1.0.0")
     assert parsed.flags == '-O3'
 
 def test_args_argument_parsing(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '-a', '-v'])
-    parsed = args("1.0.0")
-    assert parsed.argument == '-v'
-
     monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '--argument', '--debug'])
     parsed = args("1.0.0")
     assert parsed.argument == '--debug'
 
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '-a--port=8080'])
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '--argument=--port=8080'])
     parsed = args("1.0.0")
     assert parsed.argument == '--port=8080'
 
@@ -46,11 +38,11 @@ def test_args_force_flag(monkeypatch):
     assert parsed.force is True
 
 def test_args_link_auto(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', '-L'])
+    monkeypatch.setattr(sys, 'argv', ['run', '--link-auto'])
     parsed = args("1.0.0")
     assert parsed.link_auto == -1
     
-    monkeypatch.setattr(sys, 'argv', ['run', '-L', '2'])
+    monkeypatch.setattr(sys, 'argv', ['run', '--link-auto', '2'])
     parsed = args("1.0.0")
     assert parsed.link_auto == 2
 
@@ -70,7 +62,7 @@ def test_args_posix_double_dash_forwarding(monkeypatch):
     assert parsed.argument == '-v --port 8080'
 
 def test_args_posix_double_dash_merge_with_flag(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '-a', 'initial', '--', 'extra1', 'extra2'])
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '--argument', 'initial', '--', 'extra1', 'extra2'])
     parsed = args("1.0.0")
     assert parsed.files == ['main.py']
     assert parsed.argument == 'initial extra1 extra2'
@@ -85,7 +77,11 @@ def test_args_jobs_flag(monkeypatch):
     assert parsed.jobs == 4
 
 def test_args_directory_flag(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-C', 'src/'])
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--directory', 'src/'])
+    parsed = args("1.0.0")
+    assert parsed.directory == 'src/'
+
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--cwd', 'src/'])
     parsed = args("1.0.0")
     assert parsed.directory == 'src/'
 
@@ -94,14 +90,10 @@ def test_args_clean_flag(monkeypatch):
     parsed = args("1.0.0")
     assert parsed.clean is True
 
-def test_args_out_dir_aliases(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-O', 'bin/'])
+def test_args_out_dir(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--out-dir', 'bin/'])
     parsed = args("1.0.0")
     assert parsed.out_dir == 'bin/'
-
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-o', 'dist/'])
-    parsed = args("1.0.0")
-    assert parsed.out_dir == 'dist/'
 
 def test_args_memory_flags(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-M'])
@@ -143,3 +135,37 @@ def test_args_stdin_flag_variants(monkeypatch):
     parsed = args("1.0.0")
     assert parsed.stdin == '-'
     assert parsed.argument == 'arg1 arg2'
+
+def test_args_new_feature_flags(monkeypatch):
+    # --build-only
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-B'])
+    parsed = args("1.0.0")
+    assert parsed.build_only is True
+
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--build-only'])
+    parsed = args("1.0.0")
+    assert parsed.build_only is True
+
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--no-run'])
+    parsed = args("1.0.0")
+    assert parsed.build_only is True
+
+    # --expect
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--expect', 'expected.txt'])
+    parsed = args("1.0.0")
+    assert parsed.expect == 'expected.txt'
+
+    # --test-dir
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--test-dir', 'tests/'])
+    parsed = args("1.0.0")
+    assert parsed.test_dir == 'tests/'
+
+    # --doctor
+    monkeypatch.setattr(sys, 'argv', ['run', '--doctor'])
+    parsed = args("1.0.0")
+    assert parsed.doctor is True
+
+    # --no-color
+    monkeypatch.setattr(sys, 'argv', ['run', '--no-color'])
+    parsed = args("1.0.0")
+    assert parsed.no_color is True

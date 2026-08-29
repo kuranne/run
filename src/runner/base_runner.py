@@ -132,8 +132,12 @@ class BaseRunner:
                 except Exception as e:
                     Printer.error(f"Failed to open stdin file {stdin_path}: {e}")
 
-        # Setup quiet mode for compiler
-        stdout_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
+        # Setup quiet mode for compiler or output capture for expectation
+        expect_path = self.flags.get("expect") if not compiling else None
+        if expect_path:
+            stdout_dest = spc.PIPE
+        else:
+            stdout_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
         stderr_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
 
         timeout = self.flags.get("timeout") if not compiling else None
@@ -141,6 +145,7 @@ class BaseRunner:
         target_cmd = cmd_str if use_shell and isinstance(cmd, list) else cmd
 
         mem_bytes = None
+        captured_stdout = ""
         try:
             if not compiling and self.flags.get("memory", False):
                 if self.is_posix and timeout is None:
@@ -154,6 +159,8 @@ class BaseRunner:
                     )
                     _, status, rusage = os.wait4(p.pid, 0)
                     returncode = os.waitstatus_to_exitcode(status) if hasattr(os, "waitstatus_to_exitcode") else (status >> 8 if os.WIFEXITED(status) else 1)
+                    if p.stdout:
+                        captured_stdout = p.stdout.read().decode("utf-8", errors="ignore")
                     if sys.platform == "darwin":
                         mem_bytes = rusage.ru_maxrss
                     else:
@@ -172,6 +179,8 @@ class BaseRunner:
                         timeout=timeout
                     )
                     returncode = result.returncode
+                    if result.stdout:
+                        captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
                     after_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
                     rss_val = max(after_rss, before_rss)
                     mem_bytes = rss_val if sys.platform == "darwin" else rss_val * 1024
@@ -187,6 +196,8 @@ class BaseRunner:
                         stderr=stderr_dest
                     )
                     returncode = p.wait(timeout=timeout)
+                    if p.stdout:
+                        captured_stdout = p.stdout.read().decode("utf-8", errors="ignore")
                     try:
                         class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
                             _fields_ = [
@@ -219,6 +230,8 @@ class BaseRunner:
                         timeout=timeout
                     )
                     returncode = result.returncode
+                    if result.stdout:
+                        captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
             else:
                 result = spc.run(
                     target_cmd,
@@ -231,11 +244,16 @@ class BaseRunner:
                     timeout=timeout
                 )
                 returncode = result.returncode
+                if result.stdout:
+                    captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
             
             if stdin_file:
                 stdin_file.close()
                 
             if not compiling:
+                if expect_path and captured_stdout and not self.flags.get("quiet", False):
+                    print(captured_stdout, end="" if captured_stdout.endswith("\n") else "\n")
+
                 elapsed = time.perf_counter() - start_time
                 show_time = self.flags.get("time", False)
                 show_mem = self.flags.get("memory", False)
@@ -244,6 +262,21 @@ class BaseRunner:
                         seconds=elapsed if show_time else None,
                         memory_bytes=mem_bytes if show_mem else None
                     )
+
+                if expect_path:
+                    try:
+                        with open(expect_path, "r", encoding="utf-8", errors="ignore") as f:
+                            expected_content = f.read()
+                        
+                        if expected_content.strip() == captured_stdout.strip():
+                            Printer.action("PASS", f"Output matches {expect_path}", Colors.GREEN)
+                        else:
+                            Printer.action("FAIL", f"Output mismatch with {expect_path}", Colors.RED)
+                            Printer.diff(expected_content, captured_stdout, expected_name=str(expect_path))
+                            return False
+                    except Exception as e:
+                        Printer.error(f"Failed to read expectation file '{expect_path}': {e}")
+                        return False
             
             if returncode != 0:
                 if compiling:
