@@ -1,15 +1,33 @@
 import logging
+import os
 import sys
+import difflib
+from typing import Optional, List
+
+def should_disable_color() -> bool:
+    """Check if color output should be disabled based on environment or flags."""
+    return bool(os.getenv("NO_COLOR")) or "--no-color" in sys.argv
 
 class Colors:
     """ANSI color codes for terminal output."""
-    GREEN = '\033[92m'
-    CYAN = '\033[96m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    GRAY = '\033[1;30m'
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
+    GREEN = '' if should_disable_color() else '\033[92m'
+    CYAN = '' if should_disable_color() else '\033[96m'
+    YELLOW = '' if should_disable_color() else '\033[93m'
+    RED = '' if should_disable_color() else '\033[91m'
+    GRAY = '' if should_disable_color() else '\033[1;30m'
+    RESET = '' if should_disable_color() else '\033[0m'
+    BOLD = '' if should_disable_color() else '\033[1m'
+
+    @classmethod
+    def disable(cls):
+        """Disable all ANSI color codes."""
+        cls.GREEN = ''
+        cls.CYAN = ''
+        cls.YELLOW = ''
+        cls.RED = ''
+        cls.GRAY = ''
+        cls.RESET = ''
+        cls.BOLD = ''
 
 class TaggedFormatter(logging.Formatter):
     """Custom formatter to replicate [ TAG ] Message style."""
@@ -23,7 +41,6 @@ class TaggedFormatter(logging.Formatter):
     }
 
     def format(self, record):
-        # Allow custom tag override via extra={'tag': 'MYTAG', 'color': ...}
         tag, color = self.TAGS.get(record.levelno, ("LOG", Colors.RESET))
         
         if hasattr(record, 'tag'):
@@ -40,8 +57,6 @@ logger.setLevel(logging.INFO)
 handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(TaggedFormatter())
 logger.addHandler(handler)
-
-from typing import Optional
 
 class Printer:
     """Utility class wrapper for logging."""
@@ -102,3 +117,34 @@ class Printer:
     def separator():
         """Print a visual separator line."""
         print(f"\n{Colors.GRAY}{'-'*30}{Colors.RESET}\n")
+
+    @staticmethod
+    def diff(expected: str, actual: str, expected_name: str = "expected"):
+        """
+        Print a unified diff between expected and actual output.
+
+        Args:
+            expected (str): Expected output string.
+            actual (str): Actual output string.
+            expected_name (str): Label for expected source.
+        """
+        exp_lines = expected.splitlines(keepends=True)
+        act_lines = actual.splitlines(keepends=True)
+        diff_lines = list(difflib.unified_diff(
+            exp_lines, act_lines,
+            fromfile=expected_name,
+            tofile="actual_output"
+        ))
+        if diff_lines:
+            print(f"\n{Colors.YELLOW}--- Differences ---{Colors.RESET}")
+            for line in diff_lines:
+                line_clean = line.rstrip("\r\n")
+                if line_clean.startswith("+") and not line_clean.startswith("+++"):
+                    print(f"{Colors.GREEN}{line_clean}{Colors.RESET}")
+                elif line_clean.startswith("-") and not line_clean.startswith("---"):
+                    print(f"{Colors.RED}{line_clean}{Colors.RESET}")
+                elif line_clean.startswith("@@"):
+                    print(f"{Colors.CYAN}{line_clean}{Colors.RESET}")
+                else:
+                    print(f"{Colors.GRAY}{line_clean}{Colors.RESET}")
+            print(f"{Colors.YELLOW}-------------------{Colors.RESET}\n")

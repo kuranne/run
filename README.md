@@ -84,33 +84,46 @@ run <files> [flags]
 
 ### Available Flags
 
+#### Daily Essential Shortcuts
+
 | Flag | Shorthand | Description |
 |------|-----------|-------------|
 | `--watch` | `-w` | Re-compile and run on file change (press `c` to retry) |
 | `--force` | `-f` | Force continue on errors / non-interactive mode |
 | `--multi` | `-m` | Compile multiple files together (C/C++/Java) |
 | `--preset <name>` | `-p <name>` | Use a preset from `Run.toml` (e.g., `debug`, `release`) |
-| `--link-auto [depth]` | `-L [depth]` | Auto-find and compile source files (specify depth or leave empty for unlimited) |
-| `--flags <flags>` | `-F <flags>` | Pass extra compiler/interpreter flags (use `-F="-Wall"` or `-F "-Wall"`) |
-| `--out-dir <dir>` | `-O, -o <dir>` | Output directory for compiled binaries |
 | `--jobs <N>` | `-j <N>` | Number of parallel worker threads for multi-file compilation |
-| `--argument <args>` | `-a <args>` | Arguments to pass to the executable/script (or use `--`) |
-| `--timeout <sec>` | `-T <sec>` | Timeout in seconds for execution |
 | `--stdin [file]` | `-i [file]` | Redirect standard input from file or shell pipe (`-i` or `-i <file>`) |
-| `--env <KEY=VAL>` | `-e <KEY=VAL>` | Set environment variables |
-| `--compiler <bin>` | `-c <bin>` | Override compiler or interpreter binary |
-| `--dry-run` | `-d` | Preview commands without executing them |
 | `--time` | `-t` | Measure and display execution time |
-| `--mem`, `--memory` | `-M` | Measure and display peak memory usage |
+| `--mem`, `--memory` | `-M` | Measure and display peak memory usage (usable as `-tM`) |
+| `--dry-run` | `-d` | Preview commands without executing them |
 | `--quiet` | `-q` | Silence compiler output and logs |
-| `-v`, `-vv` | | Enable verbose debug logging (-v) or trace with stack traces (-vv) |
-| `--keep` | | Keep compiled binaries (don't delete after run) |
-| `--no-cache` | | Disable build caching |
-| `--clean` | | Clear local build cache and exit |
-| `--init` | `-I` | Initialize tailored `Run.toml` for the current project |
-| `--directory <dir>` | `-C <dir>` | Change to directory before executing |
-| `--unsafe` | | Allow running as root (⚠️ dangerous) |
+| `--verbose` | `-v, -vv` | Enable verbose debug logging (`-v`) or trace with stack traces (`-vv`) |
 | `--version` | `-V` | Show installed version |
+| `--help` | `-h` | Show help screen |
+
+#### Specialized & Advanced Options
+
+| Flag | Description |
+|------|-------------|
+| `--build-only`, `--no-run`, `-B` | Compile binary without executing (preserves output binary) |
+| `--expect <file>` | Automatically verify output and print line-by-line diffs against expected file |
+| `--test-dir <dir>` | Run batch testcases (*.in + *.out) from directory and display summary table |
+| `--doctor` | Run comprehensive system toolchain and compiler diagnostics |
+| `--no-color` | Disable ANSI color formatting (also respects `NO_COLOR` env var) |
+| `--argument <args>` | Arguments to pass to the executable/script (or use `--`) |
+| `--flags <flags>` | Pass extra compiler/interpreter flags |
+| `--compiler <bin>` | Override compiler or interpreter binary |
+| `--out-dir <dir>` | Output directory for compiled binaries |
+| `--link-auto [depth]` | Auto-find and compile source files (specify depth or leave empty for unlimited) |
+| `--timeout <sec>` | Timeout in seconds for execution |
+| `--env <KEY=VAL>` | Set environment variables |
+| `--keep` | Keep compiled binaries (don't delete after run) |
+| `--no-cache` | Disable build caching |
+| `--clean` | Clear local build cache and exit |
+| `--init` | Initialize tailored `Run.toml` for the current project |
+| `--directory <dir>`, `--cwd <dir>` | Change to directory before executing |
+| `--unsafe` | Allow running as root (⚠️ dangerous) |
 
 ### Updating
 
@@ -124,6 +137,12 @@ git pull
 
 ### Usage Examples
 
+**Toolchain Diagnostics:**
+
+```bash
+run --doctor
+```
+
 **Piping input directly into program with `-i`:**
 
 ```bash
@@ -136,22 +155,28 @@ echo "test input 123" | run test.py -i
 run solution.cpp -tM -i input.txt
 ```
 
+**Verify output against expected answer file:**
+
+```bash
+run solution.cpp -i in.txt --expect out.txt -tM
+```
+
+**Run full testcase directory suite:**
+
+```bash
+run solution.cpp --test-dir ./testcases/ -tM
+```
+
+**Build binary without running (`--build-only`):**
+
+```bash
+run main.cpp --build-only --out-dir bin/
+```
+
 **Run a Python script with program arguments:**
 
 ```bash
 run script.py -- --port 8080 --debug
-```
-
-**Run a Bash script:**
-
-```bash
-run setup.sh
-```
-
-**Compile and run C++ with debug preset:**
-
-```bash
-run main.cpp -p debug
 ```
 
 **Compile multiple C++ files in parallel with 8 threads:**
@@ -160,40 +185,22 @@ run main.cpp -p debug
 run main.cpp helper.cpp utils.cpp -m -j 8
 ```
 
-**Compile with custom flags:**
-
-```bash
-run program.c -F="-Wall -O2"
-```
-
 **Auto-find and compile all C++ files in current directory:**
 
 ```bash
-run -L
+run --link-auto
 ```
 
 **Run from a specific project directory:**
 
 ```bash
-run -C ./subproject
+run --directory ./subproject
 ```
 
 **Clear build cache:**
 
 ```bash
 run --clean
-```
-
-**Dry run to verify commands:**
-
-```bash
-run main.cpp -p release -d
-```
-
-**Measure execution time and memory:**
-
-```bash
-run script.py -t -M
 ```
 
 **Keep compiled binary for reuse:**

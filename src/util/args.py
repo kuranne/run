@@ -30,28 +30,33 @@ def args(__version__: str):
     exec_group.add_argument("-M", "--mem", "--memory", dest="mem", action="store_true", help="Measure and display peak memory usage")
     exec_group.add_argument("-q", "--quiet", action="store_true", help="Silence compiler output and logs")
     exec_group.add_argument("-v", "--verbose", action="count", default=0, help="Verbose mode (-v for debug, -vv for trace)")
-    exec_group.add_argument("-T", "--timeout", type=float, help="Timeout in seconds for execution")
     exec_group.add_argument("-i", "--stdin", nargs="?", const="-", type=str, help="Read stdin from file or pipe (-i or -i <file>)")
-    exec_group.add_argument("-e", "--env", action="append", default=[], help="Set environment variable (e.g. PORT=8080)")
-    exec_group.add_argument("-a", "--argument", type=str, default="", help="Arguments to pass to the executed program (or use --)")
+    exec_group.add_argument("--expect", type=str, help="Verify output against expected output file")
+    exec_group.add_argument("--test-dir", type=str, help="Run all matching testcases in directory (*.in + *.out)")
+    exec_group.add_argument("--timeout", type=float, help="Timeout in seconds for execution")
+    exec_group.add_argument("--env", action="append", default=[], help="Set environment variable (e.g. PORT=8080)")
+    exec_group.add_argument("--argument", type=str, default="", help="Arguments to pass to program (or use --)")
 
     # Compilation & Build group
     build_group = parser.add_argument_group("Compilation & Build")
     build_group.add_argument("-m", "--multi", action="store_true", help="Compile multiple source files together")
-    build_group.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files (optional depth)")
     build_group.add_argument("-p", "--preset", type=str, help="Configuration preset from Run.toml (e.g. debug, release)")
-    build_group.add_argument("-F", "--flags", type=str, default="", help="Compiler or interpreter flags")
-    build_group.add_argument("-c", "--compiler", type=str, help="Compiler or interpreter override (e.g. clang++)")
-    build_group.add_argument("-O", "-o", "--out-dir", type=str, help="Output directory for compiled binaries")
     build_group.add_argument("-j", "--jobs", type=int, help="Number of parallel compilation worker threads")
+    build_group.add_argument("-B", "--build-only", "--no-run", dest="build_only", action="store_true", help="Compile binary without executing")
+    build_group.add_argument("--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files (optional depth)")
+    build_group.add_argument("--flags", type=str, default="", help="Compiler or interpreter flags")
+    build_group.add_argument("--compiler", type=str, help="Compiler or interpreter override (e.g. clang++)")
+    build_group.add_argument("--out-dir", type=str, help="Output directory for compiled binaries")
     build_group.add_argument("--keep", action="store_true", help="Keep the output binary(s) after execution")
     build_group.add_argument("--no-cache", action="store_true", help="Disable build cache")
 
     # Project & Utilities group
     util_group = parser.add_argument_group("Project & Utilities")
-    util_group.add_argument("-I", "--init", action="store_true", help="Initialize tailored Run.toml for the current project")
-    util_group.add_argument("-C", "--directory", type=str, help="Change directory before executing")
+    util_group.add_argument("--doctor", action="store_true", help="Run toolchain and environment diagnostics")
+    util_group.add_argument("--init", action="store_true", help="Initialize tailored Run.toml for the current project")
+    util_group.add_argument("--directory", "--cwd", dest="directory", type=str, help="Change directory before executing")
     util_group.add_argument("--clean", action="store_true", help="Clear local build cache and exit")
+    util_group.add_argument("--no-color", action="store_true", help="Disable ANSI color codes in output")
     util_group.add_argument("--unsafe", action="store_true", help="Allow running as root")
     util_group.add_argument("-V", "--version", action="version", version=__version__, help="Check version of the binary")
 
@@ -68,18 +73,14 @@ def args(__version__: str):
     while i < len(cli_argv):
         arg = cli_argv[i]
         
-        if arg.startswith("-F") and len(arg) > 2 and not arg.startswith("-F="):
-            processed_args.append(f"-F={arg[2:]}")
-        elif arg.startswith("-a") and len(arg) > 2 and not arg.startswith("-a="):
-            processed_args.append(f"-a={arg[2:]}")
-        elif arg in ("-F", "--flags") and i + 1 < len(cli_argv):
+        if arg == "--flags" and i + 1 < len(cli_argv):
             next_arg = cli_argv[i + 1]
             if next_arg.startswith("-"):
                 processed_args.append(f"--flags={next_arg}")
                 i += 1
             else:
                 processed_args.append(arg)
-        elif arg in ("-a", "--argument") and i + 1 < len(cli_argv):
+        elif arg == "--argument" and i + 1 < len(cli_argv):
             next_arg = cli_argv[i + 1]
             if next_arg.startswith("-"):
                 processed_args.append(f"--argument={next_arg}")
