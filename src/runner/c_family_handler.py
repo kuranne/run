@@ -105,7 +105,7 @@ class CFamilyHandler:
         failed = False
         
         # Parallel compilation
-        max_workers = min(32, (os.cpu_count() or 1) + 4)
+        max_workers = self.flags.get("jobs") or min(32, (os.cpu_count() or 1) + 4)
         from util.output import Printer
         Printer.info(f"Compiling {len(sources)} files using {max_workers} threads...")
         

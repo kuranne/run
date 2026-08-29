@@ -62,3 +62,43 @@ def test_args_verbose(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['run', '-vv'])
     parsed = args("1.0.0")
     assert parsed.verbose == 2
+
+def test_args_posix_double_dash_forwarding(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '--', '-v', '--port', '8080'])
+    parsed = args("1.0.0")
+    assert parsed.files == ['main.py']
+    assert parsed.argument == '-v --port 8080'
+
+def test_args_posix_double_dash_merge_with_flag(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '-a', 'initial', '--', 'extra1', 'extra2'])
+    parsed = args("1.0.0")
+    assert parsed.files == ['main.py']
+    assert parsed.argument == 'initial extra1 extra2'
+
+def test_args_jobs_flag(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-j', '8'])
+    parsed = args("1.0.0")
+    assert parsed.jobs == 8
+
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--jobs', '4'])
+    parsed = args("1.0.0")
+    assert parsed.jobs == 4
+
+def test_args_directory_flag(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-C', 'src/'])
+    parsed = args("1.0.0")
+    assert parsed.directory == 'src/'
+
+def test_args_clean_flag(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['run', '--clean'])
+    parsed = args("1.0.0")
+    assert parsed.clean is True
+
+def test_args_out_dir_aliases(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-O', 'bin/'])
+    parsed = args("1.0.0")
+    assert parsed.out_dir == 'bin/'
+
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-o', 'dist/'])
+    parsed = args("1.0.0")
+    assert parsed.out_dir == 'dist/'

@@ -22,6 +22,23 @@ def main():
         logging.getLogger("run_kuranne").setLevel(logging.DEBUG)
         Printer.debug("Debug logging enabled")
 
+    import os
+
+    # Handle -C / --directory
+    if args.directory:
+        target_dir = Path(args.directory)
+        if not target_dir.is_dir():
+            Printer.error(f"Specified directory does not exist: {args.directory}")
+            return 1
+        os.chdir(target_dir)
+
+    # Handle --clean
+    if args.clean:
+        from util.cache import CacheManager
+        CacheManager().clear()
+        Printer.action("CLEAN", "Build cache cleared successfully.", Colors.GREEN)
+        return 0
+
     # Handle --init
     if args.init:
         success = ConfigInitializer.init_config(Path("."))
@@ -45,6 +62,7 @@ def main():
         "quiet": args.quiet,
         "watch": args.watch,
         "force": args.force,
+        "jobs": args.jobs,
         "timeout": args.timeout,
         "stdin": args.stdin,
         "env": args.env,
