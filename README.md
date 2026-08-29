@@ -86,20 +86,30 @@ run <files> [flags]
 
 | Flag | Shorthand | Description |
 |------|-----------|-------------|
+| `--watch` | `-w` | Re-compile and run on file change (press `c` to retry) |
+| `--force` | `-f` | Force continue on errors / non-interactive mode |
 | `--multi` | `-m` | Compile multiple files together (C/C++/Java) |
 | `--preset <name>` | `-p <name>` | Use a preset from `Run.toml` (e.g., `debug`, `release`) |
 | `--link-auto [depth]` | `-L [depth]` | Auto-find and compile source files (specify depth or leave empty for unlimited) |
+| `--flags <flags>` | `-F <flags>` | Pass extra compiler/interpreter flags (use `-F="-Wall"` or `-F "-Wall"`) |
+| `--out-dir <dir>` | `-O, -o <dir>` | Output directory for compiled binaries |
+| `--jobs <N>` | `-j <N>` | Number of parallel worker threads for multi-file compilation |
+| `--argument <args>` | `-a <args>` | Arguments to pass to the executable/script (or use `--`) |
+| `--timeout <sec>` | `-T <sec>` | Timeout in seconds for execution |
+| `--stdin <file>` | `-i <file>` | Redirect standard input from file |
+| `--env <KEY=VAL>` | `-e <KEY=VAL>` | Set environment variables |
+| `--compiler <bin>` | `-c <bin>` | Override compiler or interpreter binary |
 | `--dry-run` | `-d` | Preview commands without executing them |
 | `--time` | `-t` | Measure and display execution time |
-| `--flags <flags>` | `-F <flags>` | Pass extra compiler/interpreter flags (use `-F="-Wall"` or `-F "-Wall"`) |
-| `--force` | `-f` | Force continue on errors / non-interactive mode |
-| `--argument <args>` | `-a <args>` | Arguments to pass to the executable/script |
-| `--init` | `-I` | Initialize tailored `Run.toml` for the current project |
+| `--quiet` | `-q` | Silence compiler output and logs |
+| `-v`, `-vv` | | Enable verbose debug logging (-v) or trace with stack traces (-vv) |
 | `--keep` | | Keep compiled binaries (don't delete after run) |
 | `--no-cache` | | Disable build caching |
-| `-v`, `-vv` | | Enable verbose debug logging (-v) or trace with stack traces (-vv) |
+| `--clean` | | Clear local build cache and exit |
+| `--init` | `-I` | Initialize tailored `Run.toml` for the current project |
+| `--directory <dir>` | `-C <dir>` | Change to directory before executing |
 | `--unsafe` | | Allow running as root (⚠️ dangerous) |
-| `--version` | | Show installed version |
+| `--version` | `-V` | Show installed version |
 
 ### Updating
 
@@ -113,10 +123,10 @@ git pull
 
 ### Usage Examples
 
-**Run a Python script:**
+**Run a Python script with program arguments:**
 
 ```bash
-run script.py
+run script.py -- --port 8080 --debug
 ```
 
 **Run a Bash script:**
@@ -125,22 +135,16 @@ run script.py
 run setup.sh
 ```
 
-**Run a Node.js script with arguments:**
-
-```bash
-run app.js -a "arg1 arg2"
-```
-
 **Compile and run C++ with debug preset:**
 
 ```bash
 run main.cpp -p debug
 ```
 
-**Compile multiple C++ files:**
+**Compile multiple C++ files in parallel with 8 threads:**
 
 ```bash
-run main.cpp helper.cpp utils.cpp -m
+run main.cpp helper.cpp utils.cpp -m -j 8
 ```
 
 **Compile with custom flags:**
@@ -153,6 +157,18 @@ run program.c -F="-Wall -O2"
 
 ```bash
 run -L
+```
+
+**Run from a specific project directory:**
+
+```bash
+run -C ./subproject
+```
+
+**Clear build cache:**
+
+```bash
+run --clean
 ```
 
 **Dry run to verify commands:**
