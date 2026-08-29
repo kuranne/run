@@ -1,0 +1,5 @@
+@startuml
+actor "User" as u 
+u --> (./setup.sh [once])
+u --> (run <file>)
+@enduml

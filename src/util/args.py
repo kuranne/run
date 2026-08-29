@@ -27,10 +27,11 @@ def args(__version__: str):
     exec_group.add_argument("-f", "--force", action="store_true", help="Force continue on errors without interactive prompts")
     exec_group.add_argument("-d", "--dry-run", action="store_true", help="Simulate execution without running commands")
     exec_group.add_argument("-t", "--time", action="store_true", help="Measure and display execution time")
+    exec_group.add_argument("-M", "--mem", "--memory", dest="mem", action="store_true", help="Measure and display peak memory usage")
     exec_group.add_argument("-q", "--quiet", action="store_true", help="Silence compiler output and logs")
     exec_group.add_argument("-v", "--verbose", action="count", default=0, help="Verbose mode (-v for debug, -vv for trace)")
     exec_group.add_argument("-T", "--timeout", type=float, help="Timeout in seconds for execution")
-    exec_group.add_argument("-i", "--stdin", type=str, help="Read stdin from file")
+    exec_group.add_argument("-i", "--stdin", nargs="?", const="-", type=str, help="Read stdin from file or pipe (-i or -i <file>)")
     exec_group.add_argument("-e", "--env", action="append", default=[], help="Set environment variable (e.g. PORT=8080)")
     exec_group.add_argument("-a", "--argument", type=str, default="", help="Arguments to pass to the executed program (or use --)")
 

@@ -84,3 +84,43 @@ def test_java_handler_classpath(tmp_path, monkeypatch):
     assert exec_cmd[0] == "java"
     assert "-cp" in exec_cmd
     assert str(src_dir) in exec_cmd
+
+def test_printer_metrics(capsys):
+    from util.output import Printer
+    # Time only
+    Printer.metrics(seconds=0.042)
+    out1 = capsys.readouterr().out
+    assert "Took 0.042s" in out1
+
+    # Memory only (< 1 MB)
+    Printer.metrics(memory_bytes=512 * 1024)
+    out2 = capsys.readouterr().out
+    assert "Peak Memory: 512.0 KB" in out2
+
+    # Memory only (>= 1 MB)
+    Printer.metrics(memory_bytes=4 * 1024 * 1024)
+    out3 = capsys.readouterr().out
+    assert "Peak Memory: 4.00 MB" in out3
+
+    # Both
+    Printer.metrics(seconds=0.123, memory_bytes=2 * 1024 * 1024)
+    out4 = capsys.readouterr().out
+    assert "Took 0.123s" in out4
+    assert "Peak Memory: 2.00 MB" in out4
+
+def test_run_command_memory_tracking(tmp_path):
+    runner = CompilerRunner({"memory": True, "time": True})
+    # Run a simple Python exit command
+    assert runner.run_command(["python3", "-c", "import sys; sys.exit(0)"]) is True
+
+def test_run_command_piped_stdin(tmp_path, capfd, monkeypatch):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO("piped_secret_42\n"))
+    runner = CompilerRunner({"stdin": "-"})
+    assert runner._buffered_stdin == "piped_secret_42\n"
+    
+    # Run python reading from stdin
+    cmd = ["python3", "-c", "import sys; print(f'ECHO: {sys.stdin.read().strip()}')"]
+    assert runner.run_command(cmd) is True
+    out, _ = capfd.readouterr()
+    assert "ECHO: piped_secret_42" in out

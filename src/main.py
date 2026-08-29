@@ -56,6 +56,7 @@ def main():
         "multi" : args.multi,
         "keep" : args.keep,
         "time" : args.time,
+        "memory" : args.mem,
         "dry_run": args.dry_run,
         "preset": args.preset,
         "no_cache": args.no_cache,
