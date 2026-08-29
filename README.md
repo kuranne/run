@@ -96,11 +96,12 @@ run <files> [flags]
 | `--jobs <N>` | `-j <N>` | Number of parallel worker threads for multi-file compilation |
 | `--argument <args>` | `-a <args>` | Arguments to pass to the executable/script (or use `--`) |
 | `--timeout <sec>` | `-T <sec>` | Timeout in seconds for execution |
-| `--stdin <file>` | `-i <file>` | Redirect standard input from file |
+| `--stdin [file]` | `-i [file]` | Redirect standard input from file or shell pipe (`-i` or `-i <file>`) |
 | `--env <KEY=VAL>` | `-e <KEY=VAL>` | Set environment variables |
 | `--compiler <bin>` | `-c <bin>` | Override compiler or interpreter binary |
 | `--dry-run` | `-d` | Preview commands without executing them |
 | `--time` | `-t` | Measure and display execution time |
+| `--mem`, `--memory` | `-M` | Measure and display peak memory usage |
 | `--quiet` | `-q` | Silence compiler output and logs |
 | `-v`, `-vv` | | Enable verbose debug logging (-v) or trace with stack traces (-vv) |
 | `--keep` | | Keep compiled binaries (don't delete after run) |
@@ -122,6 +123,18 @@ git pull
 ```
 
 ### Usage Examples
+
+**Piping input directly into program with `-i`:**
+
+```bash
+echo "test input 123" | run test.py -i
+```
+
+**Competitive programming benchmark (time, memory, stdin redirection):**
+
+```bash
+run solution.cpp -tM -i input.txt
+```
 
 **Run a Python script with program arguments:**
 
@@ -177,10 +190,10 @@ run --clean
 run main.cpp -p release -d
 ```
 
-**Measure execution time:**
+**Measure execution time and memory:**
 
 ```bash
-run script.py -t
+run script.py -t -M
 ```
 
 **Keep compiled binary for reuse:**

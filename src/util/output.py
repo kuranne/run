@@ -41,6 +41,8 @@ handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(TaggedFormatter())
 logger.addHandler(handler)
 
+from typing import Optional
+
 class Printer:
     """Utility class wrapper for logging."""
     @staticmethod
@@ -50,10 +52,31 @@ class Printer:
         logger.info(message, extra={'tag': tag, 'color': color})
 
     @staticmethod
+    def metrics(seconds: Optional[float] = None, memory_bytes: Optional[int] = None):
+        """
+        Print execution performance metrics (time and/or peak memory).
+
+        Args:
+            seconds (Optional[float]): Execution duration in seconds.
+            memory_bytes (Optional[int]): Peak memory usage in bytes.
+        """
+        parts = []
+        if seconds is not None:
+            parts.append(f"Took {seconds:.3f}s")
+        if memory_bytes is not None and memory_bytes > 0:
+            mb = memory_bytes / (1024 * 1024)
+            if mb >= 1.0:
+                parts.append(f"Peak Memory: {mb:.2f} MB")
+            else:
+                kb = memory_bytes / 1024
+                parts.append(f"Peak Memory: {kb:.1f} KB")
+        if parts:
+            print(f"{Colors.YELLOW}  -> {' | '.join(parts)}{Colors.RESET}")
+
+    @staticmethod
     def time(seconds: float):
         """Print execution time."""
-        # Direct print for time to avoid logger format, or we can use a helper
-        print(f"{Colors.YELLOW}  -> Took {seconds:.3f}s{Colors.RESET}")
+        Printer.metrics(seconds=seconds)
 
     @staticmethod
     def error(message: str):

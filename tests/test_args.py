@@ -102,3 +102,44 @@ def test_args_out_dir_aliases(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-o', 'dist/'])
     parsed = args("1.0.0")
     assert parsed.out_dir == 'dist/'
+
+def test_args_memory_flags(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-M'])
+    parsed = args("1.0.0")
+    assert parsed.mem is True
+
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--mem'])
+    parsed = args("1.0.0")
+    assert parsed.mem is True
+
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--memory'])
+    parsed = args("1.0.0")
+    assert parsed.mem is True
+
+def test_args_time_and_memory_combined(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-t', '-M'])
+    parsed = args("1.0.0")
+    assert parsed.time is True
+    assert parsed.mem is True
+
+def test_args_stdin_flag_variants(monkeypatch):
+    # Standalone -i
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-i'])
+    parsed = args("1.0.0")
+    assert parsed.stdin == '-'
+
+    # Explicit -i -
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-i', '-'])
+    parsed = args("1.0.0")
+    assert parsed.stdin == '-'
+
+    # -i with file path
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-i', 'input.txt'])
+    parsed = args("1.0.0")
+    assert parsed.stdin == 'input.txt'
+
+    # -i combined with -- forwarding
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-i', '--', 'arg1', 'arg2'])
+    parsed = args("1.0.0")
+    assert parsed.stdin == '-'
+    assert parsed.argument == 'arg1 arg2'

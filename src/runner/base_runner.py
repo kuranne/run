@@ -1,7 +1,9 @@
 import os
+import sys
 import subprocess as spc
 import time
 import shlex
+import tempfile
 from typing import List, Dict, Optional, Any
 from pathlib import Path
 from util.config import Config
@@ -45,6 +47,15 @@ class BaseRunner:
         # Run args
         clean_run_args = run_args.strip().strip('"').strip("'")
         self.run_args = shlex.split(clean_run_args) if clean_run_args else []
+
+        # Buffered stdin for pipe redirection (-i or -i -)
+        self._buffered_stdin: Optional[str] = None
+        if self.flags.get("stdin") == "-":
+            try:
+                if not sys.stdin.isatty():
+                    self._buffered_stdin = sys.stdin.read()
+            except Exception as e:
+                Printer.warning(f"Failed to read from stdin: {e}")
 
     def get_executable_path(self, source_path: Path) -> Path:
         """
@@ -110,10 +121,16 @@ class BaseRunner:
         stdin_file = None
         stdin_path = self.flags.get("stdin")
         if not compiling and stdin_path:
-            try:
-                stdin_file = open(stdin_path, "r")
-            except Exception as e:
-                Printer.error(f"Failed to open stdin file {stdin_path}: {e}")
+            if stdin_path == "-":
+                if self._buffered_stdin is not None:
+                    stdin_file = tempfile.TemporaryFile(mode="w+")
+                    stdin_file.write(self._buffered_stdin)
+                    stdin_file.seek(0)
+            else:
+                try:
+                    stdin_file = open(stdin_path, "r")
+                except Exception as e:
+                    Printer.error(f"Failed to open stdin file {stdin_path}: {e}")
 
         # Setup quiet mode for compiler
         stdout_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
@@ -123,29 +140,116 @@ class BaseRunner:
 
         target_cmd = cmd_str if use_shell and isinstance(cmd, list) else cmd
 
+        mem_bytes = None
         try:
-            result = spc.run(
-                target_cmd, 
-                check=False, 
-                shell=use_shell, 
-                env=env,
-                stdin=stdin_file,
-                stdout=stdout_dest,
-                stderr=stderr_dest,
-                timeout=timeout
-            )
+            if not compiling and self.flags.get("memory", False):
+                if self.is_posix and timeout is None:
+                    p = spc.Popen(
+                        target_cmd,
+                        shell=use_shell,
+                        env=env,
+                        stdin=stdin_file,
+                        stdout=stdout_dest,
+                        stderr=stderr_dest
+                    )
+                    _, status, rusage = os.wait4(p.pid, 0)
+                    returncode = os.waitstatus_to_exitcode(status) if hasattr(os, "waitstatus_to_exitcode") else (status >> 8 if os.WIFEXITED(status) else 1)
+                    if sys.platform == "darwin":
+                        mem_bytes = rusage.ru_maxrss
+                    else:
+                        mem_bytes = rusage.ru_maxrss * 1024
+                elif self.is_posix:
+                    import resource
+                    before_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+                    result = spc.run(
+                        target_cmd,
+                        check=False,
+                        shell=use_shell,
+                        env=env,
+                        stdin=stdin_file,
+                        stdout=stdout_dest,
+                        stderr=stderr_dest,
+                        timeout=timeout
+                    )
+                    returncode = result.returncode
+                    after_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+                    rss_val = max(after_rss, before_rss)
+                    mem_bytes = rss_val if sys.platform == "darwin" else rss_val * 1024
+                elif os.name == "nt":
+                    import ctypes
+                    from ctypes import wintypes
+                    p = spc.Popen(
+                        target_cmd,
+                        shell=use_shell,
+                        env=env,
+                        stdin=stdin_file,
+                        stdout=stdout_dest,
+                        stderr=stderr_dest
+                    )
+                    returncode = p.wait(timeout=timeout)
+                    try:
+                        class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                            _fields_ = [
+                                ('cb', wintypes.DWORD),
+                                ('PageFaultCount', wintypes.DWORD),
+                                ('PeakWorkingSetSize', ctypes.c_size_t),
+                                ('WorkingSetSize', ctypes.c_size_t),
+                                ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
+                                ('QuotaPagedPoolUsage', ctypes.c_size_t),
+                                ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
+                                ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
+                                ('PagefileUsage', ctypes.c_size_t),
+                                ('PeakPagefileUsage', ctypes.c_size_t),
+                            ]
+                        counters = PROCESS_MEMORY_COUNTERS()
+                        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
+                        if ctypes.windll.psapi.GetProcessMemoryInfo(int(p._handle), ctypes.byref(counters), counters.cb):
+                            mem_bytes = int(counters.PeakWorkingSetSize)
+                    except Exception:
+                        mem_bytes = None
+                else:
+                    result = spc.run(
+                        target_cmd,
+                        check=False,
+                        shell=use_shell,
+                        env=env,
+                        stdin=stdin_file,
+                        stdout=stdout_dest,
+                        stderr=stderr_dest,
+                        timeout=timeout
+                    )
+                    returncode = result.returncode
+            else:
+                result = spc.run(
+                    target_cmd,
+                    check=False,
+                    shell=use_shell,
+                    env=env,
+                    stdin=stdin_file,
+                    stdout=stdout_dest,
+                    stderr=stderr_dest,
+                    timeout=timeout
+                )
+                returncode = result.returncode
             
             if stdin_file:
                 stdin_file.close()
                 
-            if self.flags.get("time", False) and not compiling:
-                Printer.time(time.perf_counter() - start_time)
+            if not compiling:
+                elapsed = time.perf_counter() - start_time
+                show_time = self.flags.get("time", False)
+                show_mem = self.flags.get("memory", False)
+                if show_time or show_mem:
+                    Printer.metrics(
+                        seconds=elapsed if show_time else None,
+                        memory_bytes=mem_bytes if show_mem else None
+                    )
             
-            if result.returncode != 0:
+            if returncode != 0:
                 if compiling:
-                    raise CompilationError(f"Compilation failed with exit code {result.returncode}")
+                    raise CompilationError(f"Compilation failed with exit code {returncode}")
                 else:
-                    raise ExecutionError(f"Execution failed with exit code {result.returncode}")
+                    raise ExecutionError(f"Execution failed with exit code {returncode}")
             return True
             
         except spc.TimeoutExpired:
