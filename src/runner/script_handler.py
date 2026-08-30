@@ -107,7 +107,10 @@ class ScriptHandler:
             Printer.error(str(e))
             return
         
-        self.run_command([prog, str(fp)] + self.run_args)
+        if self.flags.get("debug"):
+            self.run_command([prog, "--inspect-brk", str(fp)] + self.run_args)
+        else:
+            self.run_command([prog, str(fp)] + self.run_args)
 
     def _handle_perl_execution(self, fp: Path):
         """

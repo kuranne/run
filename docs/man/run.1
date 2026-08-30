@@ -1,0 +1,198 @@
+.TH RUN 1 "August 2026" "Run Manual" "User Commands"
+.SH NAME
+run \- intelligent auto compiler, project runner, and developer productivity tool
+.SH SYNOPSIS
+.B run
+[\fIfiles...\fR] [\fIoptions\fR] [\fB\-\-\fR \fIprogram-args...\fR]
+.SH DESCRIPTION
+.B run
+is a high-performance, intelligent build system and code runner. It automatically detects source languages (via file extension or shebang), compiles required binaries (C, C++, Rust, Java, Go, Zig), executes target programs with optional instrumentation, manages temporary artifacts, and supports custom workflows configured via \fBRun.toml\fR.
+
+.SH OPTIONS
+.SS "Execution & Runtime"
+.TP
+.BR \-w ", " \-\-watch
+Watch mode: monitor target files and dependencies, re-compiling and re-running automatically upon file change. Press \fBc\fR or Enter to trigger manual rebuilds.
+.TP
+.BR \-f ", " \-\-force
+Force continue on errors and disable interactive prompts.
+.TP
+.BR \-d ", " \-\-dry-run
+Simulate compilation and execution without running commands.
+.TP
+.BR \-t ", " \-\-time
+Measure and display total program execution time in seconds.
+.TP
+.BR \-M ", " \-\-mem ", " \-\-memory
+Measure and display peak resident memory usage (RSS). Can be combined with \fB-t\fR (e.g., \fBrun solution.cpp -tM\fR).
+.TP
+.BR \-q ", " \-\-quiet
+Silence compiler output and info banners.
+.TP
+.BR \-v ", " \-vv ", " \-\-verbose
+Enable verbose debug logging (\fB-v\fR) or full trace with exception stack traces (\fB-vv\fR).
+.TP
+.BR \-i ", " \-\-stdin " [\fIfile\fR]"
+Redirect standard input from a file or from a piped shell stream (e.g. \fBecho "data" | run test.py -i\fR).
+.TP
+.BI \-\-expect " file"
+Verify program output against an expected answer file. Displays colored unified diffs on mismatch.
+.TP
+.BI \-\-test\-dir " directory"
+Batch testcase runner: discovers and executes all matching testcase pairs (\fB*.in\fR + \fB*.out\fR or \fBin*.txt\fR + \fBout*.txt\fR) in the specified folder and displays a summary table.
+.TP
+.BR \-\-debug
+Multi-language smart debugger launcher. Automatically uses \fBlldb\fR on macOS, \fBgdb\fR on Linux, \fBpdb\fR for Python, and \fB--inspect-brk\fR for Node.js.
+.TP
+.BR \-\-gdb
+Compile and attach an interactive GDB debugger session.
+.TP
+.BR \-\-lldb
+Compile and attach an interactive LLDB debugger session.
+.TP
+.BR \-\-valgrind
+Run compiled binary with Valgrind detailed memory leak checking (\fB--leak-check=full --track-origins=yes\fR).
+.TP
+.BI \-\-timeout " seconds"
+Set maximum execution time limit before terminating the process.
+.TP
+.BI \-\-env " KEY=VALUE"
+Set environment variable for the child process. Can be passed multiple times.
+.TP
+.BI \-\-argument " args"
+Arguments to pass to the compiled binary or script. Alternatively, pass arguments after a \fB--\fR separator.
+
+.SS "Compilation & Build"
+.TP
+.BR \-m ", " \-\-multi
+Compile multiple source files together into a single binary. Includes CPM (C Project Manager) to automatically detect \fBmain()\fR entrypoint.
+.TP
+.BI \-p ", " \-\-preset " name"
+Apply a build preset defined in \fBRun.toml\fR (e.g., \fBdebug\fR, \fBrelease\fR).
+.TP
+.BI \-j ", " \-\-jobs " N"
+Number of parallel worker threads to utilize for multi-file compilation.
+.TP
+.BR \-B ", " \-\-build\-only ", " \-\-no\-run
+Compile or build the binary without executing it (preserves the binary).
+.TP
+.BR \-\-asan
+Compile with AddressSanitizer and UndefinedBehaviorSanitizer flags (\fB-fsanitize=address,undefined -fno-omit-frame-pointer\fR).
+.TP
+.BR \-\-tsan
+Compile with ThreadSanitizer flags (\fB-fsanitize=thread\fR).
+.TP
+.BI \-\-sanitize " type"
+Compile with arbitrary custom sanitizer flags (\fB-fsanitize=\fItype\fR).
+.TP
+.BI \-\-link\-auto " [depth]"
+Auto-discover and link all source files in the project workspace up to an optional search depth.
+.TP
+.BI \-\-flags " flags"
+Pass custom compiler or interpreter flags (e.g. \fB--flags="-Wall -O3"\fR).
+.TP
+.BI \-\-compiler " binary"
+Override compiler or interpreter executable (e.g. \fB--compiler clang++\fR).
+.TP
+.BI \-\-out\-dir " directory"
+Output directory where compiled binaries will be placed.
+.TP
+.BR \-\-keep
+Preserve compiled binaries after execution instead of deleting them.
+.TP
+.BR \-\-no\-cache
+Bypass compilation caching and force full recompilation.
+
+.SS "Project & Utilities"
+.TP
+.BI \-\-new " target"
+Scaffold starter source code or multi-file project templates.
+.TP
+.BI \-\-template " name"
+Specify a named template defined in \fBRun.toml\fR.
+.TP
+.BR \-\-doctor
+Run system toolchain diagnostics across compilers, interpreters, and build utilities.
+.TP
+.BR \-\-init
+Initialize a tailored \fBRun.toml\fR configuration file for the current project.
+.TP
+.BI \-\-directory ", " \-\-cwd " directory"
+Change working directory before executing.
+.TP
+.BR \-\-clean
+Clear the local compilation cache.
+.TP
+.BI \-\-completion " [shell]"
+Generate shell completion script for \fBzsh\fR, \fBbash\fR, \fBfish\fR, or \fBpowershell\fR. When called without arguments, prints setup instructions.
+.TP
+.BR \-\-no\-color
+Disable ANSI color formatting in terminal output (also respects \fBNO_COLOR\fR env var).
+.TP
+.BR \-\-unsafe
+Allow running as root (caution).
+.TP
+.BR \-V ", " \-\-version
+Show installed version.
+.TP
+.BR \-h ", " \-\-help
+Display short help message and exit.
+
+.SH CONFIGURATION
+\fBrun\fR reads configuration from \fBRun.toml\fR. It searches for configuration files in the following priority order:
+.IP 1. 3
+Current working directory or any parent directory (up to 4 levels up).
+.IP 2. 3
+Global configuration directory:
+.RS
+.IP \(bu 2
+\fB$XDG_CONFIG_HOME/run_kuranne/Run.toml\fR or \fB~/.config/run_kuranne/Run.toml\fR on Linux/macOS.
+.IP \(bu 2
+\fB%APPDATA%\\run_kuranne\\Run.toml\fR on Windows.
+.RE
+
+.SH ENVIRONMENT
+.TP
+.B NO_COLOR
+If set and non-empty, suppresses ANSI color formatting.
+.TP
+.B XDG_CONFIG_HOME
+Specifies location of user-specific global configuration files.
+.TP
+.B XDG_CACHE_HOME
+Specifies location of compilation caches.
+
+.SH EXAMPLES
+.TP
+.B run solution.cpp -tM -i input.txt
+Compile and benchmark execution time, peak memory, with input redirection.
+.TP
+.B run solution.cpp --test-dir ./tests/ -tM
+Execute all testcase pairs in the tests directory.
+.TP
+.B run main.cpp --debug
+Launch an interactive debugging session (LLDB on macOS, GDB on Linux).
+.TP
+.B run --new solution.cpp
+Scaffold a starter C++ solution file.
+.TP
+.B run --new ./problem1 --template leetcode_rs
+Scaffold a multi-file LeetCode template (\fBmain.rs\fR + \fBsolve.rs\fR).
+.TP
+.B run --doctor
+Diagnose all installed toolchains and runtimes.
+
+.SH SEE ALSO
+Full documentation guides are available in the \fBdocs/\fR directory:
+.IP \(bu 2
+\fBdocs/configuration.md\fR
+.IP \(bu 2
+\fBdocs/debugging_and_sanitizers.md\fR
+.IP \(bu 2
+\fBdocs/testing_and_benchmarking.md\fR
+.IP \(bu 2
+\fBdocs/templates_and_scaffolding.md\fR
+.IP \(bu 2
+\fBdocs/completions.md\fR
+.IP \(bu 2
+\fBdocs/troubleshooting.md\fR

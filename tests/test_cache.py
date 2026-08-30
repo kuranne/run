@@ -43,3 +43,31 @@ def test_cache_header_dependency(tmp_path):
     # Modify header file only
     header.write_text("int get_val() { return 2; }")
     assert manager.is_changed(source) is True
+
+def test_cache_commented_header_dependency(tmp_path):
+    manager = CacheManager(project_root=tmp_path)
+    source = tmp_path / "main.c"
+    source.write_text("""
+    // #include "commented_one.h"
+    /* #include "commented_two.h" */
+    int main() { return 0; }
+    """)
+
+    includes = manager._get_c_includes(source)
+    assert len(includes) == 0
+
+def test_cache_concurrent_updates(tmp_path):
+    import concurrent.futures
+    manager = CacheManager(project_root=tmp_path)
+    
+    files = []
+    for i in range(10):
+        f = tmp_path / f"file_{i}.c"
+        f.write_text(f"int func_{i}() {{ return {i}; }}")
+        files.append(f)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        list(executor.map(manager.update_cache, files))
+
+    for f in files:
+        assert manager.is_changed(f) is False

@@ -64,7 +64,8 @@ class Config:
             try:
                 with open(config_path, "rb") as f:
                     self.data = tomllib.load(f)
-                Printer.info(f"Loaded config: {config_path}")
+                if "--_complete" not in sys.argv and "--completion" not in sys.argv:
+                    Printer.info(f"Loaded config: {config_path}")
             except Exception as e:
                 Printer.error(f"Failed to parse {config_path}: {e}")
             

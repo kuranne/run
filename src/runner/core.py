@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import os
+import sys
 from util.output import Printer, Colors
 from util.errors import ConfigError, ExecutionError
 from util.cache import CacheManager
@@ -143,11 +144,14 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
                         self._handle_c_family_single_file(fp)
                     case _:
                         raise ConfigError(f"Unsupported extension: {ext}")
+            return True
                         
         except (ConfigError, ExecutionError, FileNotFoundError, OSError) as e:
             Printer.error(f"Failed to process {fp}: {e}")
+            return False
         except Exception as e:
             Printer.error(f"Unexpected error processing {fp}: {e}")
+            return False
 
     def _handle_multi_compile(self, paths: List[Path]):
         """
@@ -187,10 +191,27 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             bin_path (Path): Path to the binary.
             args (List[str]): List of arguments.
         """
+        if self.flags.get("build_only"):
+            Printer.action("BUILD", f"Binary generated successfully: {bin_path}", Colors.GREEN)
+            return
+
         target = str(bin_path) if self.is_posix else str(bin_path.absolute())
 
         if self.is_posix and not target.startswith('/') and not target.startswith('./'):
             target = f"./{target}"
         
-        cmd = [target] + args + self.run_args
+        target_args = args + self.run_args
+
+        if self.flags.get("gdb"):
+            cmd = ["gdb", "--args", target] + target_args
+        elif self.flags.get("lldb"):
+            cmd = ["lldb", "--", target] + target_args
+        elif self.flags.get("debug"):
+            dbg = "lldb" if sys.platform == "darwin" else "gdb"
+            cmd = ([dbg, "--"] if dbg == "lldb" else [dbg, "--args"]) + [target] + target_args
+        elif self.flags.get("valgrind"):
+            cmd = ["valgrind", "--leak-check=full", "--track-origins=yes", target] + target_args
+        else:
+            cmd = [target] + target_args
+
         self.run_command(cmd)
