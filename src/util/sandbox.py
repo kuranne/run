@@ -85,17 +85,26 @@ class ContainerSandbox:
         raise ConfigError("No container engine (Docker/Podman) found. Please install one to use --sandbox.")
 
     @staticmethod
-    def wrap_command(cmd: List[str], net: bool = False) -> List[str]:
+    def wrap_command(cmd: List[str], net: bool = False, compiling: bool = False) -> List[str]:
         if sys.platform == "linux":
-            # On Linux, --sandbox uses bwrap natively
+            # On Linux, --sandbox uses bwrap natively, but if compiling we don't really need to wrap it.
+            # Actually, if we wrap compiling, we must allow write to cwd.
+            # bwrap_cmd in NativeRestrictor binds `/` as ro, so it would fail to write.
+            # Let's just fallback to NativeRestrictor but we need to tell it if it's compiling.
+            # However, NativeRestrictor shouldn't be used for compiling.
+            if compiling:
+                return cmd
             return NativeRestrictor.wrap_command(cmd, net)
             
         engine = ContainerSandbox._get_engine()
         cwd = os.getcwd()
         
+        # Determine mount mode: rw for compilation, ro for execution
+        mount_mode = "rw" if compiling else "ro"
+        
         container_cmd = [
             engine, "run", "--rm",
-            "-v", f"{cwd}:{cwd}:ro",
+            "-v", f"{cwd}:{cwd}:{mount_mode}",
             "-v", "/tmp:/tmp",
             "-w", cwd
         ]
@@ -103,8 +112,25 @@ class ContainerSandbox:
         if not net:
             container_cmd.extend(["--network", "none"])
             
-        # Using ubuntu as a generic base image. Users may need to pull it.
-        container_cmd.append("ubuntu:latest") 
+        base_image = "ubuntu:latest"
+        if cmd:
+            exe = cmd[0].lower()
+            if "gcc" in exe or "g++" in exe or "clang" in exe:
+                base_image = "gcc:latest"
+            elif "python" in exe or "pytest" in exe:
+                base_image = "python:3-slim"
+            elif "rustc" in exe or "cargo" in exe:
+                base_image = "rust:latest"
+            elif "java" in exe:
+                base_image = "openjdk:latest"
+            elif "go" in exe:
+                base_image = "golang:latest"
+            elif "node" in exe or "npm" in exe or "npx" in exe:
+                base_image = "node:latest"
+            elif "ruby" in exe:
+                base_image = "ruby:latest"
+                
+        container_cmd.append(base_image) 
         container_cmd.extend(cmd)
         
         return container_cmd
