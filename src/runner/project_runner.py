@@ -104,6 +104,36 @@ class ProjectRunner:
         return None
 
     @staticmethod
+    def _run_step(step_str: str, extra_args: List[str], runner_ref: Any, compiling: bool = False) -> bool:
+        """
+        Execute a project step, properly splitting compound commands (e.g. '&&' or ';')
+        into sequential list-based executions without shell syntax errors.
+        """
+        if "&&" in step_str:
+            subcmds = [s.strip() for s in step_str.split("&&") if s.strip()]
+            for idx, sub in enumerate(subcmds):
+                flags = extra_args if idx == len(subcmds) - 1 else []
+                cmd = shlex.split(sub) + flags
+                if not cmd:
+                    continue
+                if not runner_ref.run_command(cmd, compiling=compiling):
+                    return False
+            return True
+        elif ";" in step_str:
+            subcmds = [s.strip() for s in step_str.split(";") if s.strip()]
+            for idx, sub in enumerate(subcmds):
+                flags = extra_args if idx == len(subcmds) - 1 else []
+                cmd = shlex.split(sub) + flags
+                if not cmd:
+                    continue
+                if not runner_ref.run_command(cmd, compiling=compiling):
+                    return False
+            return True
+        else:
+            cmd = shlex.split(step_str) + extra_args
+            return runner_ref.run_command(cmd, compiling=compiling)
+
+    @staticmethod
     def run_project(project_info: Tuple[str, Dict[str, Any], Path], runner_ref: Any,
                     extra_flags: Optional[List[str]] = None, run_args: Optional[List[str]] = None) -> bool:
         """
@@ -142,17 +172,14 @@ class ProjectRunner:
 
         if build_step and run_step:
             # Step 1: Build
-            build_cmd = shlex.split(build_step) + extra_flags
-            if not runner_ref.run_command(build_cmd, compiling=True):
+            if not ProjectRunner._run_step(build_step, extra_flags, runner_ref, compiling=True):
                 return False
 
             # Step 2: Run
-            run_cmd = shlex.split(run_step) + run_args
-            return runner_ref.run_command(run_cmd)
+            return ProjectRunner._run_step(run_step, run_args, runner_ref, compiling=False)
 
         elif command_step:
-            cmd = shlex.split(command_step) + extra_flags + run_args
-            return runner_ref.run_command(cmd)
+            return ProjectRunner._run_step(command_step, extra_flags + run_args, runner_ref, compiling=False)
         else:
             raise ConfigError(f"Project '{proj_name}' must define 'command' or both 'build' and 'run'.")
 

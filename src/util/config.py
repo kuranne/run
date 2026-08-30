@@ -97,6 +97,39 @@ class Config:
         if "projects" in self.data and not isinstance(self.data["projects"], dict):
             raise ValueError("'projects' section must be a table (dict)")
 
+        if "sandbox" in self.data:
+            if not isinstance(self.data["sandbox"], dict):
+                raise ValueError("'sandbox' section must be a table (dict)")
+            sandbox_cfg = self.data["sandbox"]
+            if "image" in sandbox_cfg:
+                img = sandbox_cfg["image"]
+                if not isinstance(img, str) or not img.strip():
+                    raise ValueError("sandbox 'image' must be a non-empty string")
+                if img.strip().startswith("-") or " " in img.strip():
+                    raise ValueError(f"Invalid sandbox image name '{img}'")
+            if "dockerfile" in sandbox_cfg:
+                df = sandbox_cfg["dockerfile"]
+                if not isinstance(df, str) or not df.strip():
+                    raise ValueError("sandbox 'dockerfile' must be a non-empty string")
+                df_path = Path(df)
+                if not df_path.exists() and not (Path.cwd() / df_path).exists():
+                    raise ValueError(f"Configured sandbox Dockerfile '{df}' not found")
+            if "compose" in sandbox_cfg:
+                compose = sandbox_cfg["compose"]
+                if not isinstance(compose, str) or not compose.strip():
+                    raise ValueError("sandbox 'compose' must be a non-empty string")
+                comp_path = Path(compose)
+                if not comp_path.exists() and not (Path.cwd() / comp_path).exists():
+                    raise ValueError(f"Configured sandbox compose file '{compose}' not found")
+            if "compose_service" in sandbox_cfg:
+                svc = sandbox_cfg["compose_service"]
+                if not isinstance(svc, str) or not svc.strip():
+                    raise ValueError("sandbox 'compose_service' must be a non-empty string")
+            if "sandbox_net" in sandbox_cfg and not isinstance(sandbox_cfg["sandbox_net"], bool):
+                raise ValueError("sandbox 'sandbox_net' must be a boolean")
+            if "restrict" in sandbox_cfg and not isinstance(sandbox_cfg["restrict"], bool):
+                raise ValueError("sandbox 'restrict' must be a boolean")
+
         if "languages" in self.data:
             if not isinstance(self.data["languages"], list):
                 raise ValueError("'languages' section must be an array of tables ([[languages]])")

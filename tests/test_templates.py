@@ -92,3 +92,39 @@ def test_overwrite_safety(tmp_path):
     res = TemplateManager.generate(str(target), force=True)
     assert res is True
     assert "def main():" in target.read_text()
+
+def test_multi_file_template_path_traversal_prevention(tmp_path):
+    from util.errors import ConfigError
+
+    cfg = MockConfig({
+        "templates": {
+            "malicious": {
+                "files": [
+                    {
+                        "name": "../escape.txt",
+                        "content": "pwned"
+                    }
+                ]
+            }
+        }
+    })
+
+    dest = tmp_path / "sandbox_dir"
+    dest.mkdir()
+    with pytest.raises(ConfigError, match="Path traversal detected"):
+        TemplateManager.generate(str(dest), template_name="malicious", config=cfg, force=True)
+
+    assert not (tmp_path / "escape.txt").exists()
+
+def test_file_loader_path_traversal_prevention(tmp_path):
+    from util.errors import ConfigError
+
+    outside_file = tmp_path / "secret.txt"
+    outside_file.write_text("super_secret")
+
+    sub_dir = tmp_path / "project"
+    sub_dir.mkdir()
+
+    with pytest.raises(ConfigError, match="outside base directory"):
+        TemplateManager._load_template_content({"file": "../secret.txt"}, base_dir=sub_dir)
+
