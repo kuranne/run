@@ -101,6 +101,36 @@ run test
 run build
 ```
 
+## Sandbox & Isolation (`[sandbox]`)
+
+Configure container environments and orchestration when `--sandbox` is active or `[core] sandbox = true` is set:
+
+```toml
+[sandbox]
+# Use a custom Docker/Podman image
+image = "ubuntu:latest"
+
+# Or auto-build dynamically from a local Dockerfile (hashes file to avoid redundant builds)
+dockerfile = "./Dockerfile"
+
+# Or integrate with Docker Compose (auto-manages up/exec/down)
+compose = "docker-compose.yml"
+compose_service = "app"
+```
+
+You can also enable sandboxing globally in `[core]` or per-task:
+
+```toml
+[core]
+sandbox = true
+
+[tasks.secure_test]
+command = "pytest tests/ -v"
+sandbox = true
+```
+
+See [Sandboxed & Isolated Execution Guide](sandboxed_execution.md) for full details.
+
 ## Project Exclusions (`[core]`)
 
 Exclude specific files or extensions from multi-file compilation (`-m`) or auto-link (`--link-auto`):
@@ -130,3 +160,4 @@ int main() {
 ```
 
 See [Templates & Scaffolding Guide](templates_and_scaffolding.md) for full details on multi-file templates.
+
