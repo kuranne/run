@@ -20,6 +20,28 @@
 # Note: '.toml' and '.lock' are excluded by default.
 # exclude_extensions = [".md", ".txt", ".json", ".yaml", ".bak"]
 
+# Enable sandbox globally for all executions
+# sandbox = true
+
+# ------------------------------------------------------------------------------
+# [sandbox]
+# Advanced container isolation and environment configuration.
+# Used when --sandbox is passed or [core] sandbox = true is set.
+# ------------------------------------------------------------------------------
+# [sandbox]
+# Override heuristic base images with a specific image:
+# image = "ubuntu:latest"
+
+# Automatically build a Dockerfile and use its image for execution:
+# dockerfile = "Dockerfile.test"
+
+# Run tests/scripts inside an existing docker-compose network:
+# compose = "docker-compose.yml"
+# compose_service = "app"
+
+# Note: Running `run <file> --sandbox --watch` will automatically keep the 
+# container alive in the background and use `docker exec` for ultra-fast reloads.
+
 # ------------------------------------------------------------------------------
 # [tasks]
 # Custom command shortcuts and aliases (e.g., 'run test', 'run build').
@@ -30,6 +52,11 @@
 # bench = "cargo bench"
 # build = "cmake -B build && cmake --build build"
 # clean = "rm -rf build target .run_cache"
+
+# You can also run tasks inside the sandbox by using table syntax:
+# [tasks.sandboxed_test]
+# command = "pytest tests/ -v"
+# sandbox = true
 
 # ------------------------------------------------------------------------------
 # [projects.<name>]
