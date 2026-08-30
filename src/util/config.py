@@ -12,6 +12,7 @@ except ImportError:
 
 class Config:
     """Configuration manager for the runner, handling TOML config loading and retrieval."""
+    _logged_config_paths = set()
 
     def _get_global_config_dir(self) -> Path:
         """
@@ -65,7 +66,9 @@ class Config:
                 with open(config_path, "rb") as f:
                     self.data = tomllib.load(f)
                 if "--_complete" not in sys.argv and "--completion" not in sys.argv:
-                    Printer.info(f"Loaded config: {config_path}")
+                    if config_path not in Config._logged_config_paths:
+                        Printer.info(f"Loaded config: {config_path}")
+                        Config._logged_config_paths.add(config_path)
             except Exception as e:
                 Printer.error(f"Failed to parse {config_path}: {e}")
             
