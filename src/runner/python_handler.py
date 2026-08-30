@@ -52,6 +52,6 @@ class PythonHandler:
             return
 
         if self.flags.get("debug"):
-            self.run_command([prog, "-m", "pdb", str(fp)] + self.run_args)
+            return self.run_command([prog, "-m", "pdb", str(fp)] + self.run_args)
         else:
-            self.run_command([prog, str(fp)] + self.run_args)
+            return self.run_command([prog, str(fp)] + self.run_args)

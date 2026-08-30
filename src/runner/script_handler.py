@@ -38,12 +38,13 @@ class ScriptHandler:
             str: Detected file extension or empty string if not detected.
         """
         try:
-            with open(fp, 'r') as f:
+            with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
                 first_line = f.readline().strip()
                 if first_line.startswith("#!"):
+                    import re
                     if "python" in first_line:
                         return ".py"
-                    elif "bash" in first_line or "sh" in first_line:
+                    elif "bash" in first_line or re.search(r'(?:/|\s)sh(?:\s|$)', first_line):
                         return ".sh"
                     elif "ruby" in first_line:
                         return ".rb"
@@ -73,9 +74,9 @@ class ScriptHandler:
         except ConfigError as e:
             from util.output import Printer
             Printer.error(str(e))
-            return
+            return False
         
-        self.run_command([prog, str(fp)] + self.run_args)
+        return self.run_command([prog, str(fp)] + self.run_args)
 
     def _handle_ruby_execution(self, fp: Path):
         """
@@ -89,9 +90,9 @@ class ScriptHandler:
         except ConfigError as e:
             from util.output import Printer
             Printer.error(str(e))
-            return
+            return False
         
-        self.run_command([prog, str(fp)] + self.run_args)
+        return self.run_command([prog, str(fp)] + self.run_args)
 
     def _handle_node_execution(self, fp: Path):
         """
@@ -105,12 +106,12 @@ class ScriptHandler:
         except ConfigError as e:
             from util.output import Printer
             Printer.error(str(e))
-            return
+            return False
         
         if self.flags.get("debug"):
-            self.run_command([prog, "--inspect-brk", str(fp)] + self.run_args)
+            return self.run_command([prog, "--inspect-brk", str(fp)] + self.run_args)
         else:
-            self.run_command([prog, str(fp)] + self.run_args)
+            return self.run_command([prog, str(fp)] + self.run_args)
 
     def _handle_perl_execution(self, fp: Path):
         """
@@ -124,9 +125,9 @@ class ScriptHandler:
         except ConfigError as e:
             from util.output import Printer
             Printer.error(str(e))
-            return
+            return False
         
-        self.run_command([prog, str(fp)] + self.run_args)
+        return self.run_command([prog, str(fp)] + self.run_args)
 
     def _handle_lua_execution(self, fp: Path):
         """
@@ -140,6 +141,6 @@ class ScriptHandler:
         except ConfigError as e:
             from util.output import Printer
             Printer.error(str(e))
-            return
+            return False
         
-        self.run_command([prog, str(fp)] + self.run_args)
+        return self.run_command([prog, str(fp)] + self.run_args)

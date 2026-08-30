@@ -2,6 +2,8 @@ import re
 from pathlib import Path
 from typing import Optional, List, Set, Dict
 
+MAX_SOURCE_SIZE = 10 * 1024 * 1024  # 10 MB limit
+
 class JPM:
     """
     Java Project Manager (JPM)
@@ -31,8 +33,8 @@ class JPM:
         
         for src in sources:
             try:
-                with open(src, 'r', encoding='utf-8') as f:
-                    content = f.read()
+                with open(src, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read(MAX_SOURCE_SIZE)
                     
                 # Strip comments
                 content = re.sub(r'//.*?\n|/\*.*?\*/', '', content, flags=re.DOTALL)

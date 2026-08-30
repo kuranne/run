@@ -25,7 +25,7 @@ class CFamilyHandler:
             obj_file = source.with_suffix(".o") if self.is_posix else source.with_suffix(".obj")
 
         # Check cache
-        if cache and not cache.is_changed(source) and obj_file.exists():
+        if cache and not cache.is_changed(source, obj_file):
             # Cache hit
             return obj_file
 
@@ -35,6 +35,8 @@ class CFamilyHandler:
         
         try:
             self.run_command(cmd, compiling=True)
+            if cache:
+                cache.update_cache(source, obj_file)
             return obj_file
         except Exception:
             return None
@@ -56,11 +58,10 @@ class CFamilyHandler:
         out_name = self.get_executable_path(fp)
         
         # Check cache before compiling
-        if self.cache and not self.cache.is_changed(fp) and out_name.exists():
+        if self.cache and not self.cache.is_changed(fp, out_name):
             from util.output import Printer
             Printer.info(f"Using cached binary: {out_name}")
-            self._execute_binary(out_name)
-            return
+            return self._execute_binary(out_name)
         
         cmd = [compiler] + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
         
@@ -68,10 +69,10 @@ class CFamilyHandler:
         
         # Update cache after successful compilation
         if self.cache:
-            self.cache.update_cache(fp)
+            self.cache.update_cache(fp, out_name)
         
         self.output_files.append(out_name)
-        self._execute_binary(out_name)
+        return self._execute_binary(out_name)
 
     def _handle_multi_c_family(self, sources: List[Path], all_paths: List[Path]):
         """

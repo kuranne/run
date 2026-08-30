@@ -31,6 +31,20 @@ class SecurityManager:
                 Printer.error(msg)
                 raise ConfigError("Execution as root is blocked. Use --unsafe to override.")
 
+    DANGEROUS_ENV_VARS = (
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FRAMEWORK_PATH",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "NODE_PATH",
+        "NODE_OPTIONS",
+        "PERL5LIB",
+        "RUBYLIB",
+    )
+
     @staticmethod
     def sanitize_execution_env() -> Dict[str, str]:
         """
@@ -41,14 +55,14 @@ class SecurityManager:
             Dict[str, str]: Copy of os.environ with sensitive keys removed/sanitized.
         """
         env = os.environ.copy()
-        for var in ("LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH"):
+        for var in SecurityManager.DANGEROUS_ENV_VARS:
             env.pop(var, None)
         return env
 
     @staticmethod
     def check_suspicious_flags(flags: List[str]) -> bool:
         """
-        Check for flags that explicitly try to do nasty things.
+        Check for flags that explicitly try to do arbitrary code execution or plugin loading.
         
         Args:
             flags (List[str]): List of flags.
@@ -56,8 +70,15 @@ class SecurityManager:
         Returns:
             bool: True if safe, False if suspicious.
         """
-        # This is quite heuristic.
-        # Example: preventing arbitrary command execution via compiler flags if possible
-        # But compilers are toolchains that do many things.
-        # Let's just flag empty for now to match interface.
+        dangerous_patterns = [
+            "-Wl,-rpath",
+            "-Wl,--wrap",
+            "-fplugin=",
+            "-x assembler",
+        ]
+        for flag in flags:
+            for pattern in dangerous_patterns:
+                if pattern in flag:
+                    Printer.warning(f"Suspicious flag detected: {flag}")
+                    return False
         return True

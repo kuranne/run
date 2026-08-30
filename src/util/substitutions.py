@@ -65,7 +65,9 @@ class VariableSubstitutor:
             key = match.group(1)
             if key.startswith("env:"):
                 env_var = key[4:]
-                return os.environ.get(env_var, "")
+                val = os.environ.get(env_var, "")
+                import shlex
+                return shlex.quote(val)
             return context.get(key, match.group(0))
 
         return cls.VAR_PATTERN.sub(replace, template)

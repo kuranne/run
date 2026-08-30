@@ -109,8 +109,8 @@ class BaseRunner:
             Printer.action("DRY-RUN", f"{tag}: {cmd_str}", Colors.YELLOW)
             return True
 
-        # Check for suspicious flags (if needed, but might be annoying for compilers)
-        # SecurityManager.check_suspicious_flags(cmd)
+        # Check for suspicious flags
+        SecurityManager.check_suspicious_flags(cmd)
 
         if not self.flags.get("quiet", False):
             Printer.action(tag, cmd_str)
@@ -155,78 +155,94 @@ class BaseRunner:
 
         mem_bytes = None
         captured_stdout = ""
+        p = None
         try:
-            if not compiling and self.flags.get("memory", False):
-                if self.is_posix and timeout is None:
-                    p = spc.Popen(
-                        target_cmd,
-                        shell=use_shell,
-                        env=env,
-                        stdin=stdin_file,
-                        stdout=stdout_dest,
-                        stderr=stderr_dest
-                    )
-                    _, status, rusage = os.wait4(p.pid, 0)
-                    returncode = os.waitstatus_to_exitcode(status) if hasattr(os, "waitstatus_to_exitcode") else (status >> 8 if os.WIFEXITED(status) else 1)
-                    if p.stdout:
-                        captured_stdout = p.stdout.read().decode("utf-8", errors="ignore")
-                    if sys.platform == "darwin":
-                        mem_bytes = rusage.ru_maxrss
+            try:
+                if not compiling and self.flags.get("memory", False):
+                    if self.is_posix and timeout is None:
+                        p = spc.Popen(
+                            target_cmd,
+                            shell=use_shell,
+                            env=env,
+                            stdin=stdin_file,
+                            stdout=stdout_dest,
+                            stderr=stderr_dest
+                        )
+                        _, status, rusage = os.wait4(p.pid, 0)
+                        returncode = os.waitstatus_to_exitcode(status) if hasattr(os, "waitstatus_to_exitcode") else (status >> 8 if os.WIFEXITED(status) else 1)
+                        if p.stdout:
+                            captured_stdout = p.stdout.read().decode("utf-8", errors="ignore")
+                        if sys.platform == "darwin":
+                            mem_bytes = rusage.ru_maxrss
+                        else:
+                            mem_bytes = rusage.ru_maxrss * 1024
+                    elif self.is_posix:
+                        import resource
+                        before_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+                        result = spc.run(
+                            target_cmd,
+                            check=False,
+                            shell=use_shell,
+                            env=env,
+                            stdin=stdin_file,
+                            stdout=stdout_dest,
+                            stderr=stderr_dest,
+                            timeout=timeout
+                        )
+                        returncode = result.returncode
+                        if result.stdout:
+                            captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
+                        after_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+                        rss_val = max(after_rss, before_rss)
+                        mem_bytes = rss_val if sys.platform == "darwin" else rss_val * 1024
+                    elif os.name == "nt":
+                        import ctypes
+                        from ctypes import wintypes
+                        p = spc.Popen(
+                            target_cmd,
+                            shell=use_shell,
+                            env=env,
+                            stdin=stdin_file,
+                            stdout=stdout_dest,
+                            stderr=stderr_dest
+                        )
+                        returncode = p.wait(timeout=timeout)
+                        if p.stdout:
+                            captured_stdout = p.stdout.read().decode("utf-8", errors="ignore")
+                        try:
+                            class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                                _fields_ = [
+                                    ('cb', wintypes.DWORD),
+                                    ('PageFaultCount', wintypes.DWORD),
+                                    ('PeakWorkingSetSize', ctypes.c_size_t),
+                                    ('WorkingSetSize', ctypes.c_size_t),
+                                    ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
+                                    ('QuotaPagedPoolUsage', ctypes.c_size_t),
+                                    ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
+                                    ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
+                                    ('PagefileUsage', ctypes.c_size_t),
+                                    ('PeakPagefileUsage', ctypes.c_size_t),
+                                ]
+                            counters = PROCESS_MEMORY_COUNTERS()
+                            counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
+                            if ctypes.windll.psapi.GetProcessMemoryInfo(int(p._handle), ctypes.byref(counters), counters.cb):
+                                mem_bytes = int(counters.PeakWorkingSetSize)
+                        except Exception:
+                            mem_bytes = None
                     else:
-                        mem_bytes = rusage.ru_maxrss * 1024
-                elif self.is_posix:
-                    import resource
-                    before_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-                    result = spc.run(
-                        target_cmd,
-                        check=False,
-                        shell=use_shell,
-                        env=env,
-                        stdin=stdin_file,
-                        stdout=stdout_dest,
-                        stderr=stderr_dest,
-                        timeout=timeout
-                    )
-                    returncode = result.returncode
-                    if result.stdout:
-                        captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
-                    after_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-                    rss_val = max(after_rss, before_rss)
-                    mem_bytes = rss_val if sys.platform == "darwin" else rss_val * 1024
-                elif os.name == "nt":
-                    import ctypes
-                    from ctypes import wintypes
-                    p = spc.Popen(
-                        target_cmd,
-                        shell=use_shell,
-                        env=env,
-                        stdin=stdin_file,
-                        stdout=stdout_dest,
-                        stderr=stderr_dest
-                    )
-                    returncode = p.wait(timeout=timeout)
-                    if p.stdout:
-                        captured_stdout = p.stdout.read().decode("utf-8", errors="ignore")
-                    try:
-                        class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
-                            _fields_ = [
-                                ('cb', wintypes.DWORD),
-                                ('PageFaultCount', wintypes.DWORD),
-                                ('PeakWorkingSetSize', ctypes.c_size_t),
-                                ('WorkingSetSize', ctypes.c_size_t),
-                                ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
-                                ('QuotaPagedPoolUsage', ctypes.c_size_t),
-                                ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
-                                ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
-                                ('PagefileUsage', ctypes.c_size_t),
-                                ('PeakPagefileUsage', ctypes.c_size_t),
-                            ]
-                        counters = PROCESS_MEMORY_COUNTERS()
-                        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
-                        if ctypes.windll.psapi.GetProcessMemoryInfo(int(p._handle), ctypes.byref(counters), counters.cb):
-                            mem_bytes = int(counters.PeakWorkingSetSize)
-                    except Exception:
-                        mem_bytes = None
+                        result = spc.run(
+                            target_cmd,
+                            check=False,
+                            shell=use_shell,
+                            env=env,
+                            stdin=stdin_file,
+                            stdout=stdout_dest,
+                            stderr=stderr_dest,
+                            timeout=timeout
+                        )
+                        returncode = result.returncode
+                        if result.stdout:
+                            captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
                 else:
                     result = spc.run(
                         target_cmd,
@@ -241,23 +257,12 @@ class BaseRunner:
                     returncode = result.returncode
                     if result.stdout:
                         captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
-            else:
-                result = spc.run(
-                    target_cmd,
-                    check=False,
-                    shell=use_shell,
-                    env=env,
-                    stdin=stdin_file,
-                    stdout=stdout_dest,
-                    stderr=stderr_dest,
-                    timeout=timeout
-                )
-                returncode = result.returncode
-                if result.stdout:
-                    captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
-            
-            if stdin_file:
-                stdin_file.close()
+            finally:
+                if stdin_file:
+                    try:
+                        stdin_file.close()
+                    except Exception:
+                        pass
                 
             if not compiling and not is_debug:
                 if expect_path and captured_stdout and not self.flags.get("quiet", False):
@@ -295,12 +300,14 @@ class BaseRunner:
             return True
             
         except spc.TimeoutExpired:
-            if stdin_file:
-                stdin_file.close()
+            if p is not None:
+                try:
+                    p.kill()
+                    p.wait(timeout=5)
+                except Exception:
+                    pass
             raise ExecutionError(f"Execution timed out after {timeout} seconds.")
         except FileNotFoundError:
-            if stdin_file:
-                stdin_file.close()
             cmd_name = cmd[0] if isinstance(cmd, list) and cmd else str(cmd)
             raise ExecutionError(f"Command '{cmd_name}' not found.")
         
@@ -365,8 +372,7 @@ class BaseRunner:
                      Printer.action("DRY-RUN", f"Would delete: {f}", Colors.YELLOW)
                      continue
                 
-                if f.exists():
-                    try:
-                        f.unlink()
-                    except OSError as e:
-                        Printer.warning(f"Failed to cleanup {f}: {e}")
+                try:
+                    f.unlink(missing_ok=True)
+                except OSError as e:
+                    Printer.warning(f"Failed to cleanup {f}: {e}")

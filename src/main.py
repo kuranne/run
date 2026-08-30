@@ -166,7 +166,9 @@ def main():
                     raise ConfigError("A source file must be specified with --test-dir (e.g. run solution.cpp --test-dir ./tests/)")
                 target = Path(args.files[0])
                 try:
-                    TestcasesRunner.run_tests(runner, Path(args.test_dir), target)
+                    success = TestcasesRunner.run_tests(runner, Path(args.test_dir), target)
+                    if not success and not args.watch:
+                        sys.exit(1)
                 finally:
                     runner.cleanup()
                 return args.files

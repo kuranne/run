@@ -55,8 +55,8 @@ def test_run_task_with_shell_operator(tmp_path, monkeypatch):
     TaskRunner.run_task("build", config, ["--extra"], runner)
     assert len(runner.executed) == 1
     cmd, use_shell, compiling = runner.executed[0]
-    assert use_shell is True
-    assert "mkdir -p build && cmake -B build" in cmd[0]
+    assert use_shell is False
+    assert cmd == ["mkdir", "-p", "build", "&&", "cmake", "-B", "build", "--extra"]
 
 def test_run_task_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)

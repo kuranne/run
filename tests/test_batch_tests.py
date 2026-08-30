@@ -51,6 +51,33 @@ for line in sys.stdin:
     out, _ = capfd.readouterr()
     assert "Passed: 2/2 (100.0%)" in out
 
+def test_batch_run_with_failures(tmp_path, capfd):
+    # Setup solution file with intentional wrong answer on test 2
+    sol = tmp_path / "solution.py"
+    sol.write_text("""
+import sys
+for line in sys.stdin:
+    parts = line.strip().split()
+    if parts:
+        print(int(parts[0]) + int(parts[1]))
+""")
+
+    test_dir = tmp_path / "tests"
+    test_dir.mkdir()
+    (test_dir / "01.in").write_text("1 2\n")
+    (test_dir / "01.out").write_text("3\n")
+
+    # Incorrect expected output
+    (test_dir / "02.in").write_text("10 20\n")
+    (test_dir / "02.out").write_text("999\n")
+
+    runner = CompilerRunner({"dry_run": False})
+    success = TestcasesRunner.run_tests(runner, test_dir, sol)
+    assert success is False
+
+    out, _ = capfd.readouterr()
+    assert "Passed: 1/2 (50.0%)" in out
+
 def test_expect_diff_matching(tmp_path, capfd, caplog):
     runner = CompilerRunner({"dry_run": False})
     

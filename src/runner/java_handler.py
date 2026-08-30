@@ -33,11 +33,11 @@ class JavaHandler:
 
         if self.flags.get("build_only"):
             Printer.action("BUILD", f"Java classes compiled successfully for {main_class}", Colors.GREEN)
-            return
+            return True
 
         # Execute
         cp = str(fp.parent) if str(fp.parent) != "." else "."
-        self.run_command(["java", "-cp", cp, main_class] + self.run_args)
+        return self.run_command(["java", "-cp", cp, main_class] + self.run_args)
 
 
     def _handle_multi_java(self, sources: List[Path]):

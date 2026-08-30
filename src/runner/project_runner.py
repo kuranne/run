@@ -51,18 +51,8 @@ class TaskRunner:
         task_cmd = VariableSubstitutor.substitute_string(task_cmd, var_ctx)
 
         Printer.action("TASK", f"{name}: {task_cmd}", Colors.CYAN)
-        
-        # Check if task uses shell operators (&&, ||, ;, |)
-        use_shell = any(op in task_cmd for op in ("&&", "||", ";", "|"))
-        
-        if use_shell:
-            full_cmd = task_cmd
-            if extra_args:
-                full_cmd += " " + " ".join(shlex.quote(a) for a in extra_args)
-            return runner_ref.run_command([full_cmd], use_shell=True)
-        else:
-            cmd = shlex.split(task_cmd) + extra_args
-            return runner_ref.run_command(cmd)
+        cmd = shlex.split(task_cmd) + extra_args
+        return runner_ref.run_command(cmd)
 
 class ProjectRunner:
     """
@@ -137,38 +127,17 @@ class ProjectRunner:
 
         if build_step and run_step:
             # Step 1: Build
-            build_use_shell = any(op in build_step for op in ("&&", "||", ";", "|"))
-            if build_use_shell:
-                build_cmd = [build_step]
-            else:
-                build_cmd = shlex.split(build_step) + extra_flags
-            
-            if not runner_ref.run_command(build_cmd, use_shell=build_use_shell, compiling=True):
+            build_cmd = shlex.split(build_step) + extra_flags
+            if not runner_ref.run_command(build_cmd, compiling=True):
                 return False
 
             # Step 2: Run
-            run_use_shell = any(op in run_step for op in ("&&", "||", ";", "|"))
-            if run_use_shell:
-                full_run = run_step
-                if run_args:
-                    full_run += " " + " ".join(shlex.quote(a) for a in run_args)
-                return runner_ref.run_command([full_run], use_shell=True)
-            else:
-                run_cmd = shlex.split(run_step) + run_args
-                return runner_ref.run_command(run_cmd)
+            run_cmd = shlex.split(run_step) + run_args
+            return runner_ref.run_command(run_cmd)
 
         elif command_step:
-            use_shell = any(op in command_step for op in ("&&", "||", ";", "|"))
-            if use_shell:
-                full_cmd = command_step
-                if extra_flags:
-                    full_cmd += " " + " ".join(shlex.quote(f) for f in extra_flags)
-                if run_args:
-                    full_cmd += " " + " ".join(shlex.quote(a) for a in run_args)
-                return runner_ref.run_command([full_cmd], use_shell=True)
-            else:
-                cmd = shlex.split(command_step) + extra_flags + run_args
-                return runner_ref.run_command(cmd)
+            cmd = shlex.split(command_step) + extra_flags + run_args
+            return runner_ref.run_command(cmd)
         else:
             raise ConfigError(f"Project '{proj_name}' must define 'command' or both 'build' and 'run'.")
 
