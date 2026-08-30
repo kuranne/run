@@ -210,3 +210,12 @@ def test_args_new_feature_flags(monkeypatch):
     parsed = args("1.0.0")
     assert parsed.new == 'solution.cpp'
     assert parsed.template == 'cp'
+
+    # --completion
+    monkeypatch.setattr(sys, 'argv', ['run', '--completion', 'zsh'])
+    parsed = args("1.0.0")
+    assert parsed.completion == 'zsh'
+
+    monkeypatch.setattr(sys, 'argv', ['run', '--completion'])
+    parsed = args("1.0.0")
+    assert parsed.completion == ''

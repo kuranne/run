@@ -129,10 +129,39 @@ run <files> [flags]
 | `--no-cache` | Disable build caching |
 | `--new <target>` | Generate starter source code or multi-file project from template (e.g. `run --new solution.cpp`) |
 | `--template <name>` | Specify custom template name defined in `Run.toml` |
+| `--completion [shell]` | Generate autocompletion script (`zsh`, `bash`, `fish`, `powershell`) or show setup guide |
 | `--clean` | Clear local build cache and exit |
 | `--init` | Initialize tailored `Run.toml` for the current project |
 | `--directory <dir>`, `--cwd <dir>` | Change to directory before executing |
 | `--unsafe` | Allow running as root (⚠️ dangerous) |
+
+### Shell Autocompletion Setup
+
+Generate shell autocompletions for instant tab completion of flags, source files, `Run.toml` tasks, and presets:
+
+**Zsh (with `_evalcache` or `~/.zshrc`):**
+```zsh
+# Using _evalcache:
+_evalcache run run --completion zsh
+
+# Or standard eval in ~/.zshrc:
+eval "$(run --completion zsh)"
+```
+
+**Bash (`~/.bashrc`):**
+```bash
+source <(run --completion bash)
+```
+
+**Fish (`~/.config/fish/completions/run.fish`):**
+```fish
+run --completion fish > ~/.config/fish/completions/run.fish
+```
+
+**PowerShell (`$PROFILE`):**
+```powershell
+run --completion powershell | Out-String | Invoke-Expression
+```
 
 ### Updating
 
@@ -145,6 +174,12 @@ git pull
 ```
 
 ### Usage Examples
+
+**Shell Autocompletions Guide:**
+
+```bash
+run --completion
+```
 
 **Code Scaffolding & Multi-File Template Generation:**
 

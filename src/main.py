@@ -21,6 +21,31 @@ def main():
     if args.no_color:
         Colors.disable()
 
+    # Handle internal completion helper (--_complete <type>)
+    if hasattr(args, "internal_complete") and args.internal_complete:
+        from util.completion import CompletionGenerator
+        from util.config import Config
+        cfg = Config()
+        output = CompletionGenerator.handle_internal_complete(args.internal_complete, cfg)
+        if output:
+            print(output)
+        return 0
+
+    # Handle --completion [shell]
+    if hasattr(args, "completion") and args.completion is not None:
+        from util.completion import CompletionGenerator
+        shell = args.completion.lower().strip()
+        if not shell:
+            print(CompletionGenerator.get_install_instructions())
+            return 0
+        script = CompletionGenerator.generate(shell)
+        if script:
+            print(script, end="" if script.endswith("\n") else "\n")
+            return 0
+        else:
+            Printer.error(f"Unsupported shell '{shell}'. Supported: zsh, bash, fish, powershell")
+            return 1
+
     # Handle --doctor
     if args.doctor:
         from util.doctor import Doctor
