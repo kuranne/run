@@ -4,14 +4,14 @@ This document captures architectural concepts, user experience enhancements, and
 
 ---
 
-## 1. Shell Autocompletion (`run --completion <shell>`)
+## 1. Shell Autocompletion (`run --completion <shell>`) [COMPLETED]
 - **Category**: Developer Experience & CLI Polish
-- **Description**: Generate shell completion scripts for `bash`, `zsh`, `fish`, and `powershell`.
+- **Status**: Implemented
 - **Key Capabilities**:
-  - Dynamic completion of presets from `Run.toml` (e.g. `run -p <TAB>` suggests `debug`, `release`, `fast`).
-  - Dynamic completion of task names from `[tasks]` in `Run.toml` (e.g. `run <TAB>` suggests `test`, `build`, `lint`).
-  - File extension-aware completion (e.g. suggesting `.cpp`, `.c`, `.py`, `.rs`, `.java`, `.go`, `.zig`).
-- **Implementation Note**: Can be generated using `argcomplete` or custom script templates.
+  - Support for `zsh`, `bash`, `fish`, and `powershell`.
+  - Dynamic completion of presets (`run -p <TAB>`), tasks (`run <TAB>`), and templates (`run --template <TAB>`).
+  - Source file extension filtering.
+  - 100% compatible with zsh eval caching (`_evalcache run run --completion zsh`).
 
 ---
 

@@ -65,9 +65,14 @@ def args(__version__: str):
     util_group.add_argument("--init", action="store_true", help="Initialize tailored Run.toml for the current project")
     util_group.add_argument("--directory", "--cwd", dest="directory", type=str, help="Change directory before executing")
     util_group.add_argument("--clean", action="store_true", help="Clear local build cache and exit")
+    util_group.add_argument("--completion", nargs="?", const="", type=str, help="Generate shell autocompletion script (zsh, bash, fish, powershell)")
     util_group.add_argument("--no-color", action="store_true", help="Disable ANSI color codes in output")
     util_group.add_argument("--unsafe", action="store_true", help="Allow running as root")
     util_group.add_argument("-V", "--version", action="version", version=__version__, help="Check version of the binary")
+
+    # Internal hidden completion helper
+    import argparse
+    parser.add_argument("--_complete", dest="internal_complete", type=str, help=argparse.SUPPRESS)
 
     # Split trailing arguments after '--'
     cli_argv = sys.argv[1:]
