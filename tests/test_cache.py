@@ -2,6 +2,12 @@ import pytest
 from pathlib import Path
 from util.cache import CacheManager
 
+@pytest.fixture(autouse=True)
+def isolate_cache(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache_home"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_dir))
+    return cache_dir
+
 def test_cache_init_and_hash(tmp_path):
     manager = CacheManager(project_root=tmp_path)
     
