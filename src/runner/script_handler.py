@@ -20,6 +20,9 @@ class ScriptHandler:
         Raises:
             ConfigError: If no interpreter is found.
         """
+        if hasattr(self, 'flags') and self.flags.get("sandbox"):
+            return interpreter_names[0]
+            
         for interpreter in interpreter_names:
             path = which(interpreter)
             if path:
