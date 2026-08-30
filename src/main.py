@@ -48,6 +48,14 @@ def main():
         Printer.action("CLEAN", "Build cache cleared successfully.", Colors.GREEN)
         return 0
 
+    # Handle --new
+    if args.new:
+        from util.template_manager import TemplateManager
+        from util.config import Config
+        cfg = Config()
+        success = TemplateManager.generate(args.new, template_name=args.template, config=cfg, force=args.force)
+        return 0 if success else 1
+
     # Handle --init
     if args.init:
         success = ConfigInitializer.init_config(Path("."))

@@ -26,22 +26,11 @@ This document captures architectural concepts, user experience enhancements, and
 
 ---
 
-## 3. Code Template & Project Generator (`run --new <filename>`)
+## 3. Code Template & Project Generator (`run --new <target> [--template <name>]`) [COMPLETED]
 - **Category**: Scaffolding & Competitive Programming
-- **Description**: Quickly generate starter code templates from built-in or user-configured templates in `Run.toml`.
+- **Status**: Implemented
 - **Key Capabilities**:
-  - **Competitive Programming Templates**: Fast I/O C++ templates, Python templates with `sys.stdin.readline()`, Java templates with `BufferedReader`.
-  - **Customizable Templates in `Run.toml`**:
-    ```toml
-    [templates.cpp]
-    content = """#include <iostream>
-    using namespace std;
-
-    int main() {
-        ios_base::sync_with_stdio(false);
-        cin.tie(NULL);
-        // Solution here
-        return 0;
-    }"""
-    ```
-  - Bootstraps new files with `run --new solution.cpp`.
+  - `run --new <filename>`: Generates single-file starter code for C, C++, Python, Java, Rust, Go, Zig, JS, TS, Bash.
+  - `run --new <dir> --template <name>`: Generates multi-file template bundles (e.g. LeetCode `main.rs` + `solve.rs` or C++ `main.cpp` + `solution.hpp`).
+  - Customizable in `Run.toml` with `content = "..."`, `file = "..."`, or `files = [ { name = "...", content = "..." }, ... ]`.
+  - Dynamic placeholder substitutions (`{{name}}`, `{{filename}}`, `{{date}}`, `{{year}}`).

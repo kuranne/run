@@ -59,6 +59,8 @@ def args(__version__: str):
 
     # Project & Utilities group
     util_group = parser.add_argument_group("Project & Utilities")
+    util_group.add_argument("--new", type=str, help="Generate a new file or project from template (e.g. run --new solution.cpp)")
+    util_group.add_argument("--template", type=str, help="Template name to use from Run.toml (e.g. --template leetcode_rs)")
     util_group.add_argument("--doctor", action="store_true", help="Run toolchain and environment diagnostics")
     util_group.add_argument("--init", action="store_true", help="Initialize tailored Run.toml for the current project")
     util_group.add_argument("--directory", "--cwd", dest="directory", type=str, help="Change directory before executing")

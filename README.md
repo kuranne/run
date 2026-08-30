@@ -127,6 +127,8 @@ run <files> [flags]
 | `--env <KEY=VAL>` | Set environment variables |
 | `--keep` | Keep compiled binaries (don't delete after run) |
 | `--no-cache` | Disable build caching |
+| `--new <target>` | Generate starter source code or multi-file project from template (e.g. `run --new solution.cpp`) |
+| `--template <name>` | Specify custom template name defined in `Run.toml` |
 | `--clean` | Clear local build cache and exit |
 | `--init` | Initialize tailored `Run.toml` for the current project |
 | `--directory <dir>`, `--cwd <dir>` | Change to directory before executing |
@@ -143,6 +145,14 @@ git pull
 ```
 
 ### Usage Examples
+
+**Code Scaffolding & Multi-File Template Generation:**
+
+```bash
+run --new solution.cpp            # Scaffolds C++ starter code
+run --new Solution.java           # Scaffolds Java with 'public class Solution'
+run --new ./problem1 --template leetcode_rs # Generates multi-file template (main.rs + solve.rs)
+```
 
 **Interactive Debugging:**
 
