@@ -35,6 +35,11 @@ class BaseRunner:
         
         # Config & Others
         self.config = Config()
+        core_cfg = self.config.data.get("core", {})
+        if not self.flags.get("sandbox"): self.flags["sandbox"] = core_cfg.get("sandbox", False)
+        if not self.flags.get("sandbox_net"): self.flags["sandbox_net"] = core_cfg.get("sandbox_net", False)
+        if not self.flags.get("restrict"): self.flags["restrict"] = core_cfg.get("restrict", False)
+        
         excludes = self.config.get_exclude()
         self.output_files: List[Path] = []
         self.exclude_exts: List[str] = ['.toml', '.lock'] + excludes.get("extensions", [])
@@ -110,18 +115,24 @@ class BaseRunner:
             return True
 
         # Check for suspicious flags
-        SecurityManager.check_suspicious_flags(cmd)
+        if not self.flags.get("unsafe", False) and not SecurityManager.check_suspicious_flags(cmd):
+            if compiling:
+                raise CompilationError(f"Rejected suspicious flag in compilation command: {' '.join(cmd)}")
+            else:
+                raise ExecutionError(f"Rejected suspicious flag in command: {' '.join(cmd)}")
 
         if not self.flags.get("quiet", False):
             Printer.action(tag, cmd_str)
         
-        env = SecurityManager.sanitize_execution_env()
-        
-        # Apply custom environment variables
+        custom_env = {}
         for e in self.flags.get("env", []):
             if "=" in e:
                 k, v = e.split("=", 1)
-                env[k] = v
+                custom_env[k] = v
+        env = SecurityManager.sanitize_execution_env(
+            custom_env=custom_env,
+            strict_whitelist=bool(self.flags.get("sandbox") or self.flags.get("restrict"))
+        )
 
         start_time = time.perf_counter()
         
@@ -139,6 +150,7 @@ class BaseRunner:
                     stdin_file = open(stdin_path, "r")
                 except Exception as e:
                     Printer.error(f"Failed to open stdin file {stdin_path}: {e}")
+                    raise ExecutionError(f"Failed to open stdin file '{stdin_path}': {e}")
 
         # Setup quiet mode for compiler or output capture for expectation
         expect_path = self.flags.get("expect") if not compiling else None
@@ -151,112 +163,100 @@ class BaseRunner:
         is_debug = bool(self.flags.get("debug") or self.flags.get("gdb") or self.flags.get("lldb"))
         timeout = self.flags.get("timeout") if (not compiling and not is_debug) else None
 
-        target_cmd = cmd_str if use_shell and isinstance(cmd, list) else cmd
+        if use_shell:
+            target_cmd = shlex.join(cmd) if isinstance(cmd, list) else str(cmd)
+        else:
+            target_cmd = list(cmd) if isinstance(cmd, (list, tuple)) else shlex.split(str(cmd))
+
+        sandbox_preexec_fn = None
+        if self.flags.get("sandbox"):
+            from util.sandbox import ContainerSandbox, PersistentSandbox, ComposeSandbox
+            t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
+            sandbox_cfg = self.config.get_sandbox_config() if hasattr(self, 'config') else {}
+            
+            if PersistentSandbox._container_id:
+                t_list = PersistentSandbox.wrap_command(t_list)
+            elif sandbox_cfg.get("compose"):
+                svc = sandbox_cfg.get("compose_service", "app")
+                t_list = ComposeSandbox.wrap_command(t_list, sandbox_cfg["compose"], svc)
+            else:
+                t_list = ContainerSandbox.wrap_command(
+                    t_list, 
+                    net=self.flags.get("sandbox_net", False), 
+                    compiling=compiling, 
+                    sandbox_cfg=sandbox_cfg
+                )
+            target_cmd = shlex.join(t_list) if use_shell else t_list
+        elif not compiling and self.flags.get("restrict"):
+            from util.sandbox import NativeRestrictor
+            if sys.platform == "darwin":
+                sandbox_preexec_fn = NativeRestrictor.macos_preexec_fn
+            else:
+                t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
+                t_list = NativeRestrictor.wrap_command(t_list, net=self.flags.get("sandbox_net", False), compiling=compiling)
+                target_cmd = shlex.join(t_list) if use_shell else t_list
+
+        spc_kwargs = {
+            "shell": use_shell,
+            "env": env,
+            "stdin": stdin_file,
+            "stdout": stdout_dest,
+            "stderr": stderr_dest
+        }
+        if sandbox_preexec_fn:
+            spc_kwargs["preexec_fn"] = sandbox_preexec_fn
 
         mem_bytes = None
         captured_stdout = ""
         p = None
         try:
             try:
-                if not compiling and self.flags.get("memory", False):
-                    if self.is_posix and timeout is None:
-                        p = spc.Popen(
-                            target_cmd,
-                            shell=use_shell,
-                            env=env,
-                            stdin=stdin_file,
-                            stdout=stdout_dest,
-                            stderr=stderr_dest
-                        )
-                        _, status, rusage = os.wait4(p.pid, 0)
-                        returncode = os.waitstatus_to_exitcode(status) if hasattr(os, "waitstatus_to_exitcode") else (status >> 8 if os.WIFEXITED(status) else 1)
-                        if p.stdout:
-                            captured_stdout = p.stdout.read().decode("utf-8", errors="ignore")
-                        if sys.platform == "darwin":
-                            mem_bytes = rusage.ru_maxrss
-                        else:
-                            mem_bytes = rusage.ru_maxrss * 1024
-                    elif self.is_posix:
-                        import resource
-                        before_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-                        result = spc.run(
-                            target_cmd,
-                            check=False,
-                            shell=use_shell,
-                            env=env,
-                            stdin=stdin_file,
-                            stdout=stdout_dest,
-                            stderr=stderr_dest,
-                            timeout=timeout
-                        )
-                        returncode = result.returncode
-                        if result.stdout:
-                            captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
-                        after_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-                        rss_val = max(after_rss, before_rss)
-                        mem_bytes = rss_val if sys.platform == "darwin" else rss_val * 1024
-                    elif os.name == "nt":
-                        import ctypes
-                        from ctypes import wintypes
-                        p = spc.Popen(
-                            target_cmd,
-                            shell=use_shell,
-                            env=env,
-                            stdin=stdin_file,
-                            stdout=stdout_dest,
-                            stderr=stderr_dest
-                        )
-                        returncode = p.wait(timeout=timeout)
-                        if p.stdout:
-                            captured_stdout = p.stdout.read().decode("utf-8", errors="ignore")
-                        try:
-                            class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
-                                _fields_ = [
-                                    ('cb', wintypes.DWORD),
-                                    ('PageFaultCount', wintypes.DWORD),
-                                    ('PeakWorkingSetSize', ctypes.c_size_t),
-                                    ('WorkingSetSize', ctypes.c_size_t),
-                                    ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
-                                    ('QuotaPagedPoolUsage', ctypes.c_size_t),
-                                    ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
-                                    ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
-                                    ('PagefileUsage', ctypes.c_size_t),
-                                    ('PeakPagefileUsage', ctypes.c_size_t),
-                                ]
-                            counters = PROCESS_MEMORY_COUNTERS()
-                            counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
-                            if ctypes.windll.psapi.GetProcessMemoryInfo(int(p._handle), ctypes.byref(counters), counters.cb):
-                                mem_bytes = int(counters.PeakWorkingSetSize)
-                        except Exception:
-                            mem_bytes = None
-                    else:
-                        result = spc.run(
-                            target_cmd,
-                            check=False,
-                            shell=use_shell,
-                            env=env,
-                            stdin=stdin_file,
-                            stdout=stdout_dest,
-                            stderr=stderr_dest,
-                            timeout=timeout
-                        )
-                        returncode = result.returncode
-                        if result.stdout:
-                            captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
+                track_mem = (not compiling) and self.flags.get("memory", False)
+                if track_mem and self.is_posix:
+                    import resource
+                    before_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+                    p = spc.Popen(target_cmd, **spc_kwargs)
+                    stdout_bytes, stderr_bytes = p.communicate(timeout=timeout)
+                    returncode = p.returncode
+                    if stdout_bytes is not None:
+                        captured_stdout = stdout_bytes.decode("utf-8", errors="ignore")
+                    after_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+                    rss_val = max(after_rss, before_rss)
+                    mem_bytes = rss_val if sys.platform == "darwin" else rss_val * 1024
+                elif track_mem and os.name == "nt":
+                    import ctypes
+                    from ctypes import wintypes
+                    p = spc.Popen(target_cmd, **spc_kwargs)
+                    stdout_bytes, stderr_bytes = p.communicate(timeout=timeout)
+                    returncode = p.returncode
+                    if stdout_bytes is not None:
+                        captured_stdout = stdout_bytes.decode("utf-8", errors="ignore")
+                    try:
+                        class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+                            _fields_ = [
+                                ('cb', wintypes.DWORD),
+                                ('PageFaultCount', wintypes.DWORD),
+                                ('PeakWorkingSetSize', ctypes.c_size_t),
+                                ('WorkingSetSize', ctypes.c_size_t),
+                                ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
+                                ('QuotaPagedPoolUsage', ctypes.c_size_t),
+                                ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
+                                ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
+                                ('PagefileUsage', ctypes.c_size_t),
+                                ('PeakPagefileUsage', ctypes.c_size_t),
+                            ]
+                        counters = PROCESS_MEMORY_COUNTERS()
+                        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
+                        if ctypes.windll.psapi.GetProcessMemoryInfo(int(p._handle), ctypes.byref(counters), counters.cb):
+                            mem_bytes = int(counters.PeakWorkingSetSize)
+                    except Exception:
+                        mem_bytes = None
                 else:
-                    result = spc.run(
-                        target_cmd,
-                        check=False,
-                        shell=use_shell,
-                        env=env,
-                        stdin=stdin_file,
-                        stdout=stdout_dest,
-                        stderr=stderr_dest,
-                        timeout=timeout
-                    )
-                    returncode = result.returncode
-                    if result.stdout:
-                        captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
+                    p = spc.Popen(target_cmd, **spc_kwargs)
+                    stdout_bytes, stderr_bytes = p.communicate(timeout=timeout)
+                    returncode = p.returncode
+                    if stdout_bytes is not None:
+                        captured_stdout = stdout_bytes.decode("utf-8", errors="ignore")
             finally:
                 if stdin_file:
                     try:

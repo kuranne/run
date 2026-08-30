@@ -120,7 +120,10 @@ def main():
         "stdin": args.stdin,
         "env": args.env,
         "out_dir": args.out_dir,
-        "compiler": args.compiler
+        "compiler": args.compiler,
+        "restrict": args.restrict,
+        "sandbox": args.sandbox,
+        "sandbox_net": args.sandbox_net
     }
 
     try:
@@ -219,6 +222,49 @@ def main():
                 return args.files
             
             return []
+            
+        # Initialize advanced sandboxes
+        from util.config import Config
+        cfg = Config()
+        sandbox_cfg = cfg.get_sandbox_config()
+        is_sandbox_enabled = args.sandbox or cfg.data.get("core", {}).get("sandbox", False)
+        
+        if is_sandbox_enabled:
+            from util.sandbox import ComposeSandbox, PersistentSandbox, ContainerSandbox
+            import atexit
+            
+            if sandbox_cfg.get("compose"):
+                compose_file = sandbox_cfg["compose"]
+                ComposeSandbox.setup(compose_file)
+                atexit.register(ComposeSandbox.teardown, compose_file)
+            elif args.watch:
+                engine = ContainerSandbox._get_engine()
+                
+                if sandbox_cfg.get("dockerfile"):
+                    base_image = ContainerSandbox._build_dockerfile(sandbox_cfg["dockerfile"], engine)
+                elif sandbox_cfg.get("image"):
+                    base_image = sandbox_cfg["image"]
+                else:
+                    # Guess base image based on first file extension or project type
+                    base_image = "ubuntu:latest"
+                    if args.files:
+                        if args.files[0].endswith(".c") or args.files[0].endswith(".cpp"):
+                            base_image = "gcc:latest"
+                        elif args.files[0].endswith(".py"):
+                            base_image = "python:3-slim"
+                        elif args.files[0].endswith(".rs"):
+                            base_image = "rust:latest"
+                        elif args.files[0].endswith(".java"):
+                            base_image = "openjdk:latest"
+                        elif args.files[0].endswith(".go"):
+                            base_image = "golang:latest"
+                        elif args.files[0].endswith(".js") or args.files[0].endswith(".ts"):
+                            base_image = "node:latest"
+                        elif args.files[0].endswith(".rb"):
+                            base_image = "ruby:latest"
+                            
+                PersistentSandbox.start(engine, base_image, net=args.sandbox_net, cwd=os.getcwd())
+                atexit.register(PersistentSandbox.stop)
 
         if args.watch:
             import time

@@ -57,6 +57,12 @@ def args(__version__: str):
     build_group.add_argument("--keep", action="store_true", help="Keep the output binary(s) after execution")
     build_group.add_argument("--no-cache", action="store_true", help="Disable build cache")
 
+    # Security & Isolation group
+    sandbox_group = parser.add_argument_group("Security & Isolation")
+    sandbox_group.add_argument("--restrict", action="store_true", help="Enable native OS-level restriction (bwrap/sandbox_init)")
+    sandbox_group.add_argument("--sandbox", action="store_true", help="Enable containerized sandboxing (Docker/Podman or bwrap on Linux)")
+    sandbox_group.add_argument("--sandbox-net", action="store_true", help="Enable network access within the sandbox")
+
     # Project & Utilities group
     util_group = parser.add_argument_group("Project & Utilities")
     util_group.add_argument("--new", type=str, help="Generate a new file or project from template (e.g. run --new solution.cpp)")

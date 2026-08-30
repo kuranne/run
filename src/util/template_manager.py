@@ -118,7 +118,11 @@ echo "Hello, World!"
             if "content" in template_def:
                 return str(template_def["content"])
             if "file" in template_def:
-                file_path = base_dir / template_def["file"]
+                raw_path = template_def["file"]
+                file_path = (base_dir / raw_path).resolve()
+                base_dir_resolved = base_dir.resolve()
+                if base_dir_resolved != file_path and base_dir_resolved not in file_path.parents:
+                    raise ConfigError(f"Template file '{raw_path}' resolves outside base directory.")
                 if file_path.exists():
                     return file_path.read_text(encoding="utf-8")
                 raise ConfigError(f"Template file not found: {file_path}")
@@ -182,21 +186,26 @@ echo "Hello, World!"
 
             dest_dir = target if (not target.suffix or target.is_dir()) else target.parent
             dest_dir.mkdir(parents=True, exist_ok=True)
+            dest_dir_resolved = dest_dir.resolve()
 
-            # Check all files for overwrite safety before writing
-            if not force:
-                for file_entry in files_list:
-                    fname = file_entry.get("name")
-                    if fname and (dest_dir / fname).exists():
-                        Printer.error(f"File '{(dest_dir / fname)}' already exists. Use -f / --force to overwrite.")
-                        return False
+            # Pre-validate all files for path traversal and overwrite safety
+            for file_entry in files_list:
+                fname = file_entry.get("name")
+                if not fname:
+                    continue
+                file_dest = (dest_dir / fname).resolve()
+                if dest_dir_resolved != file_dest and dest_dir_resolved not in file_dest.parents:
+                    raise ConfigError(f"Path traversal detected in template file entry '{fname}'. Destination must be inside '{dest_dir}'.")
+                if not force and file_dest.exists():
+                    Printer.error(f"File '{file_dest}' already exists. Use -f / --force to overwrite.")
+                    return False
 
             # Create files
             for file_entry in files_list:
                 fname = file_entry.get("name")
                 if not fname:
                     continue
-                file_dest = dest_dir / fname
+                file_dest = (dest_dir / fname).resolve()
                 raw_content = cls._load_template_content(file_entry, Path.cwd()) or ""
                 interpolated = cls._interpolate(raw_content, file_dest)
                 file_dest.parent.mkdir(parents=True, exist_ok=True)

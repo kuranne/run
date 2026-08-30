@@ -84,3 +84,13 @@ def test_custom_language_substitution(tmp_path):
 
     exec_cmd, compiling = runner.executed_commands[1]
     assert exec_cmd == ["EXEC", str(out_file), "--target=app"]
+
+def test_env_var_substitution_with_spaces_no_quotes(monkeypatch):
+    monkeypatch.setenv("SPACED_VAR", "hello world")
+    context = {}
+    result = VariableSubstitutor.substitute_string("prefix ${env:SPACED_VAR} suffix", context)
+    assert result == "prefix hello world suffix"
+
+    list_result = VariableSubstitutor.substitute_list(["--opt=${env:SPACED_VAR}"], context)
+    assert list_result == ["--opt=hello world"]
+
