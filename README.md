@@ -106,6 +106,13 @@ run <files> [flags]
 
 | Flag | Description |
 |------|-------------|
+| `--debug` | Launch interactive debugger (`lldb` on macOS, `gdb` on Linux, `pdb` for Python, `--inspect-brk` for Node.js) |
+| `--gdb` | Launch interactive GDB debugger session |
+| `--lldb` | Launch interactive LLDB debugger session |
+| `--valgrind` | Run with detailed Valgrind memory leak checking (`--leak-check=full --track-origins=yes`) |
+| `--asan` | Compile with AddressSanitizer and UndefinedBehaviorSanitizer (`-fsanitize=address,undefined`) |
+| `--tsan` | Compile with ThreadSanitizer (`-fsanitize=thread`) |
+| `--sanitize <type>` | Compile with custom sanitizer flags (e.g. `--sanitize memory,leak`) |
 | `--build-only`, `--no-run`, `-B` | Compile binary without executing (preserves output binary) |
 | `--expect <file>` | Automatically verify output and print line-by-line diffs against expected file |
 | `--test-dir <dir>` | Run batch testcases (*.in + *.out) from directory and display summary table |
@@ -136,6 +143,22 @@ git pull
 ```
 
 ### Usage Examples
+
+**Interactive Debugging:**
+
+```bash
+run main.cpp --debug              # Auto-launches LLDB on macOS or GDB on Linux
+run app.py --debug                # Launches Python pdb session
+run server.js --debug             # Launches Node.js with --inspect-brk
+```
+
+**Memory Leak & Sanitizer Analysis:**
+
+```bash
+run main.cpp --asan               # Compile and run with AddressSanitizer
+run server.cpp --tsan             # Compile and run with ThreadSanitizer
+run main.c --valgrind             # Run with full Valgrind leak checking
+```
 
 **Toolchain Diagnostics:**
 

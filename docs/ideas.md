@@ -15,13 +15,14 @@ This document captures architectural concepts, user experience enhancements, and
 
 ---
 
-## 2. Debugger & Sanitizer Shortcuts (`--gdb`, `--lldb`, `--asan`)
+## 2. Debugger & Sanitizer Suite (`--debug`, `--gdb`, `--lldb`, `--valgrind`, `--asan`, `--tsan`, `--sanitize`) [COMPLETED]
 - **Category**: Low-Level & Systems Development
-- **Description**: Provide one-flag compilation and debugger integration for C, C++, Rust, and Zig.
+- **Status**: Implemented
 - **Key Capabilities**:
-  - `--asan`: Injects `-fsanitize=address,undefined -g` compiler flags automatically.
-  - `--gdb`: Compiles with debug symbols (`-g`) and immediately attaches GDB in an interactive session.
-  - `--lldb`: Compiles with debug symbols (`-g`) and attaches LLDB (ideal for macOS/Clang workflows).
+  - `--debug`: Multi-language smart debugger launcher (`lldb` on macOS, `gdb` on Linux, `pdb` for Python, `--inspect-brk` for Node.js, `rust-lldb`/`rust-gdb` for Rust).
+  - `--gdb` / `--lldb`: Explicit GDB or LLDB launcher.
+  - `--valgrind`: Detailed runtime memory leak checking (`--leak-check=full --track-origins=yes`).
+  - `--asan` / `--tsan` / `--sanitize <type>`: Compiler instrumentation for AddressSanitizer, ThreadSanitizer, and custom sanitizers.
 
 ---
 

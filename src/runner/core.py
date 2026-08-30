@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 import os
+import sys
 from util.output import Printer, Colors
 from util.errors import ConfigError, ExecutionError
 from util.cache import CacheManager
@@ -199,5 +200,18 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
         if self.is_posix and not target.startswith('/') and not target.startswith('./'):
             target = f"./{target}"
         
-        cmd = [target] + args + self.run_args
+        target_args = args + self.run_args
+
+        if self.flags.get("gdb"):
+            cmd = ["gdb", "--args", target] + target_args
+        elif self.flags.get("lldb"):
+            cmd = ["lldb", "--", target] + target_args
+        elif self.flags.get("debug"):
+            dbg = "lldb" if sys.platform == "darwin" else "gdb"
+            cmd = ([dbg, "--"] if dbg == "lldb" else [dbg, "--args"]) + [target] + target_args
+        elif self.flags.get("valgrind"):
+            cmd = ["valgrind", "--leak-check=full", "--track-origins=yes", target] + target_args
+        else:
+            cmd = [target] + target_args
+
         self.run_command(cmd)
