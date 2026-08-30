@@ -1,43 +1,62 @@
 # Auto Compiler & Runner
 
-A configurable, intelligent build system and runner. It handles compilation, execution, and cleanup automatically for multiple programming languages and scripts.
+A smart, high-performance build system, test runner, and developer productivity tool. It handles automatic language detection, compilation, execution, testing, benchmarking, and cleanup across multiple programming languages.
 
-Honestly, I was too lazy to compile then run for testing, so I made this tool to automate the workflow.
+---
 
-## Current version
+## Table of Contents
 
-Version `0.0.2` - Hot Fix patch!
+- [Features](#-features)
+- [Supported Languages](#-supported-languages)
+- [Installation](#-installation)
+- [Updating](#-updating)
+- [Basic Usage](#-basic-usage)
+- [Essential Daily Flags](#-essential-daily-flags)
+- [Configuration (`Run.toml`)](#-configuration-runtoml)
+- [Documentation Hub](#-documentation-hub)
+
+---
 
 ## Features
 
-- **Multi-Language Support**: Automatically detects and executes C/C++, Java, Python, Rust, Bash, Ruby, Node.js, Perl, Lua, and custom languages
-- **Smart Auto-Detection**: Detects language by file extension or shebang line
-- **Intelligent Compilation**: Automatically compiles C/C++/Rust/Java before running
-- **Global Configuration**: Store `Run.toml` in XDG config directory (`~/.config/run_kuranne/`) or Windows APPDATA
-- **Project-Level Override**: Project-specific `Run.toml` takes precedence over global config
-- **Virtual Environment Support**: Auto-detects `.venv` or `.env` and uses local Python
-- **Multi-File Compilation**: Compile multiple C/C++/Java files together. Includes **CPM (C Project Manager)** to intelligently detect your `main()` entry point regardless of file order!
-- **Lightning Fast Lookup**: The `--link-auto` (`-L`) scanner aggressively ignores heavy directories (like `.git`, `node_modules`, `.venv`) for instant file discovery.
-- **Custom Language Support**: Add any language via `Run.toml` configuration
-- **Build Presets**: Define compile-time flags for different build profiles (debug, release, etc.)
-- **Caching**: Intelligent build cache for faster recompilation (can be disabled with `--no-cache`)
-- **Dry Run Mode**: Preview commands without executing them
-- **Debug Logging**: Detailed logging for troubleshooting build issues
-- **Security**: Runs safety checks (root detection, environment sanitization)
-- **Cross-Platform**: Full support for Linux, macOS, and Windows
+- **Multi-Language Support**: Automatically detects and runs C/C++, Rust, Python, Java, Go, Zig, Node.js, Ruby, Perl, Lua, and Bash.
+- **Smart Compilation**: Compiles C/C++/Rust/Java automatically before execution and cleans up temporary binaries.
+- **CPM (C Project Manager)**: Multi-file compilation with automatic `main()` entrypoint detection regardless of file ordering.
+- **Built-in Testing & Benchmarks**: Real-time execution time (`-t`), peak memory tracking (`-M`), output expectation diffs (`--expect`), and batch testcase runner (`--test-dir`).
+- **Interactive Debuggers & Sanitizers**: One-flag launch for LLDB, GDB, Python pdb, Node inspector, Valgrind, AddressSanitizer, and ThreadSanitizer.
+- **Template Scaffolding**: Generate single-file starter code or multi-file project bundles (`run --new`).
+- **Intelligent Caching**: Fast incremental compilation with automatic cache management.
+- **Shell Autocompletion**: Tab completion for Zsh (including `_evalcache`), Bash, Fish, and PowerShell.
+- **Cross-Platform**: Full support for Linux, macOS, and Windows.
+
+---
+
+## Supported Languages
+
+| Language | Extension | Method | Default Runner |
+|----------|-----------|--------|----------------|
+| **C** | `.c` | Compiler | `gcc` / `clang` |
+| **C++** | `.cpp`, `.cc`, `.cxx` | Compiler | `g++` / `clang++` |
+| **Rust** | `.rs` | Compiler / Cargo | `rustc` / `cargo` |
+| **Java** | `.java` | Compiler | `javac` → `java` |
+| **Python** | `.py` | Interpreter | Auto-detects `.venv` / `python3` |
+| **Go** | `.go` | Compiler / Runner | `go` |
+| **Zig** | `.zig` | Compiler | `zig` |
+| **JavaScript / TypeScript** | `.js`, `.ts` | Interpreter | `node` |
+| **Bash / Shell** | `.sh` | Interpreter | `bash` / `sh` |
+| **Ruby / Perl / Lua** | `.rb`, `.pl`, `.lua` | Interpreter | System default |
+| **Custom** | Custom | Custom | Configurable via `Run.toml` |
+
+---
 
 ## Installation
 
 ### Requirements
-
-- **Python 3.11+** (Required for TOML support)
+- **Python 3.11+**
 - **Git**
-- **Linux(POSIX base), MacOS, or Windows**
-- **Compiler and/or Interpreter** [Optional]
-- **Internet** (For downloading the repository)
+- Linux, macOS, or Windows
 
 ### Linux / macOS
-
 ```bash
 git clone https://github.com/kuranne/run.git ~/.local/share/run_kuranne
 cd ~/.local/share/run_kuranne
@@ -45,492 +64,122 @@ cd ~/.local/share/run_kuranne
 ```
 
 ### Windows (PowerShell)
-
-Before run this, ensure that you can run the script on PowerShell.
-
 ```powershell
-Set-ExecutionPolicy RemoteSigned
-```
-
-```powershell
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
 git clone https://github.com/kuranne/run.git "$HOME\AppData\Local\run_kuranne"
 cd "$HOME\AppData\Local\run_kuranne"
 .\setup.ps1
 ```
 
-_Note: This will set up a local virtual environment and symlink the `run` command to `~/.local/bin` (Linux/macOS) or your PATH._
+---
 
-## Usage
-
-```bash
-run <files> [flags]
-```
-
-### Supported Languages
-
-| Language | Extension | Method | Notes |
-|----------|-----------|--------|-------|
-| C | `.c` | Compiler | Uses gcc (configurable) |
-| C++ | `.cpp`, `.cc` | Compiler | Uses g++ (configurable) |
-| Java | `.java` | Compiler | Javac → Java |
-| Rust | `.rs` | Compiler/Cargo | Auto-detects Cargo projects |
-| Python | `.py` | Interpreter | Auto-detects venv |
-| Bash/Shell | `.sh` | Interpreter | Detects bash or sh |
-| Ruby | `.rb` | Interpreter | Requires ruby installed |
-| Node.js | `.js` | Interpreter | Detects node or nodejs |
-| Perl | `.pl` | Interpreter | Requires perl installed |
-| Lua | `.lua` | Interpreter | Tries lua, falls back to luajit |
-| Custom | Custom | Custom | Configurable via Run.toml |
-
-### Available Flags
-
-#### Daily Essential Shortcuts
-
-| Flag | Shorthand | Description |
-|------|-----------|-------------|
-| `--watch` | `-w` | Re-compile and run on file change (press `c` to retry) |
-| `--force` | `-f` | Force continue on errors / non-interactive mode |
-| `--multi` | `-m` | Compile multiple files together (C/C++/Java) |
-| `--preset <name>` | `-p <name>` | Use a preset from `Run.toml` (e.g., `debug`, `release`) |
-| `--jobs <N>` | `-j <N>` | Number of parallel worker threads for multi-file compilation |
-| `--stdin [file]` | `-i [file]` | Redirect standard input from file or shell pipe (`-i` or `-i <file>`) |
-| `--time` | `-t` | Measure and display execution time |
-| `--mem`, `--memory` | `-M` | Measure and display peak memory usage (usable as `-tM`) |
-| `--dry-run` | `-d` | Preview commands without executing them |
-| `--quiet` | `-q` | Silence compiler output and logs |
-| `--verbose` | `-v, -vv` | Enable verbose debug logging (`-v`) or trace with stack traces (`-vv`) |
-| `--version` | `-V` | Show installed version |
-| `--help` | `-h` | Show help screen |
-
-#### Specialized & Advanced Options
-
-| Flag | Description |
-|------|-------------|
-| `--debug` | Launch interactive debugger (`lldb` on macOS, `gdb` on Linux, `pdb` for Python, `--inspect-brk` for Node.js) |
-| `--gdb` | Launch interactive GDB debugger session |
-| `--lldb` | Launch interactive LLDB debugger session |
-| `--valgrind` | Run with detailed Valgrind memory leak checking (`--leak-check=full --track-origins=yes`) |
-| `--asan` | Compile with AddressSanitizer and UndefinedBehaviorSanitizer (`-fsanitize=address,undefined`) |
-| `--tsan` | Compile with ThreadSanitizer (`-fsanitize=thread`) |
-| `--sanitize <type>` | Compile with custom sanitizer flags (e.g. `--sanitize memory,leak`) |
-| `--build-only`, `--no-run`, `-B` | Compile binary without executing (preserves output binary) |
-| `--expect <file>` | Automatically verify output and print line-by-line diffs against expected file |
-| `--test-dir <dir>` | Run batch testcases (*.in + *.out) from directory and display summary table |
-| `--doctor` | Run comprehensive system toolchain and compiler diagnostics |
-| `--no-color` | Disable ANSI color formatting (also respects `NO_COLOR` env var) |
-| `--argument <args>` | Arguments to pass to the executable/script (or use `--`) |
-| `--flags <flags>` | Pass extra compiler/interpreter flags |
-| `--compiler <bin>` | Override compiler or interpreter binary |
-| `--out-dir <dir>` | Output directory for compiled binaries |
-| `--link-auto [depth]` | Auto-find and compile source files (specify depth or leave empty for unlimited) |
-| `--timeout <sec>` | Timeout in seconds for execution |
-| `--env <KEY=VAL>` | Set environment variables |
-| `--keep` | Keep compiled binaries (don't delete after run) |
-| `--no-cache` | Disable build caching |
-| `--new <target>` | Generate starter source code or multi-file project from template (e.g. `run --new solution.cpp`) |
-| `--template <name>` | Specify custom template name defined in `Run.toml` |
-| `--completion [shell]` | Generate autocompletion script (`zsh`, `bash`, `fish`, `powershell`) or show setup guide |
-| `--clean` | Clear local build cache and exit |
-| `--init` | Initialize tailored `Run.toml` for the current project |
-| `--directory <dir>`, `--cwd <dir>` | Change to directory before executing |
-| `--unsafe` | Allow running as root (⚠️ dangerous) |
-
-### Shell Autocompletion Setup
-
-Generate shell autocompletions for instant tab completion of flags, source files, `Run.toml` tasks, and presets:
-
-**Zsh (with `_evalcache` or `~/.zshrc`):**
-```zsh
-# Using _evalcache:
-_evalcache run run --completion zsh
-
-# Or standard eval in ~/.zshrc:
-eval "$(run --completion zsh)"
-```
-
-**Bash (`~/.bashrc`):**
-```bash
-source <(run --completion bash)
-```
-
-**Fish (`~/.config/fish/completions/run.fish`):**
-```fish
-run --completion fish > ~/.config/fish/completions/run.fish
-```
-
-**PowerShell (`$PROFILE`):**
-```powershell
-run --completion powershell | Out-String | Invoke-Expression
-```
-
-### Updating
+## Updating
 
 To update `run` to the latest version:
 
 ```bash
-cd ~/.local/share/run_kuranne  # Or your cloned directory
+cd ~/.local/share/run_kuranne  # Or your installation directory
 git pull
 ./setup.sh                    # On Windows: .\setup.ps1
 ```
 
-### Usage Examples
+---
 
-**Shell Autocompletions Guide:**
+## Basic Usage
 
 ```bash
-run --completion
+run <files...> [options] [-- <program-args...>]
 ```
 
-**Code Scaffolding & Multi-File Template Generation:**
+### Quick Examples
 
 ```bash
-run --new solution.cpp            # Scaffolds C++ starter code
-run --new Solution.java           # Scaffolds Java with 'public class Solution'
-run --new ./problem1 --template leetcode_rs # Generates multi-file template (main.rs + solve.rs)
-```
+# Run a Python script (auto-detects virtualenv)
+run script.py
 
-**Interactive Debugging:**
+# Compile and run a C++ file with execution timing and memory tracking
+run solution.cpp -tM
 
-```bash
-run main.cpp --debug              # Auto-launches LLDB on macOS or GDB on Linux
-run app.py --debug                # Launches Python pdb session
-run server.js --debug             # Launches Node.js with --inspect-brk
-```
+# Pipe input directly into program
+echo "10 20" | run solution.py -i
 
-**Memory Leak & Sanitizer Analysis:**
+# Run with an interactive debugger (LLDB on macOS, GDB on Linux)
+run main.cpp --debug
 
-```bash
-run main.cpp --asan               # Compile and run with AddressSanitizer
-run server.cpp --tsan             # Compile and run with ThreadSanitizer
-run main.c --valgrind             # Run with full Valgrind leak checking
-```
+# Scaffold a new file from template
+run --new solution.cpp
 
-**Toolchain Diagnostics:**
-
-```bash
+# Diagnose system toolchains
 run --doctor
 ```
 
-**Piping input directly into program with `-i`:**
+---
 
-```bash
-echo "test input 123" | run test.py -i
-```
+## Common Flags
 
-**Competitive programming benchmark (time, memory, stdin redirection):**
+| Shorthand | Long Flag | Description |
+|-----------|-----------|-------------|
+| `-w` | `--watch` | Watch mode: re-compile and run on file change |
+| `-t` | `--time` | Measure and display execution time |
+| `-M` | `--mem`, `--memory` | Measure and display peak memory usage (combine as `-tM`) |
+| `-i` | `--stdin [file]` | Redirect standard input from file or pipe |
+| `-d` | `--dry-run` | Preview commands without executing |
+| `-m` | `--multi` | Compile multiple source files together |
+| `-p` | `--preset <name>` | Use a build preset from `Run.toml` (e.g. `debug`, `release`) |
+| `-j` | `--jobs <N>` | Number of parallel compilation threads |
+| `-q` | `--quiet` | Silence compiler output and banners |
+| `-v` | `--verbose` | Enable verbose debug logging (`-v`) or trace (`-vv`) |
+| `-f` | `--force` | Force continue on errors / non-interactive mode |
+| `-V` | `--version` | Display installed version |
+| `-h` | `--help` | Show help screen |
 
-```bash
-run solution.cpp -tM -i input.txt
-```
+> For all advanced flags (`--debug`, `--asan`, `--valgrind`, `--test-dir`, `--expect`, `--build-only`), see the [UNIX Man Page](docs/man/run.1) or the [Documentation Hub](#-documentation-hub).
 
-**Verify output against expected answer file:**
+---
 
-```bash
-run solution.cpp -i in.txt --expect out.txt -tM
-```
+## Configuration (`Run.toml`)
 
-**Run full testcase directory suite:**
+### Configuration File Hierarchy
 
-```bash
-run solution.cpp --test-dir ./testcases/ -tM
-```
+`run` searches for configuration in the following order:
+1. **Workspace Directory** (Highest Priority): `./Run.toml`, `../Run.toml`, up to 4 parent levels.
+2. **Global Config Directory** (Lowest Priority):
+   - Linux/macOS: `~/.config/run_kuranne/Run.toml` (or `$XDG_CONFIG_HOME/run_kuranne/Run.toml`)
+   - Windows: `%APPDATA%\run_kuranne\Run.toml`
 
-**Build binary without running (`--build-only`):**
-
-```bash
-run main.cpp --build-only --out-dir bin/
-```
-
-**Run a Python script with program arguments:**
-
-```bash
-run script.py -- --port 8080 --debug
-```
-
-**Compile multiple C++ files in parallel with 8 threads:**
-
-```bash
-run main.cpp helper.cpp utils.cpp -m -j 8
-```
-
-**Auto-find and compile all C++ files in current directory:**
-
-```bash
-run --link-auto
-```
-
-**Run from a specific project directory:**
-
-```bash
-run --directory ./subproject
-```
-
-**Clear build cache:**
-
-```bash
-run --clean
-```
-
-**Keep compiled binary for reuse:**
-
-```bash
-run main.cpp --keep
-```
-
-## Configuration
-
-### Config File Location
-
-The runner searches for `Run.toml` in the following order of priority:
-
-1. **Project Directory** (highest priority): Current directory, checking up to 4 levels up
-   - `./Run.toml`
-   - `../Run.toml`
-   - `../../Run.toml`
-   - etc.
-
-2. **Global Config Directory** (lowest priority):
-   - **Linux/macOS**: `~/.config/run_kuranne/Run.toml` (respects `XDG_CONFIG_HOME`)
-   - **Windows**: `%APPDATA%\run_kuranne\Run.toml` (typically `C:\Users\Username\AppData\Roaming\run_kuranne\Run.toml`)
-
-Project-level configuration overrides global settings.
-
-### Basic Configuration
-
-Create `Run.toml` in your project root:
+### Basic `Run.toml` Example
 
 ```toml
 [runners]
-# Override default compiler/interpreter commands
-c = "clang"
 cpp = "clang++"
-python = "python3"
-rust = "rustc"
-java = "javac"
-```
+c = "clang"
 
-### Language Definitions
-
-Override default language behavior or add custom language support:
-
-```toml
-[[languages]]
-name = "c"
-extensions = [".c"]
-runner = "clang"
-type = "compiler"
-
-[[languages]]
-name = "cpp"
-extensions = [".cpp", ".cc", ".cxx"]
-runner = "clang++"
-type = "compiler"
-
-[[languages]]
-name = "rust"
-extensions = [".rs"]
-runner = "cargo"
-type = "compiler"
-
-[[languages]]
-name = "python"
-extensions = [".py"]
-runner = "python3"
-type = "interpreter"
-
-[[languages]]
-name = "bash"
-extensions = [".sh"]
-runner = "bash"
-type = "interpreter"
-
-[[languages]]
-name = "ruby"
-extensions = [".rb"]
-runner = "ruby"
-type = "interpreter"
-
-[[languages]]
-name = "javascript"
-extensions = [".js"]
-runner = "node"
-type = "interpreter"
-```
-
-### Build Presets
-
-Define compile flags for different build profiles:
-
-```toml
 [presets.debug]
-c = ["-g", "-Wall", "-Wextra"]
 cpp = ["-g", "-Wall", "-Wextra", "-std=c++20"]
-rust = ["-g"]
-java = ["-g"]
 
 [presets.release]
-c = ["-O3", "-Wall"]
 cpp = ["-O3", "-Wall", "-std=c++20"]
-rust = ["-C", "opt-level=3"]
-java = ["-O"]
 
-[presets.strict]
-c = ["-Wall", "-Wextra", "-Werror"]
-cpp = ["-Wall", "-Wextra", "-Werror", "-std=c++20"]
+[tasks]
+test = "pytest tests/"
+build = "cargo build --release"
 ```
 
-### Custom Languages
-
-Add support for any programming language by defining it in `Run.toml`:
-
-```toml
-[[languages]]
-name = "kotlin"
-extensions = [".kt"]
-runner = "kotlinc"
-type = "compiler"
-
-# With preset support
-[presets.debug]
-kotlin = ["-nowarn"]
-```
-
-Or for interpreted languages (don't forget to set `type = "interpreter"`):
-
-```toml
-[[languages]]
-name = "perl"
-extensions = [".pl"]
-runner = "perl"
-type = "interpreter"
-
-[[languages]]
-name = "lua"
-extensions = [".lua"]
-runner = "lua"
-type = "interpreter"
-```
-
-### Exclude Patterns
-
-Skip certain files or extensions when using wildcard compilation:
-
-```toml
-[core]
-exclude_files = ["test_private.cpp", "benchmark.cpp"]
-exclude_extensions = [".md", ".txt"]
-```
-
-When using `-L` or `-m`, files matching these patterns will be ignored.
-
-## Script Execution & Shebang Detection
-
-The runner supports executing scripts without explicit file extensions by detecting the shebang line. This is useful for script files without extensions or non-standard extensions.
-
-### Supported Shebangs
-
-Automatically detected:
-
+Initialize a template config for your project with:
 ```bash
-#!/usr/bin/env python3     → Python
-#!/bin/bash               → Bash
-#!/usr/bin/env ruby       → Ruby
-#!/usr/bin/env node       → Node.js
-#!/usr/bin/env perl       → Perl
-#!/usr/bin/env lua        → Lua
+run --init
 ```
 
-### Running Scripts Without Extensions
 
-```bash
-# Create executable script
-cat > process_data << 'EOF'
-#!/usr/bin/env python3
-import sys
-print("Processing:", sys.argv[1:])
-EOF
 
-chmod +x process_data
+## Documentation Hub
 
-# Run it - automatically detects Python from shebang
-run process_data arg1 arg2
-```
+Explore detailed topic guides and documentation:
 
-## Troubleshooting
-
-### Issue: "Interpreter not found"
-
-**Cause**: The required interpreter/compiler isn't installed or not in PATH
-
-**Solution**:
-
-- Install the missing language/compiler
-- Or override the runner in `Run.toml`:
-```toml
-[runner]
-python = "/usr/bin/python3.11"  # full path
-```
-
-### Issue: "Unsupported extension"
-
-**Cause**: File type not recognized
-
-**Solution**:
-
-- Add custom language to `Run.toml`
-- Or check for typos in the filename
-
-### Issue: Cached build not updating
-
-**Cause**: Build cache may be out of date for header file changes
-
-**Solution**:
-
-```bash
-run file.cpp --no-cache  # Skip cache this time
-```
-
-Or delete `~/.cache/run_kuranne/` directory manually and rebuild.
-
-### Issue: Binary not found after compilation
-
-**Possible causes**:
-
-- Compilation failed (check error messages)
-- Wrong output directory for Cargo projects
-- Permission issues
-
-**Solution**:
-
-- Use `--dry-run` to verify commands
-- Check `-v` or `-vv` output for detailed information
-- Use `--keep` to preserve binaries for inspection
-
-## Performance Tips
-
-1. **Use presets** - Define commonly-used flags in `Run.toml`:
-
-```bash
-run main.cpp -p release  # Much faster than typing flags
-```
-
-2. **Multi-file compilation** - Compile multiple files at once:
-
-```bash
-run *.cpp -m  # Compiles all at once, not sequentially
-```
-
-3. **Leverage caching** - Build cache is automatic:
-
-```bash
-# First run: slow (full compilation)
-run main.cpp
-# Second run: fast (from cache, if unchanged)
-run main.cpp
-```
-
-4. **Use dry-run first** - Test commands before executing:
-
-```bash
-run program.c -p release -d  # Preview what will happen
-```  
+- **[UNIX Man Page (`docs/man/run.1`)](docs/man/run.1)** - Complete CLI reference manual (`man ./docs/man/run.1`).
+- **[Configuration Guide (`docs/configuration.md`)](docs/configuration.md)** - Full `Run.toml` schema, runners, custom languages, and task runner.
+- **[Debugging & Sanitizers Guide (`docs/debugging_and_sanitizers.md`)](docs/debugging_and_sanitizers.md)** - Interactive debugging (LLDB, GDB, pdb), Valgrind, and ASan/TSan sanitizers.
+- **[Testing & Benchmarking Guide (`docs/testing_and_benchmarking.md`)](docs/testing_and_benchmarking.md)** - Batch test runner (`--test-dir`), output diffs (`--expect`), and benchmarking.
+- **[Templates & Scaffolding Guide (`docs/templates_and_scaffolding.md`)](docs/templates_and_scaffolding.md)** - Single-file and multi-file code generator (`run --new`).
+- **[Shell Autocompletion Guide (`docs/completions.md`)](docs/completions.md)** - Tab completion setup for Zsh (`_evalcache`), Bash, Fish, and PowerShell.
+- **[Troubleshooting & Tips (`docs/troubleshooting.md`)](docs/troubleshooting.md)** - Diagnostic scanner, error fixes, and performance tips.
