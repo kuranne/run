@@ -160,9 +160,22 @@ class BaseRunner:
 
         sandbox_preexec_fn = None
         if self.flags.get("sandbox"):
-            from util.sandbox import ContainerSandbox
+            from util.sandbox import ContainerSandbox, PersistentSandbox, ComposeSandbox
             t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
-            t_list = ContainerSandbox.wrap_command(t_list, net=self.flags.get("sandbox_net", False), compiling=compiling)
+            sandbox_cfg = self.config.get_sandbox_config() if hasattr(self, 'config') else {}
+            
+            if PersistentSandbox._container_id:
+                t_list = PersistentSandbox.wrap_command(t_list)
+            elif sandbox_cfg.get("compose"):
+                svc = sandbox_cfg.get("compose_service", "app")
+                t_list = ComposeSandbox.wrap_command(t_list, sandbox_cfg["compose"], svc)
+            else:
+                t_list = ContainerSandbox.wrap_command(
+                    t_list, 
+                    net=self.flags.get("sandbox_net", False), 
+                    compiling=compiling, 
+                    sandbox_cfg=sandbox_cfg
+                )
             target_cmd = " ".join(t_list) if use_shell else t_list
         elif not compiling and self.flags.get("restrict"):
             from util.sandbox import NativeRestrictor

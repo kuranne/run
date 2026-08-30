@@ -2,7 +2,7 @@ import os
 import sys
 import subprocess as spc
 from typing import List, Optional
-from util.errors import ConfigError
+from util.errors import ConfigError, ExecutionError
 from util.output import Printer
 
 class NativeRestrictor:
@@ -85,21 +85,58 @@ class ContainerSandbox:
         raise ConfigError("No container engine (Docker/Podman) found. Please install one to use --sandbox.")
 
     @staticmethod
-    def wrap_command(cmd: List[str], net: bool = False, compiling: bool = False) -> List[str]:
-        if sys.platform == "linux":
-            # On Linux, --sandbox uses bwrap natively, but if compiling we don't really need to wrap it.
-            # Actually, if we wrap compiling, we must allow write to cwd.
-            # bwrap_cmd in NativeRestrictor binds `/` as ro, so it would fail to write.
-            # Let's just fallback to NativeRestrictor but we need to tell it if it's compiling.
-            # However, NativeRestrictor shouldn't be used for compiling.
+    def _build_dockerfile(dockerfile_path: str, engine: str) -> str:
+        from pathlib import Path
+        import hashlib
+        
+        path = Path(dockerfile_path)
+        if not path.exists():
+            raise ConfigError(f"Dockerfile '{dockerfile_path}' not found.")
+        
+        with open(path, "rb") as f:
+            content = f.read()
+        
+        hash_str = hashlib.sha256(content).hexdigest()[:12]
+        image_name = f"run-sandbox-{hash_str}"
+        
+        res = spc.run([engine, "images", "-q", image_name], capture_output=True, text=True)
+        if not res.stdout.strip():
+            Printer.info(f"Building sandbox image '{image_name}' from {dockerfile_path}...")
+            build_res = spc.run([engine, "build", "-t", image_name, "-f", dockerfile_path, str(path.parent)])
+            if build_res.returncode != 0:
+                raise ConfigError(f"Failed to build Dockerfile '{dockerfile_path}'.")
+        return image_name
+
+    @staticmethod
+    def get_heuristic_image(cmd: List[str] = None) -> str:
+        base_image = "ubuntu:latest"
+        if cmd:
+            exe = cmd[0].lower()
+            if "gcc" in exe or "g++" in exe or "clang" in exe:
+                base_image = "gcc:latest"
+            elif "python" in exe or "pytest" in exe:
+                base_image = "python:3-slim"
+            elif "rustc" in exe or "cargo" in exe:
+                base_image = "rust:latest"
+            elif "java" in exe or "javac" in exe:
+                base_image = "openjdk:latest"
+            elif "go" in exe:
+                base_image = "golang:latest"
+            elif "node" in exe or "npm" in exe or "npx" in exe:
+                base_image = "node:latest"
+            elif "ruby" in exe:
+                base_image = "ruby:latest"
+        return base_image
+
+    @staticmethod
+    def wrap_command(cmd: List[str], net: bool = False, compiling: bool = False, sandbox_cfg: dict = {}) -> List[str]:
+        if sys.platform == "linux" and not sandbox_cfg:
             if compiling:
                 return cmd
             return NativeRestrictor.wrap_command(cmd, net)
             
         engine = ContainerSandbox._get_engine()
         cwd = os.getcwd()
-        
-        # Determine mount mode: rw for compilation, ro for execution
         mount_mode = "rw" if compiling else "ro"
         
         container_cmd = [
@@ -112,25 +149,69 @@ class ContainerSandbox:
         if not net:
             container_cmd.extend(["--network", "none"])
             
-        base_image = "ubuntu:latest"
-        if cmd:
-            exe = cmd[0].lower()
-            if "gcc" in exe or "g++" in exe or "clang" in exe:
-                base_image = "gcc:latest"
-            elif "python" in exe or "pytest" in exe:
-                base_image = "python:3-slim"
-            elif "rustc" in exe or "cargo" in exe:
-                base_image = "rust:latest"
-            elif "java" in exe:
-                base_image = "openjdk:latest"
-            elif "go" in exe:
-                base_image = "golang:latest"
-            elif "node" in exe or "npm" in exe or "npx" in exe:
-                base_image = "node:latest"
-            elif "ruby" in exe:
-                base_image = "ruby:latest"
+        if sandbox_cfg.get("dockerfile"):
+            base_image = ContainerSandbox._build_dockerfile(sandbox_cfg["dockerfile"], engine)
+        elif sandbox_cfg.get("image"):
+            base_image = sandbox_cfg["image"]
+        else:
+            base_image = ContainerSandbox.get_heuristic_image(cmd)
                 
         container_cmd.append(base_image) 
         container_cmd.extend(cmd)
         
         return container_cmd
+
+
+class ComposeSandbox:
+    """Handles docker-compose execution environments."""
+    
+    @staticmethod
+    def setup(compose_file: str):
+        Printer.info(f"Starting docker-compose from {compose_file}...")
+        res = spc.run(["docker", "compose", "-f", compose_file, "up", "-d"])
+        if res.returncode != 0:
+            raise ConfigError(f"Failed to start docker-compose using {compose_file}")
+            
+    @staticmethod
+    def teardown(compose_file: str):
+        Printer.info(f"Stopping docker-compose from {compose_file}...")
+        spc.run(["docker", "compose", "-f", compose_file, "down"])
+        
+    @staticmethod
+    def wrap_command(cmd: List[str], compose_file: str, service: str) -> List[str]:
+        return ["docker", "compose", "-f", compose_file, "exec", "-w", os.getcwd(), service] + cmd
+
+
+class PersistentSandbox:
+    """Handles long-running sleeper containers for fast watch mode reloads."""
+    
+    _container_id: Optional[str] = None
+    _engine: str = "docker"
+
+    @staticmethod
+    def start(engine: str, image: str, net: bool = False, cwd: str = ""):
+        Printer.info(f"Starting persistent sandbox container ({image})...")
+        cmd = [engine, "run", "-d", "--rm", "-v", f"{cwd}:{cwd}:rw", "-v", "/tmp:/tmp", "-w", cwd]
+        if not net:
+            cmd.extend(["--network", "none"])
+        cmd.extend([image, "tail", "-f", "/dev/null"])
+        
+        res = spc.run(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise ConfigError(f"Failed to start persistent container: {res.stderr}")
+            
+        PersistentSandbox._container_id = res.stdout.strip()
+        PersistentSandbox._engine = engine
+
+    @staticmethod
+    def stop():
+        if PersistentSandbox._container_id:
+            Printer.info("Stopping persistent sandbox container...")
+            spc.run([PersistentSandbox._engine, "stop", PersistentSandbox._container_id], capture_output=True)
+            PersistentSandbox._container_id = None
+            
+    @staticmethod
+    def wrap_command(cmd: List[str]) -> List[str]:
+        if not PersistentSandbox._container_id:
+            raise ExecutionError("Persistent container is not running.")
+        return [PersistentSandbox._engine, "exec", "-w", os.getcwd(), PersistentSandbox._container_id] + cmd

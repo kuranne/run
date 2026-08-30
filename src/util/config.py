@@ -127,12 +127,19 @@ class Config:
         runners = self.data.get("runners", self.data.get("runner", {}))
         return runners.get(lang, default)
     
-    def get_tasks(self) -> Dict[str, str]:
+    def get_tasks(self) -> Dict[str, Any]:
         """
         Get custom tasks from configuration.
         """
         tasks = self.data.get("tasks", {})
         return tasks if isinstance(tasks, dict) else {}
+
+    def get_sandbox_config(self) -> Dict[str, Any]:
+        """
+        Get global sandbox configuration.
+        """
+        sandbox = self.data.get("sandbox", {})
+        return sandbox if isinstance(sandbox, dict) else {}
 
     def get_projects(self) -> Dict[str, Dict[str, Any]]:
         """
