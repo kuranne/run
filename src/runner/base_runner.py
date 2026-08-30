@@ -35,6 +35,11 @@ class BaseRunner:
         
         # Config & Others
         self.config = Config()
+        core_cfg = self.config.data.get("core", {})
+        if not self.flags.get("sandbox"): self.flags["sandbox"] = core_cfg.get("sandbox", False)
+        if not self.flags.get("sandbox_net"): self.flags["sandbox_net"] = core_cfg.get("sandbox_net", False)
+        if not self.flags.get("restrict"): self.flags["restrict"] = core_cfg.get("restrict", False)
+        
         excludes = self.config.get_exclude()
         self.output_files: List[Path] = []
         self.exclude_exts: List[str] = ['.toml', '.lock'] + excludes.get("extensions", [])
@@ -153,6 +158,32 @@ class BaseRunner:
 
         target_cmd = cmd_str if use_shell and isinstance(cmd, list) else cmd
 
+        sandbox_preexec_fn = None
+        if not compiling:
+            if self.flags.get("sandbox"):
+                from util.sandbox import ContainerSandbox
+                t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
+                t_list = ContainerSandbox.wrap_command(t_list, net=self.flags.get("sandbox_net", False))
+                target_cmd = " ".join(t_list) if use_shell else t_list
+            elif self.flags.get("restrict"):
+                from util.sandbox import NativeRestrictor
+                if sys.platform == "darwin":
+                    sandbox_preexec_fn = NativeRestrictor.macos_preexec_fn
+                else:
+                    t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
+                    t_list = NativeRestrictor.wrap_command(t_list, net=self.flags.get("sandbox_net", False))
+                    target_cmd = " ".join(t_list) if use_shell else t_list
+
+        spc_kwargs = {
+            "shell": use_shell,
+            "env": env,
+            "stdin": stdin_file,
+            "stdout": stdout_dest,
+            "stderr": stderr_dest
+        }
+        if sandbox_preexec_fn:
+            spc_kwargs["preexec_fn"] = sandbox_preexec_fn
+
         mem_bytes = None
         captured_stdout = ""
         p = None
@@ -160,14 +191,7 @@ class BaseRunner:
             try:
                 if not compiling and self.flags.get("memory", False):
                     if self.is_posix and timeout is None:
-                        p = spc.Popen(
-                            target_cmd,
-                            shell=use_shell,
-                            env=env,
-                            stdin=stdin_file,
-                            stdout=stdout_dest,
-                            stderr=stderr_dest
-                        )
+                        p = spc.Popen(target_cmd, **spc_kwargs)
                         _, status, rusage = os.wait4(p.pid, 0)
                         returncode = os.waitstatus_to_exitcode(status) if hasattr(os, "waitstatus_to_exitcode") else (status >> 8 if os.WIFEXITED(status) else 1)
                         if p.stdout:
@@ -179,16 +203,7 @@ class BaseRunner:
                     elif self.is_posix:
                         import resource
                         before_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-                        result = spc.run(
-                            target_cmd,
-                            check=False,
-                            shell=use_shell,
-                            env=env,
-                            stdin=stdin_file,
-                            stdout=stdout_dest,
-                            stderr=stderr_dest,
-                            timeout=timeout
-                        )
+                        result = spc.run(target_cmd, check=False, timeout=timeout, **spc_kwargs)
                         returncode = result.returncode
                         if result.stdout:
                             captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
@@ -198,14 +213,7 @@ class BaseRunner:
                     elif os.name == "nt":
                         import ctypes
                         from ctypes import wintypes
-                        p = spc.Popen(
-                            target_cmd,
-                            shell=use_shell,
-                            env=env,
-                            stdin=stdin_file,
-                            stdout=stdout_dest,
-                            stderr=stderr_dest
-                        )
+                        p = spc.Popen(target_cmd, **spc_kwargs)
                         returncode = p.wait(timeout=timeout)
                         if p.stdout:
                             captured_stdout = p.stdout.read().decode("utf-8", errors="ignore")
@@ -230,30 +238,12 @@ class BaseRunner:
                         except Exception:
                             mem_bytes = None
                     else:
-                        result = spc.run(
-                            target_cmd,
-                            check=False,
-                            shell=use_shell,
-                            env=env,
-                            stdin=stdin_file,
-                            stdout=stdout_dest,
-                            stderr=stderr_dest,
-                            timeout=timeout
-                        )
+                        result = spc.run(target_cmd, check=False, timeout=timeout, **spc_kwargs)
                         returncode = result.returncode
                         if result.stdout:
                             captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)
                 else:
-                    result = spc.run(
-                        target_cmd,
-                        check=False,
-                        shell=use_shell,
-                        env=env,
-                        stdin=stdin_file,
-                        stdout=stdout_dest,
-                        stderr=stderr_dest,
-                        timeout=timeout
-                    )
+                    result = spc.run(target_cmd, check=False, timeout=timeout, **spc_kwargs)
                     returncode = result.returncode
                     if result.stdout:
                         captured_stdout = result.stdout.decode("utf-8", errors="ignore") if isinstance(result.stdout, bytes) else str(result.stdout)

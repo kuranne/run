@@ -120,7 +120,10 @@ def main():
         "stdin": args.stdin,
         "env": args.env,
         "out_dir": args.out_dir,
-        "compiler": args.compiler
+        "compiler": args.compiler,
+        "restrict": args.restrict,
+        "sandbox": args.sandbox,
+        "sandbox_net": args.sandbox_net
     }
 
     try:

@@ -42,9 +42,24 @@ class TaskRunner:
             bool: True if task executed successfully.
         """
         tasks = config.get_tasks()
-        task_cmd = tasks.get(name)
-        if not task_cmd:
+        task_info = tasks.get(name)
+        if not task_info:
             raise ConfigError(f"Task '{name}' not found in Run.toml.")
+
+        task_cmd = ""
+        if isinstance(task_info, str):
+            task_cmd = task_info
+        elif isinstance(task_info, dict):
+            task_cmd = task_info.get("command")
+            if not task_cmd:
+                raise ConfigError(f"Task '{name}' must define a 'command' string.")
+            
+            # Inject task-specific sandbox flags into runner
+            if task_info.get("sandbox"): runner_ref.flags["sandbox"] = True
+            if task_info.get("sandbox_net"): runner_ref.flags["sandbox_net"] = True
+            if task_info.get("restrict"): runner_ref.flags["restrict"] = True
+        else:
+            raise ConfigError(f"Task '{name}' has invalid format in Run.toml.")
 
         out_dir = runner_ref.flags.get("out_dir") if hasattr(runner_ref, "flags") else None
         var_ctx = VariableSubstitutor.build_file_context(out_dir=out_dir)
