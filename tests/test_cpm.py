@@ -34,6 +34,12 @@ def test_get_main_file_with_comments(tmp_path):
     """)
     assert CPM.get_main_file([main_file]) == main_file
 
+def test_get_main_file_auto(tmp_path):
+    main_file = tmp_path / "app.cpp"
+    main_file.write_text("auto main() -> int { return 0; }")
+    
+    assert CPM.get_main_file([main_file]) == main_file
+
 def test_no_main_file(tmp_path):
     util_file = tmp_path / "util.c"
     util_file.write_text("void helper() {}")

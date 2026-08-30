@@ -15,8 +15,8 @@ class CPM:
         Scan a list of C/C++ source files and return the one containing the main function.
         Returns None if no main function is found.
         """
-        # Matches standard C/C++ main signatures: int main, void main, int wmain, etc.
-        main_pattern = re.compile(r'(?:int|void)\s+(?:w)?main\s*\(')
+        # Matches standard C/C++ main signatures: int main, void main, int wmain, auto main, etc.
+        main_pattern = re.compile(r'(?:int|void|auto)\s+(?:w)?main\s*\(')
         
         for src in sources:
             try:

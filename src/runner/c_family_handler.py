@@ -35,11 +35,6 @@ class CFamilyHandler:
         
         try:
             self.run_command(cmd, compiling=True)
-            # We DONT add to output_files because:
-            # 1. If cached, we want to persist them in cache
-            # 2. If no-cache, we return the path and add to output_files in the caller
-            if cache:
-                cache.update_cache(source)
             return obj_file
         except Exception:
             return None
@@ -110,7 +105,7 @@ class CFamilyHandler:
         failed = False
         
         # Parallel compilation
-        max_workers = min(32, (os.cpu_count() or 1) + 4)
+        max_workers = self.flags.get("jobs") or min(32, (os.cpu_count() or 1) + 4)
         from util.output import Printer
         Printer.info(f"Compiling {len(sources)} files using {max_workers} threads...")
         
@@ -126,7 +121,8 @@ class CFamilyHandler:
                     obj_path = future.result()
                     if obj_path:
                         object_files.append(obj_path)
-                        # If no cache, we need to ensure these object files are cleaned up
+                        if self.cache:
+                            self.cache.update_cache(src)
                         if self.cache is None:
                             self.output_files.append(obj_path)
                     else:
