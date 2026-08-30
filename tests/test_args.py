@@ -204,3 +204,9 @@ def test_args_new_feature_flags(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--sanitize', 'memory,leak'])
     parsed = args("1.0.0")
     assert parsed.sanitize == 'memory,leak'
+
+    # --new & --template
+    monkeypatch.setattr(sys, 'argv', ['run', '--new', 'solution.cpp', '--template', 'cp'])
+    parsed = args("1.0.0")
+    assert parsed.new == 'solution.cpp'
+    assert parsed.template == 'cp'
