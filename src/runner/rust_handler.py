@@ -63,11 +63,11 @@ class RustHandler:
         if not toml_path:
             toml_path = Path("Cargo.toml")
 
-        is_release = "--release" in self.extra_flags
-        
-        if is_release:
-            # Case: Build Release -> Run Binary
-            Printer.info("Building release...")
+        is_debug = bool(self.flags.get("debug") or self.flags.get("gdb") or self.flags.get("lldb") or self.flags.get("valgrind"))
+
+        if is_release or is_debug:
+            mode_name = "release" if is_release else "debug"
+            Printer.info(f"Building {mode_name}...")
             build_cmd = ["cargo", "build"] + self.extra_flags
             if not self.run_command(build_cmd, compiling=True):
                 return
@@ -78,7 +78,7 @@ class RustHandler:
                 return
 
             bin_name = f"{pkg_name}.exe" if not self.is_posix else pkg_name
-            target_bin = toml_path.parent / "target" / "release" / bin_name
+            target_bin = toml_path.parent / "target" / mode_name / bin_name
             
             if target_bin.exists():
                 self._execute_binary(target_bin)

@@ -169,3 +169,38 @@ def test_args_new_feature_flags(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['run', '--no-color'])
     parsed = args("1.0.0")
     assert parsed.no_color is True
+
+    # --debug
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--debug'])
+    parsed = args("1.0.0")
+    assert parsed.debug is True
+
+    # --gdb
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--gdb'])
+    parsed = args("1.0.0")
+    assert parsed.gdb is True
+
+    # --lldb
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--lldb'])
+    parsed = args("1.0.0")
+    assert parsed.lldb is True
+
+    # --valgrind
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--valgrind'])
+    parsed = args("1.0.0")
+    assert parsed.valgrind is True
+
+    # --asan
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--asan'])
+    parsed = args("1.0.0")
+    assert parsed.asan is True
+
+    # --tsan
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--tsan'])
+    parsed = args("1.0.0")
+    assert parsed.tsan is True
+
+    # --sanitize
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--sanitize', 'memory,leak'])
+    parsed = args("1.0.0")
+    assert parsed.sanitize == 'memory,leak'

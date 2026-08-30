@@ -48,6 +48,14 @@ class BaseRunner:
         clean_run_args = run_args.strip().strip('"').strip("'")
         self.run_args = shlex.split(clean_run_args) if clean_run_args else []
 
+        # Inject sanitizer compiler flags
+        if self.flags.get("asan"):
+            self.extra_flags.extend(["-fsanitize=address,undefined", "-fno-omit-frame-pointer"])
+        if self.flags.get("tsan"):
+            self.extra_flags.append("-fsanitize=thread")
+        if self.flags.get("sanitize"):
+            self.extra_flags.append(f"-fsanitize={self.flags['sanitize']}")
+
         # Buffered stdin for pipe redirection (-i or -i -)
         self._buffered_stdin: Optional[str] = None
         if self.flags.get("stdin") == "-":
@@ -140,7 +148,8 @@ class BaseRunner:
             stdout_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
         stderr_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
 
-        timeout = self.flags.get("timeout") if not compiling else None
+        is_debug = bool(self.flags.get("debug") or self.flags.get("gdb") or self.flags.get("lldb"))
+        timeout = self.flags.get("timeout") if (not compiling and not is_debug) else None
 
         target_cmd = cmd_str if use_shell and isinstance(cmd, list) else cmd
 
@@ -250,7 +259,7 @@ class BaseRunner:
             if stdin_file:
                 stdin_file.close()
                 
-            if not compiling:
+            if not compiling and not is_debug:
                 if expect_path and captured_stdout and not self.flags.get("quiet", False):
                     print(captured_stdout, end="" if captured_stdout.endswith("\n") else "\n")
 
