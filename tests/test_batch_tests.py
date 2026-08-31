@@ -101,3 +101,28 @@ def test_expect_diff_matching(tmp_path, capfd, caplog):
     assert "Output mismatch" in caplog.text
     err_out, _ = capfd.readouterr()
     assert "Differences" in err_out
+
+def test_batch_run_with_memory_tracking(tmp_path, capfd):
+    sol = tmp_path / "solution.py"
+    sol.write_text("""
+import sys
+for line in sys.stdin:
+    parts = line.strip().split()
+    if parts:
+        print(int(parts[0]) + int(parts[1]))
+""")
+
+    test_dir = tmp_path / "tests"
+    test_dir.mkdir()
+    (test_dir / "01.in").write_text("1 2\n")
+    (test_dir / "01.out").write_text("3\n")
+    (test_dir / "02.in").write_text("10 20\n")
+    (test_dir / "02.out").write_text("30\n")
+
+    runner = CompilerRunner({"dry_run": False, "memory": True, "no_color": True})
+    success = TestcasesRunner.run_tests(runner, test_dir, sol)
+    assert success is True
+    out, _ = capfd.readouterr()
+    assert "Passed: 2/2 (100.0%)" in out
+    assert "Peak Memory:" in out
+

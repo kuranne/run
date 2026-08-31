@@ -10,6 +10,7 @@ from util.config import Config
 from util.output import Printer, Colors
 from util.errors import ExecutionError, CompilationError, ConfigError
 from util.security import SecurityManager
+from util.process import MonitoredPopen
 
 class BaseRunner:
     """
@@ -32,6 +33,10 @@ class BaseRunner:
         self.flags = op_flags
         self.dry_run = self.flags.get("dry_run", False)
         self.preset = self.flags.get("preset", None)
+        
+        # Memory metrics tracking
+        self.last_memory_bytes: Optional[int] = None
+        self.last_compile_memory_bytes: Optional[int] = None
         
         # Config & Others
         self.config = Config()
@@ -212,57 +217,24 @@ class BaseRunner:
         try:
             try:
                 track_mem = (not compiling) and self.flags.get("memory", False)
-                if track_mem and self.is_posix:
-                    import resource
-                    before_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-                    p = spc.Popen(target_cmd, **spc_kwargs)
-                    stdout_bytes, stderr_bytes = p.communicate(timeout=timeout)
-                    returncode = p.returncode
-                    if stdout_bytes is not None:
-                        captured_stdout = stdout_bytes.decode("utf-8", errors="ignore")
-                    after_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
-                    rss_val = max(after_rss, before_rss)
-                    mem_bytes = rss_val if sys.platform == "darwin" else rss_val * 1024
-                elif track_mem and os.name == "nt":
-                    import ctypes
-                    from ctypes import wintypes
-                    p = spc.Popen(target_cmd, **spc_kwargs)
-                    stdout_bytes, stderr_bytes = p.communicate(timeout=timeout)
-                    returncode = p.returncode
-                    if stdout_bytes is not None:
-                        captured_stdout = stdout_bytes.decode("utf-8", errors="ignore")
-                    try:
-                        class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
-                            _fields_ = [
-                                ('cb', wintypes.DWORD),
-                                ('PageFaultCount', wintypes.DWORD),
-                                ('PeakWorkingSetSize', ctypes.c_size_t),
-                                ('WorkingSetSize', ctypes.c_size_t),
-                                ('QuotaPeakPagedPoolUsage', ctypes.c_size_t),
-                                ('QuotaPagedPoolUsage', ctypes.c_size_t),
-                                ('QuotaPeakNonPagedPoolUsage', ctypes.c_size_t),
-                                ('QuotaNonPagedPoolUsage', ctypes.c_size_t),
-                                ('PagefileUsage', ctypes.c_size_t),
-                                ('PeakPagefileUsage', ctypes.c_size_t),
-                            ]
-                        counters = PROCESS_MEMORY_COUNTERS()
-                        counters.cb = ctypes.sizeof(PROCESS_MEMORY_COUNTERS)
-                        if ctypes.windll.psapi.GetProcessMemoryInfo(int(p._handle), ctypes.byref(counters), counters.cb):
-                            mem_bytes = int(counters.PeakWorkingSetSize)
-                    except Exception:
-                        mem_bytes = None
-                else:
-                    p = spc.Popen(target_cmd, **spc_kwargs)
-                    stdout_bytes, stderr_bytes = p.communicate(timeout=timeout)
-                    returncode = p.returncode
-                    if stdout_bytes is not None:
-                        captured_stdout = stdout_bytes.decode("utf-8", errors="ignore")
+                popen_cls = MonitoredPopen if track_mem else spc.Popen
+                p = popen_cls(target_cmd, **spc_kwargs)
+                stdout_bytes, stderr_bytes = p.communicate(timeout=timeout)
+                returncode = p.returncode
+                if stdout_bytes is not None:
+                    captured_stdout = stdout_bytes.decode("utf-8", errors="ignore")
+                if track_mem and isinstance(p, MonitoredPopen):
+                    mem_bytes = p.get_memory_bytes()
             finally:
                 if stdin_file:
                     try:
                         stdin_file.close()
                     except Exception:
                         pass
+                if not compiling:
+                    self.last_memory_bytes = mem_bytes
+                else:
+                    self.last_compile_memory_bytes = mem_bytes
                 
             if not compiling and not is_debug:
                 if expect_path and captured_stdout and not self.flags.get("quiet", False):
@@ -304,6 +276,10 @@ class BaseRunner:
                 try:
                     p.kill()
                     p.wait(timeout=5)
+                    if track_mem and isinstance(p, MonitoredPopen):
+                        mem_bytes = p.get_memory_bytes()
+                        if not compiling:
+                            self.last_memory_bytes = mem_bytes
                 except Exception:
                     pass
             raise ExecutionError(f"Execution timed out after {timeout} seconds.")
