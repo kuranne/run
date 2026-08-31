@@ -219,6 +219,7 @@ def test_adversarial_termination_sigint_handling():
     assert mem_bytes >= 35 * 1024 * 1024
 
 
+@pytest.mark.skipif(sys.platform == "darwin", reason="SIGABRT triggers macOS CrashReporter GUI dialog")
 def test_adversarial_termination_sigabrt_handling():
     """
     Tests child self-abort via SIGABRT.
