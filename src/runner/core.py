@@ -103,10 +103,17 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
         try:
             name = fp.name
 
+            from util.validator import Validator
+            if not Validator.validate_path(fp):
+                if not self.flags.get("force", False):
+                    raise ConfigError(f"Refusing to process file with suspicious characters: {fp.name}. Use -f / --force to override.")
+                else:
+                    Printer.warning(f"Processing file with suspicious characters due to --force: {fp.name}")
+
             if name in self.exclude_files:
                 if not self.flags.get("quiet", False):
                     Printer.action("SKIP", f"{name} is in exclude files", Colors.GRAY)
-                return
+                return True
 
             ext = fp.suffix.lower()
             if not ext and fp.is_file():
@@ -119,32 +126,33 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
 
             out_name = self.get_executable_path(fp)
 
+            res = True
             lang_config = self.config.get_language_by_extension(ext)
             if lang_config:
-                self._handle_custom_language(fp, lang_config, out_name)
+                res = self._handle_custom_language(fp, lang_config, out_name)
             else:
                 match ext:
                     case ".py":
-                        self._handle_python_execution(fp)
+                        res = self._handle_python_execution(fp)
                     case ".sh":
-                        self._handle_bash_execution(fp)
+                        res = self._handle_bash_execution(fp)
                     case ".rb":
-                        self._handle_ruby_execution(fp)
+                        res = self._handle_ruby_execution(fp)
                     case ".js":
-                        self._handle_node_execution(fp)
+                        res = self._handle_node_execution(fp)
                     case ".pl":
-                        self._handle_perl_execution(fp)
+                        res = self._handle_perl_execution(fp)
                     case ".lua":
-                        self._handle_lua_execution(fp)
+                        res = self._handle_lua_execution(fp)
                     case ".rs":
-                        self._handle_rust_execution(fp)
+                        res = self._handle_rust_execution(fp)
                     case ".java":
-                        self._handle_java_single_file(fp)
+                        res = self._handle_java_single_file(fp)
                     case _ if ext in self.c_family_ext:
-                        self._handle_c_family_single_file(fp)
+                        res = self._handle_c_family_single_file(fp)
                     case _:
                         raise ConfigError(f"Unsupported extension: {ext}")
-            return True
+            return True if res is None else bool(res)
                         
         except (ConfigError, ExecutionError, FileNotFoundError, OSError) as e:
             Printer.error(f"Failed to process {fp}: {e}")
@@ -183,17 +191,20 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
         else:
             raise ConfigError("No supported files found for multi-compile")
 
-    def _execute_binary(self, bin_path: Path, args: List[str] = []):
+    def _execute_binary(self, bin_path: Path, args: Optional[List[str]] = None):
         """
         Execute a compiled binary.
 
         Args:
             bin_path (Path): Path to the binary.
-            args (List[str]): List of arguments.
+            args (Optional[List[str]]): List of arguments.
         """
+        if args is None:
+            args = []
+
         if self.flags.get("build_only"):
             Printer.action("BUILD", f"Binary generated successfully: {bin_path}", Colors.GREEN)
-            return
+            return True
 
         target = str(bin_path) if self.is_posix else str(bin_path.absolute())
 
@@ -214,4 +225,4 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
         else:
             cmd = [target] + target_args
 
-        self.run_command(cmd)
+        return self.run_command(cmd)

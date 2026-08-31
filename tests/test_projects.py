@@ -93,3 +93,40 @@ def test_get_watch_files_includes_src(tmp_path):
     watch_files = ProjectRunner.get_watch_files(manifest)
     assert str(manifest) in watch_files
     assert str(main_rs) in watch_files
+
+def test_run_project_compound_command(tmp_path, monkeypatch):
+    toml = tmp_path / "Run.toml"
+    toml.write_text("""
+    [projects.compound_cmake]
+    file = "CMakeLists.txt"
+    build = "cmake -B build && cmake --build build"
+    run = "./build/app"
+    """)
+    cmake_file = tmp_path / "CMakeLists.txt"
+    cmake_file.write_text("cmake_minimum_required(VERSION 3.20)\n")
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    config = Config()
+    runner = DummyRunner()
+
+    detected = ProjectRunner.detect_project(tmp_path, config)
+    assert detected is not None
+
+    success = ProjectRunner.run_project(detected, runner, extra_flags=["--config", "Release"], run_args=["--port", "8080"])
+    assert success is True
+    assert len(runner.executed) == 3
+
+    # Step 1a: cmake -B build
+    cmd1, use_shell, compiling = runner.executed[0]
+    assert cmd1 == ["cmake", "-B", "build"]
+    assert compiling is True
+
+    # Step 1b: cmake --build build --config Release
+    cmd2, use_shell, compiling = runner.executed[1]
+    assert cmd2 == ["cmake", "--build", "build", "--config", "Release"]
+    assert compiling is True
+
+    # Step 2: ./build/app --port 8080
+    cmd3, use_shell, compiling = runner.executed[2]
+    assert cmd3 == ["./build/app", "--port", "8080"]
+    assert compiling is False
+

@@ -12,6 +12,7 @@ except ImportError:
 
 class Config:
     """Configuration manager for the runner, handling TOML config loading and retrieval."""
+    _logged_config_paths = set()
 
     def _get_global_config_dir(self) -> Path:
         """
@@ -65,7 +66,9 @@ class Config:
                 with open(config_path, "rb") as f:
                     self.data = tomllib.load(f)
                 if "--_complete" not in sys.argv and "--completion" not in sys.argv:
-                    Printer.info(f"Loaded config: {config_path}")
+                    if config_path not in Config._logged_config_paths:
+                        Printer.info(f"Loaded config: {config_path}")
+                        Config._logged_config_paths.add(config_path)
             except Exception as e:
                 Printer.error(f"Failed to parse {config_path}: {e}")
             
@@ -97,6 +100,39 @@ class Config:
         if "projects" in self.data and not isinstance(self.data["projects"], dict):
             raise ValueError("'projects' section must be a table (dict)")
 
+        if "sandbox" in self.data:
+            if not isinstance(self.data["sandbox"], dict):
+                raise ValueError("'sandbox' section must be a table (dict)")
+            sandbox_cfg = self.data["sandbox"]
+            if "image" in sandbox_cfg:
+                img = sandbox_cfg["image"]
+                if not isinstance(img, str) or not img.strip():
+                    raise ValueError("sandbox 'image' must be a non-empty string")
+                if img.strip().startswith("-") or " " in img.strip():
+                    raise ValueError(f"Invalid sandbox image name '{img}'")
+            if "dockerfile" in sandbox_cfg:
+                df = sandbox_cfg["dockerfile"]
+                if not isinstance(df, str) or not df.strip():
+                    raise ValueError("sandbox 'dockerfile' must be a non-empty string")
+                df_path = Path(df)
+                if not df_path.exists() and not (Path.cwd() / df_path).exists():
+                    raise ValueError(f"Configured sandbox Dockerfile '{df}' not found")
+            if "compose" in sandbox_cfg:
+                compose = sandbox_cfg["compose"]
+                if not isinstance(compose, str) or not compose.strip():
+                    raise ValueError("sandbox 'compose' must be a non-empty string")
+                comp_path = Path(compose)
+                if not comp_path.exists() and not (Path.cwd() / comp_path).exists():
+                    raise ValueError(f"Configured sandbox compose file '{compose}' not found")
+            if "compose_service" in sandbox_cfg:
+                svc = sandbox_cfg["compose_service"]
+                if not isinstance(svc, str) or not svc.strip():
+                    raise ValueError("sandbox 'compose_service' must be a non-empty string")
+            if "sandbox_net" in sandbox_cfg and not isinstance(sandbox_cfg["sandbox_net"], bool):
+                raise ValueError("sandbox 'sandbox_net' must be a boolean")
+            if "restrict" in sandbox_cfg and not isinstance(sandbox_cfg["restrict"], bool):
+                raise ValueError("sandbox 'restrict' must be a boolean")
+
         if "languages" in self.data:
             if not isinstance(self.data["languages"], list):
                 raise ValueError("'languages' section must be an array of tables ([[languages]])")
@@ -127,12 +163,19 @@ class Config:
         runners = self.data.get("runners", self.data.get("runner", {}))
         return runners.get(lang, default)
     
-    def get_tasks(self) -> Dict[str, str]:
+    def get_tasks(self) -> Dict[str, Any]:
         """
         Get custom tasks from configuration.
         """
         tasks = self.data.get("tasks", {})
         return tasks if isinstance(tasks, dict) else {}
+
+    def get_sandbox_config(self) -> Dict[str, Any]:
+        """
+        Get global sandbox configuration.
+        """
+        sandbox = self.data.get("sandbox", {})
+        return sandbox if isinstance(sandbox, dict) else {}
 
     def get_projects(self) -> Dict[str, Dict[str, Any]]:
         """

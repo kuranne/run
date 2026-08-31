@@ -15,18 +15,22 @@ class PythonHandler:
         """
         potential_venvs = [".venv", ".env"]
         # Check in current working directory
-        for venv in potential_venvs:
-            venv_path = Path(venv)
-            if venv_path.is_dir():
-                if self.is_posix:
-                    py_path = venv_path / "bin" / "python"
-                else:
-                    py_path = venv_path / "Scripts" / "python.exe"
-                
-                if py_path.exists():
-                    from util.output import Printer
-                    Printer.info(f"Using venv: {venv}")
-                    return str(py_path)
+        if not self.flags.get("sandbox"):
+            for venv in potential_venvs:
+                venv_path = Path(venv)
+                if venv_path.is_dir():
+                    if self.is_posix:
+                        py_path = venv_path / "bin" / "python"
+                    else:
+                        py_path = venv_path / "Scripts" / "python.exe"
+                    
+                    if py_path.exists():
+                        from util.output import Printer
+                        Printer.info(f"Using venv: {venv}")
+                        return str(py_path)
+
+        if self.flags.get("sandbox"):
+            return "python3"
 
         from shutil import which
         possible_exec = ["python", "python3"]
@@ -52,6 +56,6 @@ class PythonHandler:
             return
 
         if self.flags.get("debug"):
-            self.run_command([prog, "-m", "pdb", str(fp)] + self.run_args)
+            return self.run_command([prog, "-m", "pdb", str(fp)] + self.run_args)
         else:
-            self.run_command([prog, str(fp)] + self.run_args)
+            return self.run_command([prog, str(fp)] + self.run_args)

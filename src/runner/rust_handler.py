@@ -64,26 +64,28 @@ class RustHandler:
             toml_path = Path("Cargo.toml")
 
         is_debug = bool(self.flags.get("debug") or self.flags.get("gdb") or self.flags.get("lldb") or self.flags.get("valgrind"))
+        is_release = self.flags.get("release")
 
         if is_release or is_debug:
             mode_name = "release" if is_release else "debug"
             Printer.info(f"Building {mode_name}...")
             build_cmd = ["cargo", "build"] + self.extra_flags
             if not self.run_command(build_cmd, compiling=True):
-                return
+                return False
             
             pkg_name = self._get_cargo_package_name(toml_path)
             if not pkg_name:
                 Printer.error("Could not parse package name from Cargo.toml")
-                return
+                return False
 
             bin_name = f"{pkg_name}.exe" if not self.is_posix else pkg_name
             target_bin = toml_path.parent / "target" / mode_name / bin_name
             
             if target_bin.exists():
-                self._execute_binary(target_bin)
+                return self._execute_binary(target_bin)
             else:
                 Printer.error(f"Binary not found at {target_bin}")
+                return False
         else:
             # Case: Default Run Quiet
             # Note: -q comes before --flags to ensure cargo itself is quiet
@@ -92,7 +94,7 @@ class RustHandler:
             if hasattr(self, 'run_args') and self.run_args:
                  cmd += ["--"] + self.run_args
                  
-            self.run_command(cmd)
+            return self.run_command(cmd)
 
     def _handle_rust_execution(self, fp: Path):
         """
@@ -107,15 +109,25 @@ class RustHandler:
         
         if cargo_toml:
             # Use cargo to run the project
-            self.run_cargo_mode(cargo_toml)
+            return self.run_cargo_mode(cargo_toml)
         else:
-            # Single file compilation with rustc
             compiler = self.config.get_runner("rust", "rustc")
             out_name = self.get_executable_path(fp)
             
+            # Check cache before compiling
+            if self.cache and not self.cache.is_changed(fp, out_name):
+                from util.output import Printer
+                Printer.info(f"Using cached binary: {out_name}")
+                return self._execute_binary(out_name)
+
             preset_flags = self.config.get_preset_flags(self.preset, "rust")
             cmd = [compiler] + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
             
-            self.run_command(cmd, compiling=True)
+            if not self.run_command(cmd, compiling=True):
+                return False
+            
+            if self.cache:
+                self.cache.update_cache(fp, out_name)
+
             self.output_files.append(out_name)
-            self._execute_binary(out_name)
+            return self._execute_binary(out_name)

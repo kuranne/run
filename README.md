@@ -122,6 +122,9 @@ run --doctor
 | `-w` | `--watch` | Watch mode: re-compile and run on file change |
 | `-t` | `--time` | Measure and display execution time |
 | `-M` | `--mem`, `--memory` | Measure and display peak memory usage (combine as `-tM`) |
+| | `--restrict` | Native OS isolation (bwrap on Linux, setrlimit on macOS) |
+| | `--sandbox` | Run inside an isolated Docker/Podman container |
+| | `--sandbox-net` | Allow network access within sandboxed execution |
 | `-i` | `--stdin [file]` | Redirect standard input from file or pipe |
 | `-d` | `--dry-run` | Preview commands without executing |
 | `-m` | `--multi` | Compile multiple source files together |
@@ -160,6 +163,11 @@ cpp = ["-g", "-Wall", "-Wextra", "-std=c++20"]
 [presets.release]
 cpp = ["-O3", "-Wall", "-std=c++20"]
 
+[sandbox]
+image = "ubuntu:latest"
+# dockerfile = "Dockerfile.dev"
+# compose = "docker-compose.yml"
+
 [tasks]
 test = "pytest tests/"
 build = "cargo build --release"
@@ -178,6 +186,7 @@ Explore detailed topic guides and documentation:
 
 - **[UNIX Man Page (`docs/man/run.1`)](docs/man/run.1)** - Complete CLI reference manual (`man ./docs/man/run.1`).
 - **[Configuration Guide (`docs/configuration.md`)](docs/configuration.md)** - Full `Run.toml` schema, runners, custom languages, and task runner.
+- **[Sandboxed Execution Guide (`docs/sandboxed_execution.md`)](docs/sandboxed_execution.md)** - Native OS isolation (`bwrap`), Docker/Podman containerization, and Compose workflows.
 - **[Debugging & Sanitizers Guide (`docs/debugging_and_sanitizers.md`)](docs/debugging_and_sanitizers.md)** - Interactive debugging (LLDB, GDB, pdb), Valgrind, and ASan/TSan sanitizers.
 - **[Testing & Benchmarking Guide (`docs/testing_and_benchmarking.md`)](docs/testing_and_benchmarking.md)** - Batch test runner (`--test-dir`), output diffs (`--expect`), and benchmarking.
 - **[Templates & Scaffolding Guide (`docs/templates_and_scaffolding.md`)](docs/templates_and_scaffolding.md)** - Single-file and multi-file code generator (`run --new`).

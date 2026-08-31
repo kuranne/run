@@ -2,6 +2,12 @@ import pytest
 from pathlib import Path
 from util.cache import CacheManager
 
+@pytest.fixture(autouse=True)
+def isolate_cache(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache_home"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_dir))
+    return cache_dir
+
 def test_cache_init_and_hash(tmp_path):
     manager = CacheManager(project_root=tmp_path)
     
@@ -71,3 +77,31 @@ def test_cache_concurrent_updates(tmp_path):
 
     for f in files:
         assert manager.is_changed(f) is False
+
+def test_cache_binary_verification_stem_collision(tmp_path):
+    manager = CacheManager(project_root=tmp_path)
+    
+    c_source = tmp_path / "hello.c"
+    c_source.write_text("int main() { return 0; }")
+    
+    cpp_source = tmp_path / "hello.cpp"
+    cpp_source.write_text("int main() { return 1; }")
+    
+    out_bin = tmp_path / "hello.out"
+    
+    # 1. Compile hello.cpp to hello.out and update cache
+    out_bin.write_bytes(b"binary_compiled_from_cpp")
+    manager.update_cache(cpp_source, out_bin)
+    
+    # Cache hit for cpp
+    assert manager.is_changed(cpp_source, out_bin) is False
+    
+    # 2. hello.c compiles and overwrites hello.out
+    out_bin.write_bytes(b"binary_compiled_from_c")
+    manager.update_cache(c_source, out_bin)
+    
+    # Cache hit for c
+    assert manager.is_changed(c_source, out_bin) is False
+    
+    # 3. hello.cpp must now report CHANGED because hello.out was overwritten!
+    assert manager.is_changed(cpp_source, out_bin) is True

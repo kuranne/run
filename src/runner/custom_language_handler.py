@@ -61,12 +61,13 @@ class CustomLanguageHandler(LanguageHandler):
 
         if lang_type == "interpreter":
             cmd = run_cmd + flags + ctx.extra_flags + preset_flags + [str(fp)] + execute_args + ctx.run_args
-            ctx.run_command(cmd)
+            return ctx.run_command(cmd)
         elif lang_type == "compiler":
             cmd = run_cmd + flags + ctx.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
-            ctx.run_command(cmd, compiling=True)
+            if not ctx.run_command(cmd, compiling=True):
+                return False
             ctx.output_files.append(out_name)
-            ctx.execute_binary(out_name, args=execute_args)
+            return ctx.execute_binary(out_name, args=execute_args)
         else:
             raise ConfigError(f"Unknown language type '{lang_type}' for {lang_name}")
 
@@ -94,12 +95,13 @@ class CustomLanguageHandler(LanguageHandler):
 
         if lang_type == "compiler":
             cmd = run_cmd + flags + ctx.extra_flags + preset_flags + [str(p) for p in paths] + ["-o", str(out_name)]
-            ctx.run_command(cmd, compiling=True)
+            if not ctx.run_command(cmd, compiling=True):
+                return False
             ctx.output_files.append(out_name)
-            ctx.execute_binary(out_name, args=execute_args)
+            return ctx.execute_binary(out_name, args=execute_args)
         else:
             cmd = run_cmd + flags + ctx.extra_flags + preset_flags + [str(p) for p in paths] + execute_args + ctx.run_args
-            ctx.run_command(cmd)
+            return ctx.run_command(cmd)
 
     def _handle_custom_language(self, fp: Path, lang_config: dict, out_name: Path):
         """Legacy helper for direct invocation."""
@@ -114,4 +116,4 @@ class CustomLanguageHandler(LanguageHandler):
             is_posix=getattr(self, "is_posix", True),
             runner_ref=self
         )
-        self._execute_custom(fp, lang_config, out_name, ctx)
+        return self._execute_custom(fp, lang_config, out_name, ctx)

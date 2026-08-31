@@ -62,6 +62,17 @@ Set environment variable for the child process. Can be passed multiple times.
 .BI \-\-argument " args"
 Arguments to pass to the compiled binary or script. Alternatively, pass arguments after a \fB--\fR separator.
 
+.SS "Security & Isolation"
+.TP
+.BR \-\-restrict
+Run with native OS sandboxing/isolation (Bubblewrap on Linux, setrlimit on macOS).
+.TP
+.BR \-\-sandbox
+Compile and run inside an isolated Docker/Podman container environment.
+.TP
+.BR \-\-sandbox\-net
+Allow network access inside the sandboxed container or bubblewrap environment.
+
 .SS "Compilation & Build"
 .TP
 .BR \-m ", " \-\-multi

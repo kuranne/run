@@ -78,9 +78,24 @@ class TestcasesRunner:
         passed_count = 0
         failed_count = 0
 
-        # Extract executable command
-        exec_cmd = runner._get_run_command_for_file(target_file) if hasattr(runner, "_get_run_command_for_file") else None
+        # Phase 1: Compile once if target is a compiled language
+        ext = target_file.suffix.lower()
+        compiled_exts = {".c", ".cpp", ".cc", ".cxx", ".rs", ".java"}
+        is_compiled = ext in compiled_exts
+        bin_path = None
 
+        if is_compiled and hasattr(runner, "get_executable_path"):
+            bin_path = runner.get_executable_path(target_file)
+            runner.flags["build_only"] = True
+            try:
+                compile_ok = runner._handle_single_file(target_file)
+                if not compile_ok:
+                    Printer.error(f"Compilation failed for {target_file}")
+                    return False
+            finally:
+                runner.flags["build_only"] = False
+
+        # Phase 2: Execute all test cases
         for idx, (in_path, out_path) in enumerate(pairs, start=1):
             with open(in_path, "r", encoding="utf-8", errors="ignore") as f:
                 in_content = f.read()
@@ -95,7 +110,10 @@ class TestcasesRunner:
 
             start_t = time.perf_counter()
             try:
-                success = runner._handle_single_file(target_file)
+                if is_compiled and bin_path and bin_path.exists() and hasattr(runner, "_execute_binary"):
+                    success = runner._execute_binary(bin_path)
+                else:
+                    success = runner._handle_single_file(target_file)
                 elapsed = time.perf_counter() - start_t
                 
                 if success:

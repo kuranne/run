@@ -124,3 +124,20 @@ def test_run_command_piped_stdin(tmp_path, capfd, monkeypatch):
     assert runner.run_command(cmd) is True
     out, _ = capfd.readouterr()
     assert "ECHO: piped_secret_42" in out
+
+def test_large_stdout_pipe_no_deadlock(tmp_path):
+    # Generates 128KB of output with memory tracking and expect active
+    expect_file = tmp_path / "expected.txt"
+    large_data = "A" * (128 * 1024)
+    expect_file.write_text(large_data)
+
+    runner = CompilerRunner({"memory": True, "expect": str(expect_file), "quiet": True})
+    cmd = ["python3", "-c", f"import sys; sys.stdout.write('A' * {128 * 1024})"]
+    assert runner.run_command(cmd) is True
+
+def test_missing_stdin_file_raises_error():
+    from util.errors import ExecutionError
+    runner = CompilerRunner({"stdin": "nonexistent_stdin_file.txt", "quiet": True})
+    with pytest.raises(ExecutionError, match="Failed to open stdin file"):
+        runner.run_command(["python3", "-c", "pass"])
+

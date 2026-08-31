@@ -15,6 +15,18 @@ run-cli = "main:main"
 test = [
     "pytest>=7.0.0",
 ]
+dev = [
+    "pytest>=7.0.0",
+    "nuitka>=2.0.0",
+    "zstandard>=0.22.0",
+    "ordered-set>=4.1.0",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider --basetemp=/tmp/pytest_run"
+

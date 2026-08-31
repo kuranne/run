@@ -11,16 +11,17 @@ else:
 from util.output import Printer
 
 fp = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
+FALLBACK_VERSION = "0.1.0"
 
 def version(file_path: Path = fp) -> Optional[str]:
     """
-    Retrieve current package version from pyproject.toml or package metadata.
+    Retrieve current package version from pyproject.toml, package metadata, or fallback.
 
     Args:
         file_path (Path): Path to pyproject.toml fallback.
 
     Returns:
-        Optional[str]: Version string if found, else None.
+        Optional[str]: Version string if found, else fallback version.
     """
     if file_path and file_path.exists():
         try:
@@ -35,6 +36,6 @@ def version(file_path: Path = fp) -> Optional[str]:
     try:
         return pkg_version("run")
     except (PackageNotFoundError, Exception):
-        return None
+        return FALLBACK_VERSION
 
     

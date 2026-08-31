@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
 echo "-- Checking for python3..."
 command -v python3 >/dev/null 2>&1 || { echo "[ ERROR ] Can't execute python3"; exit 1; }
 
