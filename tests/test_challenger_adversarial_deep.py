@@ -278,18 +278,15 @@ def test_batch_runner_separator_pattern_limitation(tmp_path):
     Edge-Case / Defect Verification:
     Tests discovery when output files have separator prefixes (e.g. in_1.txt and out_1.txt,
     or in_data.txt and out_data.txt).
-    Documents TestcasesRunner.discover_test_pairs behavior.
+    Verifies that separator-based outputs (out_1.txt, output_1.txt) are successfully matched.
     """
     (tmp_path / "in_1.txt").write_text("1\n")
     (tmp_path / "out_1.txt").write_text("1\n")
 
     pairs = TestcasesRunner.discover_test_pairs(tmp_path)
-    # in_1.txt normalized to '1', but expected_names checks out1.txt, NOT out_1.txt
-    # If out_1.txt is not matched, pairs will be empty (0).
-    # We assert this behavior to document whether separator-based outputs are supported.
-    matched = len(pairs) == 1
-    # Document current status
-    assert not matched, "Expected out_1.txt to fail discovery due to missing out_{normalized}.txt pattern in expected_names"
+    assert len(pairs) == 1
+    assert pairs[0][0].name == "in_1.txt"
+    assert pairs[0][1].name == "out_1.txt"
 
 
 # ==============================================================================
