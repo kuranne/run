@@ -105,3 +105,32 @@ def test_cache_binary_verification_stem_collision(tmp_path):
     
     # 3. hello.cpp must now report CHANGED because hello.out was overwritten!
     assert manager.is_changed(cpp_source, out_bin) is True
+
+
+def test_cache_clear_cleans_objs_dir(tmp_path):
+    """Verify that CacheManager.clear() cleans up all cached .o object files and directories."""
+    manager = CacheManager(project_root=tmp_path)
+    src = tmp_path / "main.c"
+    src.write_text("int main() {}")
+
+    obj_path = manager.get_object_path(src)
+    obj_path.write_bytes(b"compiled_object_binary")
+    manager.update_cache(src, obj_path)
+
+    assert obj_path.exists() is True
+    assert manager.objs_dir.exists() is True
+
+    manager.clear()
+    assert obj_path.exists() is False
+    assert manager.objs_dir.exists() is False
+
+
+def test_cache_commented_header_at_eof_without_newline(tmp_path):
+    """Verify that commented includes at EOF without newline are stripped properly."""
+    manager = CacheManager(project_root=tmp_path)
+    source = tmp_path / "main.c"
+    source.write_bytes(b'int main() { return 0; }\n// #include "never_exist.h"')
+
+    includes = manager._get_c_includes(source)
+    assert len(includes) == 0
+
