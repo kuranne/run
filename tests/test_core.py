@@ -112,6 +112,8 @@ def test_run_command_memory_tracking(tmp_path):
     runner = CompilerRunner({"memory": True, "time": True})
     # Run a simple Python exit command
     assert runner.run_command(["python3", "-c", "import sys; sys.exit(0)"]) is True
+    assert runner.last_memory_bytes is not None
+    assert runner.last_memory_bytes > 0
 
 def test_run_command_piped_stdin(tmp_path, capfd, monkeypatch):
     import io

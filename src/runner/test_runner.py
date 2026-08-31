@@ -8,6 +8,19 @@ from util.output import Printer, Colors
 class TestcasesRunner:
     """Batch testcases runner matching input/output files and reporting test results."""
 
+    @staticmethod
+    def _natural_sort_key(file_path: Path) -> List[Any]:
+        """
+        Produce sort key for natural numerical sorting of file paths.
+
+        Args:
+            file_path (Path): Path to file.
+
+        Returns:
+            List[Any]: Split token list supporting numeric order.
+        """
+        return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', file_path.name)]
+
     @classmethod
     def discover_test_pairs(cls, test_dir: Path) -> List[Tuple[Path, Path]]:
         """
@@ -22,7 +35,7 @@ class TestcasesRunner:
         if not test_dir.is_dir():
             return []
 
-        all_files = sorted(list(test_dir.iterdir()))
+        all_files = sorted(list(test_dir.iterdir()), key=cls._natural_sort_key)
         in_files = [
             f for f in all_files 
             if f.is_file() and (f.suffix in ('.in', '.input') or f.name.startswith(('in', 'input')) and f.suffix == '.txt')
@@ -32,14 +45,15 @@ class TestcasesRunner:
         
         for in_file in in_files:
             stem = in_file.stem
-            # Clean stem from prefixes like 'in', 'input', etc.
-            normalized = re.sub(r'^(in|input)[_-]?', '', stem, flags=re.IGNORECASE)
+            # Clean stem from prefixes like 'input', 'in', etc.
+            normalized = re.sub(r'^(?:input|in)[_-]?', '', stem, flags=re.IGNORECASE)
             
             # Look for matching output file
             expected_names = [
                 f"{stem}.out", f"{stem}.ans", f"{stem}.output",
                 f"out{normalized}.txt", f"output{normalized}.txt", f"ans{normalized}.txt",
-                f"{normalized}.out", f"{normalized}.ans"
+                f"out_{normalized}.txt", f"output_{normalized}.txt", f"ans_{normalized}.txt",
+                f"{normalized}.out", f"{normalized}.ans", f"{normalized}.output"
             ]
             
             out_file = None
@@ -52,7 +66,7 @@ class TestcasesRunner:
             if out_file:
                 pairs.append((in_file, out_file))
 
-        return sorted(pairs, key=lambda p: p[0].name)
+        return sorted(pairs, key=lambda p: cls._natural_sort_key(p[0]))
 
     @classmethod
     def run_tests(cls, runner: Any, test_dir: Path, target_file: Path) -> bool:
@@ -95,34 +109,43 @@ class TestcasesRunner:
             finally:
                 runner.flags["build_only"] = False
 
-        # Phase 2: Execute all test cases
-        for idx, (in_path, out_path) in enumerate(pairs, start=1):
-            with open(in_path, "r", encoding="utf-8", errors="ignore") as f:
-                in_content = f.read()
+        orig_stdin = runner.flags.get("stdin")
+        orig_expect = runner.flags.get("expect")
+        orig_buffered_stdin = getattr(runner, "_buffered_stdin", None)
 
-            with open(out_path, "r", encoding="utf-8", errors="ignore") as f:
-                expected_content = f.read()
+        try:
+            # Phase 2: Execute all test cases
+            for idx, (in_path, out_path) in enumerate(pairs, start=1):
+                with open(in_path, "r", encoding="utf-8", errors="ignore") as f:
+                    in_content = f.read()
 
-            # Set test inputs into runner
-            runner.flags["stdin"] = str(in_path)
-            runner.flags["expect"] = str(out_path)
-            runner._buffered_stdin = in_content
+                with open(out_path, "r", encoding="utf-8", errors="ignore") as f:
+                    expected_content = f.read()
 
-            start_t = time.perf_counter()
-            try:
-                if is_compiled and bin_path and bin_path.exists() and hasattr(runner, "_execute_binary"):
-                    success = runner._execute_binary(bin_path)
-                else:
-                    success = runner._handle_single_file(target_file)
-                elapsed = time.perf_counter() - start_t
-                
-                if success:
-                    passed_count += 1
-                else:
+                # Set test inputs into runner
+                runner.flags["stdin"] = str(in_path)
+                runner.flags["expect"] = str(out_path)
+                runner._buffered_stdin = in_content
+
+                start_t = time.perf_counter()
+                try:
+                    if is_compiled and bin_path and bin_path.exists() and hasattr(runner, "_execute_binary"):
+                        success = runner._execute_binary(bin_path)
+                    else:
+                        success = runner._handle_single_file(target_file)
+                    elapsed = time.perf_counter() - start_t
+                    
+                    if success:
+                        passed_count += 1
+                    else:
+                        failed_count += 1
+                except Exception as e:
                     failed_count += 1
-            except Exception as e:
-                failed_count += 1
-                Printer.error(f"Test #{idx} ({in_path.name}) failed with exception: {e}")
+                    Printer.error(f"Test #{idx} ({in_path.name}) failed with exception: {e}")
+        finally:
+            runner.flags["stdin"] = orig_stdin
+            runner.flags["expect"] = orig_expect
+            runner._buffered_stdin = orig_buffered_stdin
 
         total = len(pairs)
         print(f"\n{Colors.BOLD}{Colors.CYAN}=== Test Summary ==={Colors.RESET}")

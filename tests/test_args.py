@@ -219,3 +219,36 @@ def test_args_new_feature_flags(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['run', '--completion'])
     parsed = args("1.0.0")
     assert parsed.completion == ''
+
+    monkeypatch.setattr(sys, 'argv', ['run', '--completion', 'main.c'])
+    parsed = args("1.0.0")
+    assert parsed.completion == ''
+    assert parsed.files == ['main.c']
+
+
+def test_args_optional_flags_with_source_files(monkeypatch):
+    """Test optional flags like -i and --link-auto positioned before source file arguments."""
+    # -i before source file
+    monkeypatch.setattr(sys, 'argv', ['run', '-i', 'main.c'])
+    parsed = args("1.0.0")
+    assert parsed.stdin == '-'
+    assert parsed.files == ['main.c']
+
+    # -i with explicit input file before source file
+    monkeypatch.setattr(sys, 'argv', ['run', '-i', 'input.txt', 'main.c'])
+    parsed = args("1.0.0")
+    assert parsed.stdin == 'input.txt'
+    assert parsed.files == ['main.c']
+
+    # --link-auto without explicit depth before source file
+    monkeypatch.setattr(sys, 'argv', ['run', '--link-auto', 'main.c'])
+    parsed = args("1.0.0")
+    assert parsed.link_auto == -1
+    assert parsed.files == ['main.c']
+
+    # --link-auto with explicit depth before source file
+    monkeypatch.setattr(sys, 'argv', ['run', '--link-auto', '3', 'main.c'])
+    parsed = args("1.0.0")
+    assert parsed.link_auto == 3
+    assert parsed.files == ['main.c']
+

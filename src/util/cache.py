@@ -121,7 +121,7 @@ class CacheManager:
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
-            clean_content = re.sub(r'//.*?\n|/\*.*?\*/', '', content, flags=re.DOTALL)
+            clean_content = re.sub(r'//.*?$|/\*.*?\*/', '', content, flags=re.DOTALL | re.MULTILINE)
             for match in include_pattern.finditer(clean_content):
                 inc_rel = match.group(1)
                 inc_path = (file_path.parent / inc_rel).resolve()
@@ -217,17 +217,27 @@ class CacheManager:
         self._save_cache()
 
     def clear(self):
-        """Clear all cache."""
+        """Clear all cache and cached object binaries."""
         with self._lock:
             self.cache_data = {}
+            if self.objs_dir.exists():
+                try:
+                    for obj in self.objs_dir.iterdir():
+                        if obj.is_file():
+                            obj.unlink()
+                    self.objs_dir.rmdir()
+                except OSError:
+                    pass
+
             if self.cache_file.exists():
                 try:
                     self.cache_file.unlink()
                 except OSError:
                     pass
             
-            if self.cache_dir.exists() and not any(self.cache_dir.iterdir()):
+            if self.cache_dir.exists():
                 try:
-                    self.cache_dir.rmdir()
+                    if not any(self.cache_dir.iterdir()):
+                        self.cache_dir.rmdir()
                 except OSError:
                     pass
