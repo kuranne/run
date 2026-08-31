@@ -4,6 +4,7 @@ WORKDIR /app
 COPY . /app
 
 RUN pip install pytest
+RUN apt update && apt install make
 
 ENV PYTHONPATH=/app/src
-CMD ["pytest", "tests/", "-v"]
+CMD ["make", "test"]
