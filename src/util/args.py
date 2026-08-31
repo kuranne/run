@@ -88,25 +88,61 @@ def args(__version__: str):
         trailing_args = cli_argv[split_idx + 1:]
         cli_argv = cli_argv[:split_idx]
 
+    from pathlib import Path
+    source_exts = {
+        ".c", ".cpp", ".cc", ".cxx", ".rs", ".java", ".py", ".go",
+        ".js", ".ts", ".zig", ".rb", ".cs", ".kt", ".swift", ".php"
+    }
+
     processed_args = []
     i = 0
     while i < len(cli_argv):
         arg = cli_argv[i]
         
-        if arg == "--flags" and i + 1 < len(cli_argv):
+        if arg in ("--flags", "--argument") and i + 1 < len(cli_argv):
             next_arg = cli_argv[i + 1]
             if next_arg.startswith("-"):
-                processed_args.append(f"--flags={next_arg}")
+                processed_args.append(f"{arg}={next_arg}")
                 i += 1
             else:
                 processed_args.append(arg)
-        elif arg == "--argument" and i + 1 < len(cli_argv):
+        elif arg == "--link-auto" and i + 1 < len(cli_argv):
             next_arg = cli_argv[i + 1]
-            if next_arg.startswith("-"):
-                processed_args.append(f"--argument={next_arg}")
+            if next_arg.lstrip("-").isdigit():
+                processed_args.append(arg)
+                processed_args.append(next_arg)
                 i += 1
+            elif not next_arg.startswith("-"):
+                processed_args.append("--link-auto=-1")
             else:
                 processed_args.append(arg)
+        elif arg == "--completion" and i + 1 < len(cli_argv):
+            next_arg = cli_argv[i + 1]
+            if next_arg in ("zsh", "bash", "fish", "powershell", "ps1"):
+                processed_args.append(arg)
+                processed_args.append(next_arg)
+                i += 1
+            elif not next_arg.startswith("-"):
+                processed_args.append("--completion=")
+            else:
+                processed_args.append(arg)
+        elif arg in ("-i", "--stdin") and i + 1 < len(cli_argv):
+            next_arg = cli_argv[i + 1]
+            if next_arg == "-":
+                processed_args.append(f"{arg}=-")
+                i += 1
+            elif next_arg.startswith("-"):
+                processed_args.append(f"{arg}=-")
+            else:
+                ext = Path(next_arg).suffix.lower()
+                remaining = cli_argv[i + 2:]
+                has_subsequent_source = any(Path(r).suffix.lower() in source_exts for r in remaining if not r.startswith("-"))
+                if ext in source_exts and not has_subsequent_source:
+                    processed_args.append(f"{arg}=-")
+                else:
+                    processed_args.append(arg)
+                    processed_args.append(next_arg)
+                    i += 1
         else:
             processed_args.append(arg)
             
