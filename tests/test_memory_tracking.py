@@ -79,7 +79,7 @@ def test_feature_cli_flag_m(tmp_path):
     """Tier 1: Verify CLI invocation with -M displays Peak Memory metric."""
     script = make_memory_script(tmp_path / "app.py", mb=5)
     result = subprocess.run(
-        [sys.executable, "src/main.py", str(script), "-M", "--no-color"],
+        [sys.executable, "src/main.py", str(script), "-M", "--no-color", "--unsafe"],
         cwd=str(Path(__file__).resolve().parent.parent),
         env=dict(os.environ, PYTHONPATH="src"),
         capture_output=True,
@@ -95,7 +95,7 @@ def test_feature_cli_flag_mem(tmp_path):
     """Tier 1: Verify CLI invocation with --mem displays Peak Memory metric."""
     script = make_memory_script(tmp_path / "app.py", mb=8)
     result = subprocess.run(
-        [sys.executable, "src/main.py", str(script), "--mem", "--no-color"],
+        [sys.executable, "src/main.py", str(script), "--mem", "--no-color", "--unsafe"],
         cwd=str(Path(__file__).resolve().parent.parent),
         env=dict(os.environ, PYTHONPATH="src"),
         capture_output=True,
@@ -111,7 +111,7 @@ def test_feature_cli_flag_memory_long(tmp_path):
     """Tier 1: Verify CLI invocation with --memory displays Peak Memory metric."""
     script = make_memory_script(tmp_path / "app.py", mb=6)
     result = subprocess.run(
-        [sys.executable, "src/main.py", str(script), "--memory", "--no-color"],
+        [sys.executable, "src/main.py", str(script), "--memory", "--no-color", "--unsafe"],
         cwd=str(Path(__file__).resolve().parent.parent),
         env=dict(os.environ, PYTHONPATH="src"),
         capture_output=True,
@@ -127,7 +127,7 @@ def test_feature_cli_combined_time_and_memory(tmp_path):
     """Tier 1: Verify CLI invocation with -t -M displays both time and Peak Memory."""
     script = make_memory_script(tmp_path / "app.py", mb=5, sleep_s=0.05)
     result = subprocess.run(
-        [sys.executable, "src/main.py", str(script), "-t", "-M", "--no-color"],
+        [sys.executable, "src/main.py", str(script), "-t", "-M", "--no-color", "--unsafe"],
         cwd=str(Path(__file__).resolve().parent.parent),
         env=dict(os.environ, PYTHONPATH="src"),
         capture_output=True,

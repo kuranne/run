@@ -8,18 +8,93 @@ preventing cumulative memory accumulation across multiple sequential executions.
 
 import os
 import sys
+import time
+import threading
 import subprocess as spc
 from typing import Optional, Tuple, Any
+
+
+class ProcfsSampler:
+    """
+    Lightweight daemon thread sampler monitoring /proc/[pid]/status on Linux.
+    Captures the true peak resident memory (VmHWM) of the child process without
+    parent fork Copy-On-Write (COW) memory contamination.
+    """
+
+    def __init__(self, pid: int, interval: float = 0.001) -> None:
+        """
+        Initialize ProcfsSampler for a given process ID.
+
+        Args:
+            pid (int): Process ID to monitor.
+            interval (float): Polling interval in seconds (default: 1ms).
+        """
+        self.pid = pid
+        self.interval = interval
+        self.peak_bytes: Optional[int] = None
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> None:
+        """Start the background sampling thread if on Linux."""
+        if sys.platform.startswith("linux") and os.path.exists(f"/proc/{self.pid}"):
+            self._thread = threading.Thread(target=self._sample_loop, daemon=True)
+            self._thread.start()
+
+    def _sample_loop(self) -> None:
+        """Continuously read /proc/[pid]/status to capture VmHWM."""
+        proc_status = f"/proc/{self.pid}/status"
+        while not self._stop_event.is_set():
+            try:
+                with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if line.startswith("VmHWM:"):
+                            parts = line.split()
+                            if len(parts) >= 2 and parts[1].isdigit():
+                                bytes_val = int(parts[1]) * 1024
+                                if self.peak_bytes is None or bytes_val > self.peak_bytes:
+                                    self.peak_bytes = bytes_val
+                            break
+            except (OSError, IOError, FileNotFoundError, ProcessLookupError):
+                break
+            time.sleep(self.interval)
+
+    def stop(self) -> Optional[int]:
+        """
+        Stop sampling and attempt a final reading before returning peak memory.
+
+        Returns:
+            Optional[int]: Peak memory in bytes, or None if unavailable.
+        """
+        self._stop_event.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=0.05)
+
+        proc_status = f"/proc/{self.pid}/status"
+        try:
+            if os.path.exists(proc_status):
+                with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        if line.startswith("VmHWM:"):
+                            parts = line.split()
+                            if len(parts) >= 2 and parts[1].isdigit():
+                                bytes_val = int(parts[1]) * 1024
+                                if self.peak_bytes is None or bytes_val > self.peak_bytes:
+                                    self.peak_bytes = bytes_val
+                            break
+        except Exception:
+            pass
+
+        return self.peak_bytes
 
 
 class MonitoredPopen(spc.Popen):
     """
     Subprocess Popen subclass that accurately tracks per-process peak memory usage.
 
-    On POSIX systems (Linux, macOS, BSD), it leverages os.wait4 during process
-    reaping to harvest the exact struct_rusage belonging to the specific child PID.
-    On Windows systems, it queries PROCESS_MEMORY_COUNTERS.PeakWorkingSetSize via
-    GetProcessMemoryInfo from the child process handle before closure.
+    - On Linux: Leverages ProcfsSampler (/proc/[pid]/status VmHWM) with os.wait4 fallback.
+    - On macOS/BSD: Leverages os.wait4 during process reaping to harvest struct_rusage.
+    - On Windows: Queries PROCESS_MEMORY_COUNTERS.PeakWorkingSetSize via GetProcessMemoryInfo.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -32,7 +107,23 @@ class MonitoredPopen(spc.Popen):
         """
         self.rusage: Optional[Any] = None
         self.peak_working_set_size: Optional[int] = None
+        self.procfs_sampler: Optional[ProcfsSampler] = None
+
+        # Isolate child process group/session if no preexec_fn is provided
+        if "start_new_session" not in kwargs and os.name != "nt":
+            if kwargs.get("preexec_fn") is None:
+                kwargs["start_new_session"] = True
+
         super().__init__(*args, **kwargs)
+
+        if sys.platform.startswith("linux"):
+            self.procfs_sampler = ProcfsSampler(self.pid)
+            self.procfs_sampler.start()
+
+    def _stop_sampler(self) -> None:
+        """Stop background sampler if active."""
+        if self.procfs_sampler is not None:
+            self.procfs_sampler.stop()
 
     def _try_wait(self, wait_flags: int) -> Tuple[int, int]:
         """
@@ -51,7 +142,6 @@ class MonitoredPopen(spc.Popen):
                     self.rusage = ru
                 return (pid, sts)
             except ChildProcessError:
-                # Process was already waited on or reaped
                 return (self.pid, self.returncode if self.returncode is not None else 0)
         return super()._try_wait(wait_flags)
 
@@ -139,10 +229,12 @@ class MonitoredPopen(spc.Popen):
             res = super().wait(timeout=timeout)
             if os.name == "nt":
                 self._query_windows_memory()
+            self._stop_sampler()
             return res
         except Exception:
             if os.name == "nt":
                 self._query_windows_memory()
+            self._stop_sampler()
             raise
 
     def poll(self) -> Optional[int]:
@@ -153,8 +245,10 @@ class MonitoredPopen(spc.Popen):
             Optional[int]: Process return code if terminated, else None.
         """
         res = super().poll()
-        if res is not None and os.name == "nt":
-            self._query_windows_memory()
+        if res is not None:
+            if os.name == "nt":
+                self._query_windows_memory()
+            self._stop_sampler()
         return res
 
     def communicate(self, input: Optional[Any] = None, timeout: Optional[float] = None) -> Tuple[Optional[Any], Optional[Any]]:
@@ -172,10 +266,12 @@ class MonitoredPopen(spc.Popen):
             res = super().communicate(input=input, timeout=timeout)
             if os.name == "nt":
                 self._query_windows_memory()
+            self._stop_sampler()
             return res
         except Exception:
             if os.name == "nt":
                 self._query_windows_memory()
+            self._stop_sampler()
             raise
 
     def get_memory_bytes(self) -> Optional[int]:
@@ -183,13 +279,23 @@ class MonitoredPopen(spc.Popen):
         Get the peak memory usage of this process in normalized bytes.
 
         Normalizes across operating systems:
+        - Linux: Prioritizes /proc/[pid]/status VmHWM with wait4 fallback.
         - macOS (darwin): ru_maxrss is reported in bytes.
-        - Linux & other POSIX: ru_maxrss is reported in kilobytes (converted to bytes).
         - Windows (NT): PeakWorkingSetSize is reported in bytes.
 
         Returns:
             Optional[int]: Peak memory consumption in bytes, or None if unavailable.
         """
+        if self.poll() is None:
+            return None
+
+        self._stop_sampler()
+
+        # 1. Linux Procfs Sampler (most accurate on Linux)
+        if self.procfs_sampler is not None and self.procfs_sampler.peak_bytes is not None:
+            return self.procfs_sampler.peak_bytes
+
+        # 2. POSIX wait4 rusage
         if self.rusage is not None:
             raw_rss = getattr(self.rusage, "ru_maxrss", 0)
             if sys.platform == "darwin":
@@ -197,6 +303,7 @@ class MonitoredPopen(spc.Popen):
             else:
                 return int(raw_rss * 1024)
 
+        # 3. Windows GetProcessMemoryInfo
         if os.name == "nt":
             self._query_windows_memory()
             if self.peak_working_set_size is not None:
@@ -230,3 +337,4 @@ def normalize_memory_bytes(raw_rss: int, platform: Optional[str] = None) -> int:
     if target_platform == "darwin":
         return int(raw_rss)
     return int(raw_rss * 1024)
+
