@@ -24,6 +24,8 @@ def _read_procfs_vmhwm(pid: int) -> Optional[int]:
         with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read(4096)
             idx = content.find("VmHWM:")
+            if idx == -1:
+                idx = content.find("VmRSS:")
             if idx != -1:
                 end = content.find("\n", idx)
                 parts = content[idx:end].split()
@@ -312,14 +314,10 @@ class MonitoredPopen(spc.Popen):
 
         self._stop_sampler()
 
-        # 1. Linux: Rely primarily on ProcfsSampler with wait4 fallback
+        # 1. Linux: Rely exclusively on ProcfsSampler to prevent cumulative RUSAGE_CHILDREN leakage
         if sys.platform.startswith("linux"):
             if self.procfs_sampler is not None and self.procfs_sampler.peak_bytes is not None:
                 return self.procfs_sampler.peak_bytes
-            if self.rusage is not None:
-                raw_rss = getattr(self.rusage, "ru_maxrss", 0)
-                if raw_rss > 0:
-                    return int(raw_rss * 1024)
             return None
 
         # 2. POSIX wait4 rusage (macOS / BSD - isolated per reaped child)

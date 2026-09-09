@@ -119,6 +119,7 @@ def test_batch_runner_compiled_c_binary_varying_memory(tmp_path, capfd):
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 int main() {
     int mb = 0;
@@ -132,6 +133,7 @@ int main() {
             }
         }
         printf("C_DONE:%d\\n", mb);
+        usleep(2000);
         return 0;
     }
     return 1;

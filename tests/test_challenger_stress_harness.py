@@ -153,6 +153,7 @@ def test_10_consecutive_compile_and_run_cycles(tmp_path, capfd):
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 int main() {{
     int mb = {alloc_mb};
@@ -160,6 +161,7 @@ int main() {{
     char *buf = (char *)malloc(sz);
     if (buf) memset(buf, 7, sz);
     printf("CYCLE_{cycle:02d}:%d\\n", mb);
+    usleep(2000);
     return 0;
 }}
 """)
