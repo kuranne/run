@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.gitignore'
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.gitignore'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Fast Lint Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+
+      - name: Lint with flake8
+        run: |
+          flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+
+  test-macos:
+    name: Test on macOS
+    needs: lint
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+
+      - name: Run test suite
+        run: make test
+
+  test-fedora:
+    name: Test on Fedora
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Fedora Test Image with Cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.test
+          load: true
+          tags: run-test-fedora:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run test suite in Fedora container
+        run: |
+          docker run --rm run-test-fedora:latest
