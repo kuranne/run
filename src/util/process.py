@@ -14,6 +14,26 @@ import subprocess as spc
 from typing import Optional, Tuple, Any
 
 
+def _read_procfs_vmhwm(pid: int) -> Optional[int]:
+    """
+    Directly read /proc/[pid]/status to parse VmHWM in bytes.
+    Opens freshly each time to avoid userspace buffer caching across seeks.
+    """
+    proc_status = f"/proc/{pid}/status"
+    try:
+        with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(4096)
+            idx = content.find("VmHWM:")
+            if idx != -1:
+                end = content.find("\n", idx)
+                parts = content[idx:end].split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    return int(parts[1]) * 1024
+    except (OSError, IOError, FileNotFoundError, ProcessLookupError):
+        pass
+    return None
+
+
 class ProcfsSampler:
     """
     Lightweight daemon thread sampler monitoring /proc/[pid]/status on Linux.
@@ -39,21 +59,10 @@ class ProcfsSampler:
         """
         Perform an immediate single-shot reading of /proc/[pid]/status VmHWM.
         """
-        proc_status = f"/proc/{self.pid}/status"
-        try:
-            if os.path.exists(proc_status):
-                with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read(1024)
-                    idx = content.find("VmHWM:")
-                    if idx != -1:
-                        end = content.find("\n", idx)
-                        parts = content[idx:end].split()
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            bytes_val = int(parts[1]) * 1024
-                            if self.peak_bytes is None or bytes_val > self.peak_bytes:
-                                self.peak_bytes = bytes_val
-        except Exception:
-            pass
+        bytes_val = _read_procfs_vmhwm(self.pid)
+        if bytes_val is not None:
+            if self.peak_bytes is None or bytes_val > self.peak_bytes:
+                self.peak_bytes = bytes_val
         return self.peak_bytes
 
     def start(self) -> None:
@@ -65,23 +74,9 @@ class ProcfsSampler:
 
     def _sample_loop(self) -> None:
         """Continuously read /proc/[pid]/status to capture VmHWM."""
-        proc_status = f"/proc/{self.pid}/status"
-        try:
-            with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
-                while not self._stop_event.is_set():
-                    f.seek(0)
-                    content = f.read(1024)
-                    idx = content.find("VmHWM:")
-                    if idx != -1:
-                        end = content.find("\n", idx)
-                        parts = content[idx:end].split()
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            bytes_val = int(parts[1]) * 1024
-                            if self.peak_bytes is None or bytes_val > self.peak_bytes:
-                                self.peak_bytes = bytes_val
-                    time.sleep(self.interval)
-        except (OSError, IOError, FileNotFoundError, ProcessLookupError):
-            pass
+        while not self._stop_event.is_set():
+            self.sample()
+            time.sleep(self.interval)
 
     def stop(self) -> Optional[int]:
         """
@@ -94,22 +89,7 @@ class ProcfsSampler:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=0.05)
 
-        proc_status = f"/proc/{self.pid}/status"
-        try:
-            if os.path.exists(proc_status):
-                with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read(1024)
-                    idx = content.find("VmHWM:")
-                    if idx != -1:
-                        end = content.find("\n", idx)
-                        parts = content[idx:end].split()
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            bytes_val = int(parts[1]) * 1024
-                            if self.peak_bytes is None or bytes_val > self.peak_bytes:
-                                self.peak_bytes = bytes_val
-        except Exception:
-            pass
-
+        self.sample()
         return self.peak_bytes
 
 
@@ -163,25 +143,15 @@ class MonitoredPopen(spc.Popen):
         if os.name != "nt" and hasattr(os, "wait4"):
             # On Linux with blocking wait, sample procfs inline to guarantee capturing fast-exiting processes
             if sys.platform.startswith("linux") and wait_flags == 0 and self.procfs_sampler:
-                proc_status = f"/proc/{self.pid}/status"
                 try:
-                    with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
-                        while True:
-                            f.seek(0)
-                            content = f.read(1024)
-                            idx = content.find("VmHWM:")
-                            if idx != -1:
-                                end = content.find("\n", idx)
-                                parts = content[idx:end].split()
-                                if len(parts) >= 2 and parts[1].isdigit():
-                                    val = int(parts[1]) * 1024
-                                    if self.procfs_sampler.peak_bytes is None or val > self.procfs_sampler.peak_bytes:
-                                        self.procfs_sampler.peak_bytes = val
-                            pid, sts, ru = os.wait4(self.pid, os.WNOHANG)
-                            if pid == self.pid:
-                                self.rusage = ru
-                                return (pid, sts)
-                            time.sleep(0.0001)
+                    while True:
+                        self.procfs_sampler.sample()
+                        pid, sts, ru = os.wait4(self.pid, os.WNOHANG)
+                        if pid == self.pid:
+                            self.rusage = ru
+                            self.procfs_sampler.sample()
+                            return (pid, sts)
+                        time.sleep(0.0001)
                 except (OSError, IOError, FileNotFoundError, ProcessLookupError):
                     pass
 
@@ -342,10 +312,14 @@ class MonitoredPopen(spc.Popen):
 
         self._stop_sampler()
 
-        # 1. Linux: Rely exclusively on ProcfsSampler to prevent cumulative RUSAGE_CHILDREN leakage
+        # 1. Linux: Rely primarily on ProcfsSampler with wait4 fallback
         if sys.platform.startswith("linux"):
             if self.procfs_sampler is not None and self.procfs_sampler.peak_bytes is not None:
                 return self.procfs_sampler.peak_bytes
+            if self.rusage is not None:
+                raw_rss = getattr(self.rusage, "ru_maxrss", 0)
+                if raw_rss > 0:
+                    return int(raw_rss * 1024)
             return None
 
         # 2. POSIX wait4 rusage (macOS / BSD - isolated per reaped child)

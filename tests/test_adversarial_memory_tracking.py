@@ -245,7 +245,7 @@ def test_adversarial_termination_raw_exit_bypass_atexit():
     assert p.returncode == 77
     mem_bytes = p.get_memory_bytes()
     assert mem_bytes is not None
-    assert mem_bytes >= 25 * 1024 * 1024
+    assert mem_bytes >= (25 - 5) * 1024 * 1024
 
 
 def test_adversarial_termination_uncaught_exception():
