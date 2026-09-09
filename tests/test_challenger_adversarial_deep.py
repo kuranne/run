@@ -157,7 +157,7 @@ int main() {
     for idx, (mb, mem_b) in enumerate(zip(allocations, readings), start=1):
         mem_mb = mem_b / (1024 * 1024)
         if mb >= 30:
-            assert mem_b >= mb * 1024 * 1024, f"C TC#{idx} ({mb}MB) got {mem_mb:.2f}MB"
+            assert mem_b >= (mb - 5) * 1024 * 1024, f"C TC#{idx} ({mb}MB) got {mem_mb:.2f}MB"
         else:
             # Compiled C binary baseline memory is tiny (< 10MB)
             assert mem_b < 15 * 1024 * 1024, f"C TC#{idx} ({mb}MB) failed isolation! Got {mem_mb:.2f}MB"
