@@ -14,9 +14,11 @@ run-cli = "main:main"
 [project.optional-dependencies]
 test = [
     "pytest>=7.0.0",
+    "flake8>=7.0.0",
 ]
 dev = [
     "pytest>=7.0.0",
+    "flake8>=7.0.0",
     "nuitka>=2.0.0",
     "zstandard>=0.22.0",
     "ordered-set>=4.1.0",
