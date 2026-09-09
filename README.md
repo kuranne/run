@@ -200,3 +200,4 @@ Explore detailed topic guides and documentation:
 - **[Templates & Scaffolding Guide (`docs/templates_and_scaffolding.md`)](docs/templates_and_scaffolding.md)** - Single-file and multi-file code generator (`run --new`).
 - **[Shell Autocompletion Guide (`docs/completions.md`)](docs/completions.md)** - Tab completion setup for Zsh (`_evalcache`), Bash, Fish, and PowerShell.
 - **[Troubleshooting & Tips (`docs/troubleshooting.md`)](docs/troubleshooting.md)** - Diagnostic scanner, error fixes, and performance tips.
+- **[Changelog (`CHANGELOG.md`)](CHANGELOG.md)** - Release notes and version history.
