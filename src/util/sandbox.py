@@ -45,44 +45,12 @@ class NativeRestrictor:
             bwrap_cmd.extend(cmd)
             return bwrap_cmd
         elif sys.platform == "darwin":
-            # On macOS, handled internally via macos_preexec_fn
-            return cmd
+            raise ConfigError(
+                "--restrict is only supported on Linux (via Bubblewrap). "
+                "On macOS, please use --sandbox (Docker/Podman) for isolation."
+            )
         else:
-            raise ConfigError("--restrict is not supported on this OS. Use --sandbox instead.")
-
-    @staticmethod
-    def macos_preexec_fn():
-        """Pre-execution function for subprocess on macOS to apply sandbox_init and rlimits safely."""
-        import resource
-        try:
-            # Set CPU limit if appropriate; avoid RLIMIT_AS on 64-bit macOS as it crashes dyld
-            try:
-                resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
-            except (ValueError, OSError):
-                pass
-            
-            # Apply sandbox_init if possible (might fail due to SIP on newer macOS)
-            try:
-                import ctypes
-                libc = ctypes.CDLL("/usr/lib/libc.dylib")
-                if hasattr(libc, "sandbox_init"):
-                    sandbox_init = libc.sandbox_init
-                    sandbox_init.argtypes = [ctypes.c_char_p, ctypes.c_uint64, ctypes.POINTER(ctypes.c_char_p)]
-                    sandbox_init.restype = ctypes.c_int
-                    
-                    errorbuf = ctypes.c_char_p()
-                    profile = b"no-write-except-temporary"
-                    
-                    res = sandbox_init(profile, 1, ctypes.byref(errorbuf))
-                    if res != 0:
-                        err_msg = errorbuf.value.decode('utf-8') if errorbuf.value else 'Unknown error'
-                        print(f"[WARN] macOS sandbox_init failed (SIP?): {err_msg}", file=sys.stderr)
-                        if hasattr(libc, "sandbox_free_error") and errorbuf.value:
-                            libc.sandbox_free_error(errorbuf)
-            except Exception:
-                pass
-        except Exception as e:
-            print(f"[WARN] Sandbox setup failed: {e}", file=sys.stderr)
+            raise ConfigError("--restrict is only supported on Linux (via Bubblewrap). Use --sandbox instead.")
 
 
 class ContainerSandbox:

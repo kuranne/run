@@ -13,8 +13,8 @@ The `--restrict` flag enforces operating-system-level constraints with zero daem
   - System directories (`/usr`, `/bin`, `/lib`) are mounted read-only (`--ro-bind`).
   - Temporary files are isolated in an in-memory `tmpfs`.
   - Disables networking by default unless `--sandbox-net` is specified.
-- **macOS (`setrlimit`):**
-  - Restricts process execution limits (CPU runtime bounds) inside a `preexec_fn` hook before calling `exec`.
+- **macOS & Windows:**
+  - Native process restriction is only supported on Linux via Bubblewrap. On macOS, native Seatbelt profiles are deprecated by Apple, and Windows lacks native namespace sandboxing. On macOS and Windows, use `--sandbox` (Docker or Podman) for robust container isolation.
 
 ### Example
 ```bash

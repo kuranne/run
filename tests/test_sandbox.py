@@ -49,18 +49,21 @@ class TestNativeRestrictor:
         with pytest.raises(ConfigError, match="Bubblewrap.*not found"):
             NativeRestrictor.wrap_command(["ls"], cwd="/app")
 
-    def test_macos_restriction_safety(self, monkeypatch):
+    def test_macos_restriction_raises_config_error(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "darwin")
-        cmd = ["ls", "-la"]
-        wrapped = NativeRestrictor.wrap_command(cmd)
-        assert wrapped == cmd
+        with pytest.raises(ConfigError, match="only supported on Linux.*Bubblewrap"):
+            NativeRestrictor.wrap_command(["ls", "-la"])
 
-        # Execute macos_preexec_fn safely without exceptions
-        NativeRestrictor.macos_preexec_fn()
+    def test_base_runner_restrict_on_macos_raises_config_error(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        from runner.base_runner import BaseRunner
+        runner = BaseRunner({"restrict": True})
+        with pytest.raises(ConfigError, match="only supported on Linux"):
+            runner.run_command(["echo", "hello"], compiling=False)
 
     def test_unsupported_os_raises_config_error(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "win32")
-        with pytest.raises(ConfigError, match="not supported on this OS"):
+        with pytest.raises(ConfigError, match="only supported on Linux"):
             NativeRestrictor.wrap_command(["dir"])
 
 
