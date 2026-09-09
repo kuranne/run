@@ -307,10 +307,11 @@ def test_compiler_vs_runner_memory_isolation_c_program(tmp_path, capfd):
         pytest.skip("No C compiler available")
 
     # Generate a C file with 10,000 unrolled statements to stress the compiler
-    lines = ["#include <stdio.h>", "int main() {", "    volatile long long sum = 0;"]
+    lines = ["#include <stdio.h>", "#include <unistd.h>", "int main() {", "    volatile long long sum = 0;"]
     for i in range(10000):
         lines.append(f"    sum += {i} * 3;")
     lines.append('    printf("SUM_DONE\\n");')
+    lines.append("    usleep(2000);")
     lines.append("    return 0;")
     lines.append("}")
 
@@ -364,9 +365,11 @@ int compute_val(int x) {
     # File 2: main
     (tmp_path / "main.c").write_text("""
 #include <stdio.h>
+#include <unistd.h>
 #include "helper.h"
 int main() {
     printf("RES:%d\\n", compute_val(10));
+    usleep(2000);
     return 0;
 }
 """)
