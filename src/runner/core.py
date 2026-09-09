@@ -70,7 +70,11 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             List[str]: List of found source file paths.
         """
         files = []
-        ext = self.c_family_ext.union(self.java_ext)
+        custom_exts = set()
+        if hasattr(self, "config") and self.config:
+            for lang_cfg in self.config.get_custom_languages().values():
+                custom_exts.update(lang_cfg.get("extensions", []))
+        ext = self.c_family_ext.union(self.java_ext).union(custom_exts)
         ignore_dirs = {'.git', '.venv', 'venv', 'env', 'node_modules', '.run_cache', 'build', 'target', '__pycache__'}
         start_level = len(path.absolute().parts)
         
@@ -176,7 +180,8 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
         first_ext = paths[0].suffix.lower()
         lang_config = self.config.get_language_by_extension(first_ext)
         if lang_config:
-            out_name = self.get_executable_path(paths[0])
+            main_candidate = next((p for p in paths if p.stem.lower() == "main"), paths[0])
+            out_name = self.get_executable_path(main_candidate)
             self._execute_custom_multi(paths, lang_config, out_name, self._get_context())
             return
 

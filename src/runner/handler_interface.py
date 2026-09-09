@@ -38,7 +38,8 @@ class ExecutionContext:
     def execute_binary(self, bin_path: Path, args: Optional[List[str]] = None):
         """Execute a compiled binary."""
         if self.runner_ref:
-            self.runner_ref._execute_binary(bin_path, args=args or [])
+            return self.runner_ref._execute_binary(bin_path, args=args or [])
+        return True
 
 class LanguageHandler(ABC):
     """
