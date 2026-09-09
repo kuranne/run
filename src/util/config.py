@@ -37,13 +37,13 @@ class Config:
             else:
                 return Path.home() / ".config" / "run_kuranne"
 
-    def __init__(self):
+    def __init__(self, start_dir: Optional[Path] = None):
         """Initialize the Config manager, loading Run.toml from detected paths."""
         self.data: Dict[str, Any] = {}
         config_path = None
         
         # 1. Search in current workspace (up to 4 levels)
-        current = Path.cwd()
+        current = start_dir if start_dir is not None else Path.cwd()
         for i in range(4):  # 0=current, 1=parent, 2=grandparent, 3=great-grandparent
             target = current / "Run.toml"
             if target.exists():
@@ -152,8 +152,8 @@ class Config:
                 if not isinstance(config["extensions"], list):
                     raise ValueError(f"Language '{name}' 'extensions' must be a list")
 
-                if "runner" not in config:
-                     raise ValueError(f"Language '{name}' missing required 'runner' command")
+                if "runner" not in config and "compile" not in config and "command" not in config and "build" not in config:
+                     raise ValueError(f"Language '{name}' missing required 'runner', 'compile', or 'command' definition")
     
     def get_runner(self, lang: str, default: str) -> str:
         """
@@ -163,7 +163,7 @@ class Config:
         runners = self.data.get("runners", self.data.get("runner", {}))
         return runners.get(lang, default)
     
-    def get_tasks(self) -> Dict[str, Any]:
+    def get_tasks(self) -> Dict[str, str]:
         """
         Get custom tasks from configuration.
         """
@@ -234,9 +234,16 @@ class Config:
     
     def get_custom_languages(self) -> Dict[str, Any]:
         """
-        Returns all custom language configurations.
+        Returns all custom language configurations with built-in defaults like Go.
         """
-        langs = {}
+        langs = {
+            "go": {
+                "name": "go",
+                "extensions": [".go"],
+                "compile": "go build -o ${out} ${files}",
+                "type": "compiler"
+            }
+        }
         # Support old format mapping for backwards compatibility if needed, but prioritize new format
         if "language" in self.data and isinstance(self.data["language"], dict):
             for name, config in self.data["language"].items():
