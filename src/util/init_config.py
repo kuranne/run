@@ -76,6 +76,7 @@ class ConfigInitializer:
             "",
             "[core]",
             "exclude_files = []",
+            "exclude_dirs = []",
             "exclude_extensions = [\".md\", \".txt\", \".json\", \".yaml\", \".bak\"]",
             ""
         ]
