@@ -1,23 +1,25 @@
 import os
 import re
+import shlex
 from pathlib import Path
 from typing import Dict, List, Optional
 
 class VariableSubstitutor:
     """
     Substitutes dynamic variables in template strings and lists.
-    Supported variables:
-    - ${file}: full source file path
-    - ${filename}: base filename with extension
-    - ${name} / ${stem}: filename without extension
-    - ${ext}: file extension with leading dot
-    - ${dir} / ${parent}: parent directory of file
-    - ${out} / ${executable}: resolved executable output path
-    - ${out_dir}: output directory
-    - ${env:VAR_NAME}: environment variable value
+    Supported variables (both ${var} and {var} syntax):
+    - ${file} / {file}: full source file path
+    - ${files} / {files}: all source file paths (space-separated)
+    - ${filename} / {filename}: base filename with extension
+    - ${name} / ${stem} / {name} / {stem}: filename without extension
+    - ${ext} / {ext}: file extension with leading dot
+    - ${dir} / ${parent} / {dir} / {parent}: parent directory of file
+    - ${out} / ${executable} / {out} / {executable}: resolved executable output path
+    - ${out_dir} / {out_dir}: output directory
+    - ${env:VAR_NAME} / {env:VAR_NAME}: environment variable value
     """
 
-    VAR_PATTERN = re.compile(r'\$\{([a-zA-Z0-9_:]+)\}')
+    VAR_PATTERN = re.compile(r'(?:\$\{([a-zA-Z0-9_:]+)\}|\{([a-zA-Z0-9_:]+)\})')
 
     @classmethod
     def build_file_context(cls, file_path: Optional[Path] = None, out_path: Optional[Path] = None,
@@ -36,6 +38,7 @@ class VariableSubstitutor:
         ctx: Dict[str, str] = {}
         if file_path:
             ctx["file"] = str(file_path)
+            ctx["files"] = shlex.quote(str(file_path)) if " " in str(file_path) else str(file_path)
             ctx["filename"] = file_path.name
             ctx["name"] = file_path.stem
             ctx["stem"] = file_path.stem
@@ -47,6 +50,26 @@ class VariableSubstitutor:
             ctx["executable"] = str(out_path)
         if out_dir:
             ctx["out_dir"] = out_dir
+        return ctx
+
+    @classmethod
+    def build_multi_file_context(cls, file_paths: List[Path], out_path: Optional[Path] = None,
+                                 out_dir: Optional[str] = None) -> Dict[str, str]:
+        """
+        Build substitution dictionary for multiple source files.
+
+        Args:
+            file_paths (List[Path]): List of source file paths.
+            out_path (Optional[Path]): Output binary path.
+            out_dir (Optional[str]): Output directory string.
+
+        Returns:
+            Dict[str, str]: Key-value variable mapping.
+        """
+        first_file = file_paths[0] if file_paths else None
+        ctx = cls.build_file_context(file_path=first_file, out_path=out_path, out_dir=out_dir)
+        if file_paths:
+            ctx["files"] = " ".join(shlex.quote(str(p)) if " " in str(p) else str(p) for p in file_paths)
         return ctx
 
     @classmethod
@@ -62,7 +85,7 @@ class VariableSubstitutor:
             str: String with variables replaced.
         """
         def replace(match):
-            key = match.group(1)
+            key = match.group(1) or match.group(2)
             if key.startswith("env:"):
                 env_var = key[4:]
                 return os.environ.get(env_var, "")

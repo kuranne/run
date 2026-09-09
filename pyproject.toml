@@ -1,7 +1,7 @@
 [project]
 name = "run"
-version = "0.1.0"
-description = "A configurable runner for compilation, execution, and cleanup."
+version = "0.2.0"
+description = "A fast, smart CLI compiler and runner for multiple languages"
 authors = [
     { name = "kuranne" }
 ]
@@ -14,9 +14,11 @@ run-cli = "main:main"
 [project.optional-dependencies]
 test = [
     "pytest>=7.0.0",
+    "flake8>=7.0.0",
 ]
 dev = [
     "pytest>=7.0.0",
+    "flake8>=7.0.0",
     "nuitka>=2.0.0",
     "zstandard>=0.22.0",
     "ordered-set>=4.1.0",

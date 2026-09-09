@@ -86,6 +86,7 @@ class ProjectRunner:
         Returns:
             Optional[Tuple[str, Dict[str, Any], Path]]: (project_type, config_dict, manifest_path).
         """
+        from util.glob_matcher import has_glob_wildcard, find_matching_manifests
         projects = config.get_projects()
         current = start_dir.absolute()
 
@@ -94,9 +95,17 @@ class ProjectRunner:
             for proj_name, proj_cfg in projects.items():
                 manifest_file = proj_cfg.get("file")
                 if manifest_file:
-                    manifest_path = current / manifest_file
-                    if manifest_path.exists():
-                        return proj_name, proj_cfg, manifest_path
+                    if has_glob_wildcard(manifest_file):
+                        matches = find_matching_manifests(current, manifest_file)
+                        if matches:
+                            if len(matches) > 1:
+                                match_names = [m.name for m in matches]
+                                Printer.info(f"Multiple manifest files matched '{manifest_file}' for project '{proj_name}': {match_names}. Using '{matches[0].name}'.")
+                            return proj_name, proj_cfg, matches[0]
+                    else:
+                        manifest_path = current / manifest_file
+                        if manifest_path.exists():
+                            return proj_name, proj_cfg, manifest_path
             if current == current.parent:
                 break
             current = current.parent

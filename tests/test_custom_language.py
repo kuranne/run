@@ -39,7 +39,7 @@ def test_missing_runner_raises_error(tmp_path):
     lang_config = {"name": "invalid", "type": "interpreter"}
     dummy_file = tmp_path / "test.inv"
 
-    with pytest.raises(ConfigError, match="No runner specified"):
+    with pytest.raises(ConfigError, match="No runner, compile, or command specified"):
         runner._handle_custom_language(dummy_file, lang_config, tmp_path / "test.out")
 
 def test_interpreter_custom_language(tmp_path):
@@ -82,4 +82,66 @@ def test_compiler_custom_language_multi(tmp_path):
 
     exec_cmd, compiling = runner.executed_commands[1]
     assert exec_cmd == ["EXEC", str(out_file), "run_arg"]
+    assert compiling is False
+
+
+def test_template_driven_compile_single(tmp_path):
+    runner = DummyCustomRunner()
+    lang_config = {
+        "name": "template_lang",
+        "compile": "custom-cc -o {out} {files}",
+        "run": "{out}"
+    }
+    src = tmp_path / "main.tl"
+    out = tmp_path / "main.out"
+
+    runner._execute_custom(src, lang_config, out, runner._get_dummy_context(tmp_path))
+
+    assert len(runner.executed_commands) == 2
+    comp_cmd, compiling = runner.executed_commands[0]
+    assert comp_cmd == ["custom-cc", "-o", str(out), str(src)]
+    assert compiling is True
+
+    run_cmd, compiling = runner.executed_commands[1]
+    assert run_cmd == ["EXEC", str(out)]
+    assert compiling is False
+
+
+def test_template_driven_compile_multi(tmp_path):
+    runner = DummyCustomRunner()
+    lang_config = {
+        "name": "go_custom",
+        "compile": "go build -o ${out} ${files}",
+        "run": "${out}"
+    }
+    f1 = tmp_path / "main.go"
+    f2 = tmp_path / "helper.go"
+    out = tmp_path / "main.out"
+
+    runner._execute_custom_multi([f1, f2], lang_config, out, runner._get_dummy_context(tmp_path))
+
+    assert len(runner.executed_commands) == 2
+    comp_cmd, compiling = runner.executed_commands[0]
+    assert comp_cmd == ["go", "build", "-o", str(out), str(f1), str(f2)]
+    assert compiling is True
+
+    run_cmd, compiling = runner.executed_commands[1]
+    assert run_cmd == ["EXEC", str(out)]
+    assert compiling is False
+
+
+def test_template_driven_command_interpreter(tmp_path):
+    runner = DummyCustomRunner()
+    lang_config = {
+        "name": "interp_lang",
+        "command": "node --experimental-strip-types {file}"
+    }
+    src = tmp_path / "index.ts"
+    out = tmp_path / "index.out"
+
+    runner._execute_custom(src, lang_config, out, runner._get_dummy_context(tmp_path))
+
+    assert len(runner.executed_commands) == 1
+    cmd, compiling = runner.executed_commands[0]
+    assert cmd == ["node", "--experimental-strip-types", str(src)]
     assert compiling is False

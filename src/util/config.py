@@ -37,13 +37,13 @@ class Config:
             else:
                 return Path.home() / ".config" / "run_kuranne"
 
-    def __init__(self):
+    def __init__(self, start_dir: Optional[Path] = None):
         """Initialize the Config manager, loading Run.toml from detected paths."""
         self.data: Dict[str, Any] = {}
         config_path = None
         
         # 1. Search in current workspace (up to 4 levels)
-        current = Path.cwd()
+        current = start_dir if start_dir is not None else Path.cwd()
         for i in range(4):  # 0=current, 1=parent, 2=grandparent, 3=great-grandparent
             target = current / "Run.toml"
             if target.exists():
@@ -91,8 +91,16 @@ class Config:
         if "presets" in self.data and not isinstance(self.data["presets"], dict):
             raise ValueError("'presets' section must be a table (dict)")
             
-        if "core" in self.data and not isinstance(self.data["core"], dict):
-            raise ValueError("'core' section must be a table (dict)")
+        if "core" in self.data:
+            if not isinstance(self.data["core"], dict):
+                raise ValueError("'core' section must be a table (dict)")
+            core_cfg = self.data["core"]
+            if "exclude_files" in core_cfg and not isinstance(core_cfg["exclude_files"], list):
+                raise ValueError("'core.exclude_files' must be a list")
+            if "exclude_extensions" in core_cfg and not isinstance(core_cfg["exclude_extensions"], list):
+                raise ValueError("'core.exclude_extensions' must be a list")
+            if "exclude_dirs" in core_cfg and not isinstance(core_cfg["exclude_dirs"], list):
+                raise ValueError("'core.exclude_dirs' must be a list")
 
         if "tasks" in self.data and not isinstance(self.data["tasks"], dict):
             raise ValueError("'tasks' section must be a table (dict)")
@@ -152,8 +160,8 @@ class Config:
                 if not isinstance(config["extensions"], list):
                     raise ValueError(f"Language '{name}' 'extensions' must be a list")
 
-                if "runner" not in config:
-                     raise ValueError(f"Language '{name}' missing required 'runner' command")
+                if "runner" not in config and "compile" not in config and "command" not in config and "build" not in config:
+                     raise ValueError(f"Language '{name}' missing required 'runner', 'compile', or 'command' definition")
     
     def get_runner(self, lang: str, default: str) -> str:
         """
@@ -163,7 +171,7 @@ class Config:
         runners = self.data.get("runners", self.data.get("runner", {}))
         return runners.get(lang, default)
     
-    def get_tasks(self) -> Dict[str, Any]:
+    def get_tasks(self) -> Dict[str, str]:
         """
         Get custom tasks from configuration.
         """
@@ -234,9 +242,16 @@ class Config:
     
     def get_custom_languages(self) -> Dict[str, Any]:
         """
-        Returns all custom language configurations.
+        Returns all custom language configurations with built-in defaults like Go.
         """
-        langs = {}
+        langs = {
+            "go": {
+                "name": "go",
+                "extensions": [".go"],
+                "compile": "go build -o ${out} ${files}",
+                "type": "compiler"
+            }
+        }
         # Support old format mapping for backwards compatibility if needed, but prioritize new format
         if "language" in self.data and isinstance(self.data["language"], dict):
             for name, config in self.data["language"].items():
@@ -253,11 +268,13 @@ class Config:
         """
         Find language configuration by file extension.
         """
+        from util.glob_matcher import match_extension
         languages = self.get_custom_languages()
         for lang_name, lang_config in languages.items():
             extensions = lang_config.get("extensions", [])
-            if ext in extensions:
-                return lang_config
+            for pattern in extensions:
+                if match_extension(ext, pattern):
+                    return lang_config
         return None
     
     def is_custom_language_configured(self, ext: str) -> bool:
@@ -266,14 +283,15 @@ class Config:
         """
         return self.get_language_by_extension(ext) is not None
     
-    def get_exclude(self) -> Optional[Dict[str, Any]]:
+    def get_exclude(self) -> Dict[str, Any]:
         """
-        Get exclude extensions and files.
+        Get exclude extensions, files, and directories.
         """
         core = self.data.get("core", {})
         old_exclude = self.data.get("exclude", {})
         
         return {
             "files": core.get("exclude_files", old_exclude.get("files", [])),
-            "extensions": core.get("exclude_extensions", old_exclude.get("extensions", []))
+            "extensions": core.get("exclude_extensions", old_exclude.get("extensions", [])),
+            "dirs": core.get("exclude_dirs", old_exclude.get("dirs", []))
         }

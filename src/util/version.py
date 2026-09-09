@@ -11,7 +11,7 @@ else:
 from util.output import Printer
 
 fp = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
-FALLBACK_VERSION = "0.1.0"
+FALLBACK_VERSION = "0.2.0"
 
 def version(file_path: Path = fp) -> Optional[str]:
     """

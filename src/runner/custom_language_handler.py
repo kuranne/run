@@ -40,11 +40,47 @@ class CustomLanguageHandler(LanguageHandler):
     def _execute_custom(self, fp: Path, lang_config: dict, out_name: Path, ctx: ExecutionContext):
         """Execute single file based on config."""
         lang_name = lang_config.get("name", "unknown")
+        compile_template = lang_config.get("compile") or lang_config.get("build")
+        command_template = lang_config.get("command")
+        run_template = lang_config.get("run")
+
+        var_ctx = VariableSubstitutor.build_file_context(
+            file_path=fp,
+            out_path=out_name,
+            out_dir=ctx.flags.get("out_dir") if ctx.flags else None
+        )
+        preset_flags = ctx.config.get_preset_flags(ctx.preset, lang_name) if ctx.config else []
+        execute_args = VariableSubstitutor.substitute_list(lang_config.get("arguments", []), var_ctx)
+
+        # 1. Template-driven compiler
+        if compile_template:
+            expanded_cmd = VariableSubstitutor.substitute_string(compile_template, var_ctx)
+            cmd = shlex.split(expanded_cmd)
+            if ctx.extra_flags or preset_flags:
+                cmd = [cmd[0]] + ctx.extra_flags + preset_flags + cmd[1:]
+            if not ctx.run_command(cmd, compiling=True):
+                return False
+            ctx.output_files.append(out_name)
+            if run_template and run_template.strip() not in ("${out}", "{out}", "$out", "out"):
+                expanded_run = VariableSubstitutor.substitute_string(run_template, var_ctx)
+                run_cmd = shlex.split(expanded_run) + execute_args + ctx.run_args
+                return ctx.run_command(run_cmd)
+            return ctx.execute_binary(out_name, args=execute_args)
+
+        # 2. Template-driven interpreter / direct command
+        if command_template:
+            expanded_cmd = VariableSubstitutor.substitute_string(command_template, var_ctx)
+            cmd = shlex.split(expanded_cmd)
+            if ctx.extra_flags or preset_flags:
+                cmd = [cmd[0]] + ctx.extra_flags + preset_flags + cmd[1:]
+            cmd = cmd + execute_args + ctx.run_args
+            return ctx.run_command(cmd)
+
+        # 3. Legacy runner / subcommand / flags / type configuration
         runner = lang_config.get("runner")
         if not runner:
-            raise ConfigError(f"No runner specified for language: {lang_name}")
+            raise ConfigError(f"No runner, compile, or command specified for language: {lang_name}")
 
-        var_ctx = VariableSubstitutor.build_file_context(file_path=fp, out_path=out_name, out_dir=ctx.flags.get("out_dir") if ctx.flags else None)
         runner = VariableSubstitutor.substitute_string(runner, var_ctx)
         subcommand = lang_config.get("subcommand")
         if subcommand:
@@ -52,9 +88,7 @@ class CustomLanguageHandler(LanguageHandler):
 
         lang_type = lang_config.get("type", "interpreter")
         flags = VariableSubstitutor.substitute_list(lang_config.get("flags", []), var_ctx)
-        preset_flags = ctx.config.get_preset_flags(ctx.preset, lang_name) if ctx.config else []
-        execute_args = VariableSubstitutor.substitute_list(lang_config.get("arguments", []), var_ctx)
-        
+
         run_cmd = [runner]
         if subcommand:
             run_cmd.extend(shlex.split(subcommand))
@@ -74,11 +108,47 @@ class CustomLanguageHandler(LanguageHandler):
     def _execute_custom_multi(self, paths: List[Path], lang_config: dict, out_name: Path, ctx: ExecutionContext):
         """Execute multiple files based on config."""
         lang_name = lang_config.get("name", "unknown")
+        compile_template = lang_config.get("compile") or lang_config.get("build")
+        command_template = lang_config.get("command")
+        run_template = lang_config.get("run")
+
+        var_ctx = VariableSubstitutor.build_multi_file_context(
+            file_paths=paths,
+            out_path=out_name,
+            out_dir=ctx.flags.get("out_dir") if ctx.flags else None
+        )
+        preset_flags = ctx.config.get_preset_flags(ctx.preset, lang_name) if ctx.config else []
+        execute_args = VariableSubstitutor.substitute_list(lang_config.get("arguments", []), var_ctx)
+
+        # 1. Template-driven compiler for multi-file
+        if compile_template:
+            expanded_cmd = VariableSubstitutor.substitute_string(compile_template, var_ctx)
+            cmd = shlex.split(expanded_cmd)
+            if ctx.extra_flags or preset_flags:
+                cmd = [cmd[0]] + ctx.extra_flags + preset_flags + cmd[1:]
+            if not ctx.run_command(cmd, compiling=True):
+                return False
+            ctx.output_files.append(out_name)
+            if run_template and run_template.strip() not in ("${out}", "{out}", "$out", "out"):
+                expanded_run = VariableSubstitutor.substitute_string(run_template, var_ctx)
+                run_cmd = shlex.split(expanded_run) + execute_args + ctx.run_args
+                return ctx.run_command(run_cmd)
+            return ctx.execute_binary(out_name, args=execute_args)
+
+        # 2. Template-driven interpreter / direct command for multi-file
+        if command_template:
+            expanded_cmd = VariableSubstitutor.substitute_string(command_template, var_ctx)
+            cmd = shlex.split(expanded_cmd)
+            if ctx.extra_flags or preset_flags:
+                cmd = [cmd[0]] + ctx.extra_flags + preset_flags + cmd[1:]
+            cmd = cmd + execute_args + ctx.run_args
+            return ctx.run_command(cmd)
+
+        # 3. Legacy runner / subcommand / flags / type configuration
         runner = lang_config.get("runner")
         if not runner:
-            raise ConfigError(f"No runner specified for language: {lang_name}")
+            raise ConfigError(f"No runner, compile, or command specified for language: {lang_name}")
 
-        var_ctx = VariableSubstitutor.build_file_context(file_path=paths[0] if paths else None, out_path=out_name, out_dir=ctx.flags.get("out_dir") if ctx.flags else None)
         runner = VariableSubstitutor.substitute_string(runner, var_ctx)
         subcommand = lang_config.get("subcommand")
         if subcommand:
@@ -86,8 +156,6 @@ class CustomLanguageHandler(LanguageHandler):
 
         lang_type = lang_config.get("type", "interpreter")
         flags = VariableSubstitutor.substitute_list(lang_config.get("flags", []), var_ctx)
-        preset_flags = ctx.config.get_preset_flags(ctx.preset, lang_name) if ctx.config else []
-        execute_args = VariableSubstitutor.substitute_list(lang_config.get("arguments", []), var_ctx)
 
         run_cmd = [runner]
         if subcommand:

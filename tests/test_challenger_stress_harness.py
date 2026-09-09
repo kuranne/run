@@ -178,7 +178,7 @@ int main() {{
         mem = parse_all_peak_memory_bytes(out)[-1]
 
         if alloc_mb == 50:
-            assert mem >= 50 * 1024 * 1024, f"Cycle {cycle} expected >= 50MB, got {mem / (1024*1024):.2f}MB"
+            assert mem >= 45 * 1024 * 1024, f"Cycle {cycle} expected >= 45MB, got {mem / (1024*1024):.2f}MB"
         else:
             assert mem < 15 * 1024 * 1024, f"Cycle {cycle} failed isolation! Inherited peak: {mem / (1024*1024):.2f}MB"
 

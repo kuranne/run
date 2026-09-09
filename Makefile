@@ -66,9 +66,11 @@ venv:
 test:
 	@printf "$(GREEN)[ TEST ]$(RESET) Running test suite...\n"
 	@if [ -x "$(VENV_PY)" ]; then \
-		$(VENV_PY) -m pytest -p no:cacheprovider tests/; \
+		PYTHONPATH=src:. $(VENV_PY) -m pytest -p no:cacheprovider tests/; \
+	elif command -v pytest >/dev/null 2>&1; then \
+		PYTHONPATH=src:. pytest -p no:cacheprovider tests/; \
 	else \
-		$(PYTHON) -m pytest -p no:cacheprovider tests/; \
+		PYTHONPATH=src:. $(PYTHON) -m pytest -p no:cacheprovider tests/; \
 	fi
 
 ## completions: Generate shell completion files for zsh, bash, fish
