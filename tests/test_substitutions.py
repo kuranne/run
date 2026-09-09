@@ -27,9 +27,23 @@ def test_substitute_string_and_env(monkeypatch):
     s = VariableSubstitutor.substitute_string("run ${name} on port ${env:TEST_PORT} -> ${out}", context)
     assert s == "run app on port 9000 -> bin/app"
 
+    # Test alternative {var} syntax
+    s2 = VariableSubstitutor.substitute_string("run {name} on port {env:TEST_PORT} -> {out}", context)
+    assert s2 == "run app on port 9000 -> bin/app"
+
+def test_build_multi_file_context():
+    files = [Path("a.go"), Path("b.go"), Path("c space.go")]
+    out = Path("bin/app")
+    ctx = VariableSubstitutor.build_multi_file_context(files, out_path=out)
+    assert ctx["file"] == "a.go"
+    assert "a.go" in ctx["files"]
+    assert "b.go" in ctx["files"]
+    assert "'c space.go'" in ctx["files"] or '"c space.go"' in ctx["files"]
+    assert ctx["out"] == "bin/app"
+
 def test_substitute_list():
     context = {"out_dir": "target", "stem": "server"}
-    template = ["-o", "${out_dir}/${stem}.bin", "-DNAME=${stem}"]
+    template = ["-o", "${out_dir}/${stem}.bin", "-DNAME={stem}"]
     result = VariableSubstitutor.substitute_list(template, context)
 
     assert result == ["-o", "target/server.bin", "-DNAME=server"]
