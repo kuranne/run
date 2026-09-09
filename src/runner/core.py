@@ -77,9 +77,15 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
         ext = self.c_family_ext.union(self.java_ext).union(custom_exts)
         ignore_dirs = {'.git', '.venv', 'venv', 'env', 'node_modules', '.run_cache', 'build', 'target', '__pycache__'}
         start_level = len(path.absolute().parts)
+        from util.glob_matcher import match_path, match_extension
         
         for root, dirs, filenames in os.walk(path):
-            dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith('.')]
+            dirs[:] = [
+                d for d in dirs 
+                if d not in ignore_dirs 
+                and not d.startswith('.') 
+                and not any(match_path(Path(root) / d, pat, root_dir=path) for pat in self.exclude_dirs)
+            ]
             
             current_level = len(Path(root).absolute().parts)
             if max_depth is not None and (current_level - start_level > max_depth):
@@ -87,11 +93,15 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
                 continue
                 
             for filename in filenames:
-                if filename in self.exclude_files:
+                p = Path(root) / filename
+                if any(match_path(p, pat, root_dir=path) for pat in self.exclude_files):
                     continue
                     
-                p = Path(root) / filename
-                if p.suffix in ext and p.suffix not in self.exclude_exts:
+                matches_lang = (
+                    p.suffix in ext 
+                    or any(match_extension(p.suffix, e) for e in ext)
+                )
+                if matches_lang and not any(match_extension(p.suffix, pat) for pat in self.exclude_exts):
                     files.append(str(p))
                     
         return files
@@ -108,13 +118,14 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             name = fp.name
 
             from util.validator import Validator
+            from util.glob_matcher import match_path, match_extension
             if not Validator.validate_path(fp):
                 if not self.flags.get("force", False):
                     raise ConfigError(f"Refusing to process file with suspicious characters: {fp.name}. Use -f / --force to override.")
                 else:
                     Printer.warning(f"Processing file with suspicious characters due to --force: {fp.name}")
 
-            if name in self.exclude_files:
+            if any(match_path(fp, pat, root_dir=Path.cwd()) for pat in self.exclude_files):
                 if not self.flags.get("quiet", False):
                     Printer.action("SKIP", f"{name} is in exclude files", Colors.GRAY)
                 return True
@@ -123,7 +134,8 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             if not ext and fp.is_file():
                 ext = self._detect_language_from_shebang(fp)
             
-            if ext in self.exclude_exts:
+            raw_ext = fp.suffix or ext
+            if any(match_extension(raw_ext, pat) or match_extension(ext, pat) for pat in self.exclude_exts):
                 if not self.flags.get("quiet", False):
                     Printer.action("SKIP", f"{ext} file is exclude extensions", Colors.GRAY)
                 return

@@ -153,6 +153,14 @@ run --doctor
 ### Basic `Run.toml` Example
 
 ```toml
+[core]
+exclude_files = ["*.tmp.c", "tests/**/mock_*.c"]
+exclude_dirs = ["vendor*", "dist"]
+
+[projects.dotnet]
+file = "*.sln"
+command = "dotnet run --project ${file}"
+
 [runners]
 cpp = "clang++"
 c = "clang"

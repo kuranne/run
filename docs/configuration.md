@@ -32,33 +32,54 @@ java = "javac"
 
 ## Language Definitions (`[[languages]]`)
 
-Add custom programming languages or override built-in behavior:
+Add custom programming languages, configure template-driven compiler commands, or override built-in behavior:
 
 ```toml
+# Built-in Go language default (out-of-the-box)
 [[languages]]
-name = "c"
-extensions = [".c"]
-runner = "clang"
+name = "go"
+extensions = [".go"]
+compile = "go build -o ${out} ${files}"
 type = "compiler"
 
+# Custom compiled language with template variables
 [[languages]]
-name = "cpp"
-extensions = [".cpp", ".cc", ".cxx"]
-runner = "clang++"
+name = "csharp"
+extensions = [".cs"]
+compile = "csc /out:${out} ${files}"
+run = "mono ${out}"
 type = "compiler"
 
+# Interpreted language with subcommand and flags
 [[languages]]
-name = "kotlin"
-extensions = [".kt"]
+name = "kotlin_script"
+extensions = [".kts"]
 runner = "kotlinc"
-type = "compiler"
-
-[[languages]]
-name = "perl"
-extensions = [".pl"]
-runner = "perl"
+subcommand = "-script"
 type = "interpreter"
+
+# Simple compiled language definition
+[[languages]]
+name = "zig_c"
+extensions = [".c"]
+runner = "zig"
+subcommand = "cc"
+type = "compiler"
+flags = ["-Wall", "-O2"]
 ```
+
+### Template Substitution Variables
+When defining `compile`, `run`, or `command` in `[[languages]]` (or `[projects]`), the following variables are automatically expanded:
+
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| `${file}` / `{file}` | Path to the target source file | `main.go` |
+| `${files}` / `{files}` | All related source files (in multi-compile `-m` mode) | `add.go main.go parser.go` |
+| `${dir}` / `{dir}` | Directory containing the source file | `./src` |
+| `${stem}` / `{stem}` | Filename without extension | `main` |
+| `${out}` / `{out}` | Output executable path (respects `-o` / `--out-dir` / cache) | `main.out` |
+| `${flags}` / `{flags}` | Extra compiler/interpreter flags passed from CLI or presets | `-Wall -O3` |
+| `${args}` / `{args}` | Runtime program arguments passed after `--` | `arg1 arg2` |
 
 ## Build Presets (`[presets]`)
 
@@ -131,15 +152,76 @@ sandbox = true
 
 See [Sandboxed & Isolated Execution Guide](sandboxed_execution.md) for full details.
 
-## Project Exclusions (`[core]`)
+## Project Manifest Detectors (`[projects]`)
 
-Exclude specific files or extensions from multi-file compilation (`-m`) or auto-link (`--link-auto`):
+When `run` is executed without arguments, it scans the current directory and up to 3 parent directories for known project manifest files and runs the project.
+
+### Built-in Detectors
+Out of the box, `run` recognizes:
+- **Rust (`cargo`)**: `file = "Cargo.toml"`, `command = "cargo run -q"`
+- **Go (`go`)**: `file = "go.mod"`, `command = "go run ."`
+- **Zig (`zig`)**: `file = "build.zig"`, `command = "zig build run"`
+- **CMake (`cmake`)**: `file = "CMakeLists.txt"`, `build = "cmake -B build && cmake --build build"`, `run = "./build/app"`
+- **Make (`make`)**: `file = "Makefile"`, `command = "make"`
+
+### Custom Projects & Glob Manifests
+Define custom project workflows or use glob wildcards (e.g. `*.sln`, `*.csproj`):
+
+```toml
+# .NET Solution Runner with Glob Pattern
+[projects.dotnet]
+file = "*.sln"
+command = "dotnet run --project ${file}"
+
+# Gradle Project Runner
+[projects.gradle]
+file = "build.gradle"
+command = "./gradlew run"
+
+# Node.js / NPM Runner
+[projects.node]
+file = "package.json"
+command = "npm start"
+```
+
+> [!NOTE]
+> If a manifest glob matches multiple files in a directory (e.g., `App1.sln` and `App2.sln`), `run` logs an informational notice and deterministically selects the first file in alphabetical order.
+
+## Project Exclusions & Glob Matching (`[core]`)
+
+Control file and directory discovery across single runs, multi-file compilations (`-m`), and directory scans (`-L`):
 
 ```toml
 [core]
-exclude_files = ["benchmark.cpp", "test_private.cpp"]
-exclude_extensions = [".md", ".txt", ".tmp"]
+# Gitignore-style file patterns
+exclude_files = [
+    "benchmark.cpp",         # Exact filename anywhere
+    "*.tmp.c",               # Wildcard pattern matching filename anywhere
+    "tests/**/mock_*.c",     # Recursive path pattern matching nested files
+    "vendor/*"               # Single-level path wildcard
+]
+
+# Directory patterns pruned early during recursive directory traversal
+exclude_dirs = [
+    "vendor*",               # Prunes directories like vendor, vendor_libs
+    "dist",                  # Prunes dist directory
+    "tmp_*"                  # Prunes temporary build folders
+]
+
+# Flexible extension patterns
+exclude_extensions = [
+    ".md",                   # With leading dot
+    "txt",                   # Without leading dot
+    "*.bak",                 # Extension glob
+    ".tmp*"                  # Wildcard extensions (.tmp1, .tmp2, etc.)
+]
 ```
+
+### Matching Rules
+- **Filenames vs. Paths**: Patterns without slashes (e.g., `*.tmp`, `mock_*`) match against the filename directly. Patterns containing `/` (e.g., `tests/*`, `src/vendor/**`) match against relative paths from the workspace root.
+- **Recursive Wildcards**: Supports `*` within a single directory segment and `**` across multiple directory levels.
+- **Case Sensitivity**: All glob pattern matching is strictly case-sensitive across all operating systems.
+- **Directory Pruning**: Patterns in `exclude_dirs` prune directories during traversal, avoiding unnecessary search overhead in ignored subtrees.
 
 ## Templates (`[templates]`)
 
