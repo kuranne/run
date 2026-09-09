@@ -13,12 +13,17 @@
 # Global file discovery and filtering settings applied across all runners.
 # ------------------------------------------------------------------------------
 [core]
-# exclude_files (List[str]): Specific file names to skip when compiling or scanning with -L / -m.
-# exclude_files = ["test_private.cpp", "benchmark.cpp", "temp.c"]
+# exclude_files (List[str]): File names or glob patterns to skip when compiling or scanning with -L / -m.
+# Supports gitignore-style matching (e.g. "*.tmp", "mock_*", "tests/**/*.c", "vendor/*").
+# exclude_files = ["test_private.cpp", "*.tmp", "tests/**/*.mock.c"]
 
-# exclude_extensions (List[str]): File extensions to skip during directory scans.
-# Note: '.toml' and '.lock' are excluded by default.
-# exclude_extensions = [".md", ".txt", ".json", ".yaml", ".bak"]
+# exclude_dirs (List[str]): Directory names or glob patterns to skip during directory walks.
+# Default ignored: .git, .venv, venv, env, node_modules, .run_cache, build, target, __pycache__
+# exclude_dirs = ["vendor", "dist", "tmp_*"]
+
+# exclude_extensions (List[str]): File extensions or glob patterns to skip during directory scans.
+# Supports formats like ".md", "md", "*.bak", ".tmp*". (Note: '.toml' and '.lock' are excluded by default).
+# exclude_extensions = [".md", ".txt", ".json", ".yaml", "*.bak", ".tmp*"]
 
 # Enable sandbox globally for all executions
 # sandbox = true
@@ -80,6 +85,11 @@
 # [projects.node]
 # file = "package.json"
 # command = "npm start"
+
+# Example 4: .NET solution project runner with glob pattern
+# [projects.dotnet]
+# file = "*.sln"
+# command = "dotnet run --project ${file}"
 
 # ------------------------------------------------------------------------------
 # [runners]
