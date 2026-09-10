@@ -192,6 +192,12 @@ class ContainerSandbox:
             "-v", f"{cwd}:{cwd}:{mount_mode}",
             "-w", cwd
         ]
+
+        user_opt = sandbox_cfg.get("user")
+        if user_opt:
+            container_cmd.extend(["--user", str(user_opt)])
+        elif hasattr(os, "getuid") and hasattr(os, "getgid"):
+            container_cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
         
         if not net:
             container_cmd.extend(["--network", "none"])
@@ -296,6 +302,8 @@ class PersistentSandbox:
             "-v", f"{actual_cwd}:{actual_cwd}:rw",
             "-w", actual_cwd
         ]
+        if hasattr(os, "getuid") and hasattr(os, "getgid"):
+            cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
         if not net:
             cmd.extend(["--network", "none"])
         cmd.extend([image, "tail", "-f", "/dev/null"])

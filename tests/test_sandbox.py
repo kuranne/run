@@ -171,6 +171,21 @@ class TestContainerSandbox:
             if token == "-v" and idx + 1 < len(wrapped):
                 assert wrapped[idx + 1] != "/tmp:/tmp"
 
+    def test_wrap_command_user_uid_gid_mapping(self, monkeypatch):
+        monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
+        cmd = ["python", "main.py"]
+        wrapped = ContainerSandbox.wrap_command(cmd)
+        if hasattr(os, "getuid") and hasattr(os, "getgid"):
+            assert "--user" in wrapped
+            u_idx = wrapped.index("--user")
+            assert wrapped[u_idx + 1] == f"{os.getuid()}:{os.getgid()}"
+
+        # Test explicit user override in sandbox_cfg
+        wrapped_custom = ContainerSandbox.wrap_command(cmd, sandbox_cfg={"user": "1001:1001"})
+        assert "--user" in wrapped_custom
+        c_idx = wrapped_custom.index("--user")
+        assert wrapped_custom[c_idx + 1] == "1001:1001"
+
     def test_wrap_command_compiling_mount_mode(self, monkeypatch):
         monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
         cwd = os.getcwd()
