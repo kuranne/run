@@ -257,6 +257,49 @@ class TestContainerSandbox:
         assert "APP_ENV=production" in wrapped
         assert "PORT=8080" in wrapped
 
+    def test_wrap_command_assigns_container_name(self, monkeypatch):
+        monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
+        cmd = ["echo", "test"]
+        wrapped = ContainerSandbox.wrap_command(cmd)
+        assert "--name" in wrapped
+        name_idx = wrapped.index("--name")
+        assert wrapped[name_idx + 1].startswith("run-sandbox-")
+
+        # Custom container name
+        wrapped_custom = ContainerSandbox.wrap_command(cmd, sandbox_cfg={"container_name": "custom-box-42"})
+        assert "--name" in wrapped_custom
+        c_idx = wrapped_custom.index("--name")
+        assert wrapped_custom[c_idx + 1] == "custom-box-42"
+
+    def test_base_runner_kills_container_on_timeout(self, monkeypatch):
+        monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
+        killed_cmds = []
+
+        class TimeoutPopen:
+            returncode = None
+            def communicate(self, timeout=None):
+                raise spc.TimeoutExpired(cmd="docker run", timeout=timeout)
+            def kill(self):
+                pass
+            def wait(self, timeout=None):
+                pass
+
+        def fake_run(cmd, *args, **kwargs):
+            killed_cmds.append(cmd)
+            class FakeRes:
+                returncode = 0
+            return FakeRes()
+
+        monkeypatch.setattr(spc, "Popen", lambda *args, **kwargs: TimeoutPopen())
+        monkeypatch.setattr(spc, "run", fake_run)
+
+        runner = BaseRunner({"sandbox": True, "timeout": 1})
+        with pytest.raises(ExecutionError, match="timed out after 1 seconds"):
+            runner.run_command(["sleep", "10"])
+
+        # Assert docker kill <container-name> was issued
+        assert any(len(c) == 3 and c[0] == "docker" and c[1] == "kill" and c[2].startswith("run-sandbox-") for c in killed_cmds)
+
 
 class TestComposeSandbox:
     def test_compose_setup_and_teardown(self, monkeypatch):

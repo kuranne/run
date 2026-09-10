@@ -4,7 +4,8 @@ import subprocess as spc
 import time
 import shlex
 import tempfile
-from typing import List, Dict, Optional, Any
+import uuid
+from typing import List, Dict, Optional, Any, Tuple
 from pathlib import Path
 from util.config import Config
 from util.output import Printer, Colors
@@ -47,6 +48,7 @@ class BaseRunner:
         
         excludes = self.config.get_exclude()
         self.output_files: List[Path] = []
+        self._active_container: Optional[Tuple[str, str]] = None
         self.exclude_exts: List[str] = ['.toml', '.lock'] + excludes.get("extensions", [])
         self.exclude_files: List[str] = ['.git', '.gitignore'] + excludes.get("files", [])
         self.exclude_dirs: List[str] = ['.git', '__pycache__', 'venv', '.venv', 'build', 'bin', 'obj', 'node_modules', '.run_cache'] + excludes.get("dirs", [])
@@ -186,6 +188,13 @@ class BaseRunner:
                 svc = sandbox_cfg.get("compose_service", "app")
                 t_list = ComposeSandbox.wrap_command(t_list, sandbox_cfg["compose"], svc, custom_env=custom_env)
             else:
+                cname = f"run-sandbox-{uuid.uuid4().hex[:12]}"
+                sandbox_cfg["container_name"] = cname
+                try:
+                    eng = ContainerSandbox._get_engine()
+                    self._active_container = (eng, cname)
+                except Exception:
+                    pass
                 t_list = ContainerSandbox.wrap_command(
                     t_list, 
                     net=self.flags.get("sandbox_net", False), 
@@ -271,6 +280,13 @@ class BaseRunner:
             return True
             
         except spc.TimeoutExpired:
+            if self._active_container:
+                eng, cname = self._active_container
+                try:
+                    spc.run([eng, "kill", cname], capture_output=True, timeout=5)
+                except Exception:
+                    pass
+                self._active_container = None
             if p is not None:
                 try:
                     p.kill()
@@ -285,6 +301,8 @@ class BaseRunner:
         except FileNotFoundError:
             cmd_name = cmd[0] if isinstance(cmd, list) and cmd else str(cmd)
             raise ExecutionError(f"Command '{cmd_name}' not found.")
+        finally:
+            self._active_container = None
         
     def _compile_c_family(self, fp: Path):
         """

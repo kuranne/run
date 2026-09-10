@@ -1,6 +1,7 @@
 import re
 import os
 import sys
+import uuid
 import shutil
 import hashlib
 import signal
@@ -207,6 +208,9 @@ class ContainerSandbox:
         
         if not net:
             container_cmd.extend(["--network", "none"])
+
+        container_name = sandbox_cfg.get("container_name") or f"run-sandbox-{uuid.uuid4().hex[:12]}"
+        container_cmd.extend(["--name", container_name])
 
         if custom_env:
             for k, v in custom_env.items():
