@@ -248,6 +248,15 @@ class TestContainerSandbox:
         with pytest.raises(ConfigError, match="Invalid container image"):
             ContainerSandbox.wrap_command(["echo", "1"], sandbox_cfg={"image": "--privileged ubuntu"})
 
+    def test_wrap_command_forwards_custom_env(self, monkeypatch):
+        monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
+        cmd = ["python", "app.py"]
+        custom = {"APP_ENV": "production", "PORT": "8080"}
+        wrapped = ContainerSandbox.wrap_command(cmd, custom_env=custom)
+        assert "-e" in wrapped
+        assert "APP_ENV=production" in wrapped
+        assert "PORT=8080" in wrapped
+
 
 class TestComposeSandbox:
     def test_compose_setup_and_teardown(self, monkeypatch):

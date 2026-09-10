@@ -179,7 +179,13 @@ class ContainerSandbox:
         return clean_image
 
     @staticmethod
-    def wrap_command(cmd: List[str], net: bool = False, compiling: bool = False, sandbox_cfg: Optional[Dict[str, Any]] = None) -> List[str]:
+    def wrap_command(
+        cmd: List[str],
+        net: bool = False,
+        compiling: bool = False,
+        sandbox_cfg: Optional[Dict[str, Any]] = None,
+        custom_env: Optional[Dict[str, str]] = None,
+    ) -> List[str]:
         sandbox_cfg = sandbox_cfg or {}
         engine = ContainerSandbox._get_engine()
         cwd = os.getcwd()
@@ -201,6 +207,10 @@ class ContainerSandbox:
         
         if not net:
             container_cmd.extend(["--network", "none"])
+
+        if custom_env:
+            for k, v in custom_env.items():
+                container_cmd.extend(["-e", f"{k}={v}"])
             
         if sandbox_cfg.get("dockerfile"):
             base_image = ContainerSandbox._build_dockerfile(sandbox_cfg["dockerfile"], engine)
@@ -264,8 +274,13 @@ class ComposeSandbox:
             pass
         
     @staticmethod
-    def wrap_command(cmd: List[str], compose_file: str, service: str) -> List[str]:
-        return ["docker", "compose", "-f", compose_file, "exec", "-w", os.getcwd(), service] + cmd
+    def wrap_command(cmd: List[str], compose_file: str, service: str, custom_env: Optional[Dict[str, str]] = None) -> List[str]:
+        exec_cmd = ["docker", "compose", "-f", compose_file, "exec"]
+        if custom_env:
+            for k, v in custom_env.items():
+                exec_cmd.extend(["-e", f"{k}={v}"])
+        exec_cmd.extend(["-w", os.getcwd(), service] + cmd)
+        return exec_cmd
 
 
 class PersistentSandbox:
@@ -324,7 +339,12 @@ class PersistentSandbox:
             spc.run([cls._engine, "stop", cid], capture_output=True)
             
     @classmethod
-    def wrap_command(cls, cmd: List[str]) -> List[str]:
+    def wrap_command(cls, cmd: List[str], custom_env: Optional[Dict[str, str]] = None) -> List[str]:
         if not cls._container_id:
             raise ExecutionError("Persistent container is not running.")
-        return [cls._engine, "exec", "-w", os.getcwd(), cls._container_id] + cmd
+        exec_cmd = [cls._engine, "exec"]
+        if custom_env:
+            for k, v in custom_env.items():
+                exec_cmd.extend(["-e", f"{k}={v}"])
+        exec_cmd.extend(["-w", os.getcwd(), cls._container_id] + cmd)
+        return exec_cmd

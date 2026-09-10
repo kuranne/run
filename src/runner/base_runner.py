@@ -181,16 +181,17 @@ class BaseRunner:
             sandbox_cfg = self.config.get_sandbox_config() if hasattr(self, 'config') else {}
             
             if PersistentSandbox._container_id:
-                t_list = PersistentSandbox.wrap_command(t_list)
+                t_list = PersistentSandbox.wrap_command(t_list, custom_env=custom_env)
             elif sandbox_cfg.get("compose"):
                 svc = sandbox_cfg.get("compose_service", "app")
-                t_list = ComposeSandbox.wrap_command(t_list, sandbox_cfg["compose"], svc)
+                t_list = ComposeSandbox.wrap_command(t_list, sandbox_cfg["compose"], svc, custom_env=custom_env)
             else:
                 t_list = ContainerSandbox.wrap_command(
                     t_list, 
                     net=self.flags.get("sandbox_net", False), 
                     compiling=compiling, 
-                    sandbox_cfg=sandbox_cfg
+                    sandbox_cfg=sandbox_cfg,
+                    custom_env=custom_env
                 )
             target_cmd = shlex.join(t_list) if use_shell else t_list
         elif self.flags.get("restrict"):
