@@ -28,10 +28,15 @@ class NativeRestrictor:
                 "--dev", "/dev",
                 "--proc", "/proc",
                 "--tmpfs", "/tmp",
+                "--tmpfs", "/home",
+                "--tmpfs", "/root",
+                "--tmpfs", "/run",
+                "--tmpfs", "/sys",
                 "--unshare-user",
                 "--unshare-ipc",
                 "--unshare-pid",
                 "--unshare-uts",
+                "--unshare-cgroup-try",
                 "--die-with-parent",
                 "--new-session",
             ]
@@ -44,6 +49,7 @@ class NativeRestrictor:
             else:
                 bwrap_cmd.extend(["--ro-bind", actual_cwd, actual_cwd])
             bwrap_cmd.extend(["--chdir", actual_cwd])
+            bwrap_cmd.append("--")
             bwrap_cmd.extend(cmd)
             return bwrap_cmd
         elif sys.platform == "darwin":

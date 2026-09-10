@@ -24,12 +24,18 @@ class TestNativeRestrictor:
         assert "--unshare-ipc" in wrapped
         assert "--unshare-pid" in wrapped
         assert "--unshare-uts" in wrapped
+        assert "--unshare-cgroup-try" in wrapped
         assert "--die-with-parent" in wrapped
         assert "--new-session" in wrapped
         assert "--unshare-net" in wrapped
         assert "--bind" in wrapped
         assert "/workspace" in wrapped
+        assert wrapped[-5] == "--"
         assert wrapped[-4:] == cmd
+
+        for masked in ["/home", "/root", "/run", "/sys"]:
+            idx = wrapped.index(masked)
+            assert wrapped[idx - 1] == "--tmpfs"
 
     def test_bwrap_network_isolation_toggle(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "linux")
