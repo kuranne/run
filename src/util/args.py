@@ -50,7 +50,7 @@ def args(__version__: str):
     build_group.add_argument("--asan", action="store_true", help="Compile with AddressSanitizer and UndefinedBehaviorSanitizer")
     build_group.add_argument("--tsan", action="store_true", help="Compile with ThreadSanitizer")
     build_group.add_argument("--sanitize", type=str, help="Compile with custom sanitizer (e.g. memory, leak)")
-    build_group.add_argument("--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files (optional depth)")
+    build_group.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files (optional depth)")
     build_group.add_argument("--flags", type=str, default="", help="Compiler or interpreter flags")
     build_group.add_argument("--compiler", type=str, help="Compiler or interpreter override (e.g. clang++)")
     build_group.add_argument("--out-dir", type=str, help="Output directory for compiled binaries")
@@ -106,10 +106,10 @@ def args(__version__: str):
                 i += 1
             else:
                 processed_args.append(arg)
-        elif arg == "--link-auto" and i + 1 < len(cli_argv):
+        elif arg in ("-L", "--link-auto") and i + 1 < len(cli_argv):
             next_arg = cli_argv[i + 1]
             if next_arg.lstrip("-").isdigit():
-                processed_args.append(arg)
+                processed_args.append("--link-auto")
                 processed_args.append(next_arg)
                 i += 1
             elif not next_arg.startswith("-"):

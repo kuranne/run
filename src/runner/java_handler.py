@@ -76,4 +76,4 @@ class JavaHandler:
         sep = ";" if not self.is_posix else ":"
         cp_list = [str(d) for d in parent_dirs] + ["."]
         cp = sep.join(dict.fromkeys(cp_list))
-        self.run_command(["java", "-cp", cp, main_class] + self.run_args)
+        return self.run_command(["java", "-cp", cp, main_class] + self.run_args)

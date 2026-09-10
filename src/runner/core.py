@@ -194,17 +194,16 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
         if lang_config:
             main_candidate = next((p for p in paths if p.stem.lower() == "main"), paths[0])
             out_name = self.get_executable_path(main_candidate)
-            self._execute_custom_multi(paths, lang_config, out_name, self._get_context())
-            return
+            return self._execute_custom_multi(paths, lang_config, out_name, self._get_context())
 
         # 2. Built-in multi-file check (C/C++ or Java)
         c_sources = [p for p in paths if p.suffix in self.c_family_ext]
         java_sources = [p for p in paths if p.suffix in self.java_ext]
         
         if c_sources:
-            self._handle_multi_c_family(c_sources, paths)
+            return self._handle_multi_c_family(c_sources, paths)
         elif java_sources:
-            self._handle_multi_java(java_sources)
+            return self._handle_multi_java(java_sources)
         else:
             raise ConfigError("No supported files found for multi-compile")
 

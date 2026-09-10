@@ -169,3 +169,151 @@ def test_batch_run_preserves_runner_flags(tmp_path):
     assert runner._buffered_stdin == "orig_buffered"
 
 
+def test_batch_run_multi_c_files(tmp_path, capfd):
+    """Test batch testcases runner with multiple C source files (-m)."""
+    header = tmp_path / "math_lib.h"
+    header.write_text("int add_numbers(int a, int b);\n")
+
+    math_c = tmp_path / "math_lib.c"
+    math_c.write_text("""#include "math_lib.h"
+int add_numbers(int a, int b) {
+    return a + b;
+}
+""")
+
+    main_c = tmp_path / "main.c"
+    main_c.write_text("""#include <stdio.h>
+#include "math_lib.h"
+
+int main(void) {
+    int a, b;
+    if (scanf("%d %d", &a, &b) == 2) {
+        printf("%d\\n", add_numbers(a, b));
+    }
+    return 0;
+}
+""")
+
+    test_dir = tmp_path / "tests"
+    test_dir.mkdir()
+    (test_dir / "01.in").write_text("10 20\n")
+    (test_dir / "01.out").write_text("30\n")
+    (test_dir / "02.in").write_text("100 250\n")
+    (test_dir / "02.out").write_text("350\n")
+
+    runner = CompilerRunner({"dry_run": False})
+    try:
+        success = TestcasesRunner.run_tests(runner, test_dir, [main_c, math_c, header], is_multi=True)
+        assert success is True
+        out, _ = capfd.readouterr()
+        assert "Passed: 2/2 (100.0%)" in out
+    finally:
+        runner.cleanup()
+
+
+def test_batch_run_multi_cpm_detection(tmp_path, capfd):
+    """Test CPM locates entry point when source files are provided in reverse order."""
+    header = tmp_path / "calc.h"
+    header.write_text("int multiply(int a, int b);\n")
+
+    calc_c = tmp_path / "calc.c"
+    calc_c.write_text("""#include "calc.h"
+int multiply(int a, int b) {
+    return a * b;
+}
+""")
+
+    main_c = tmp_path / "app_main.c"
+    main_c.write_text("""#include <stdio.h>
+#include "calc.h"
+
+int main(void) {
+    int x, y;
+    if (scanf("%d %d", &x, &y) == 2) {
+        printf("%d\\n", multiply(x, y));
+    }
+    return 0;
+}
+""")
+
+    test_dir = tmp_path / "tests"
+    test_dir.mkdir()
+    (test_dir / "01.in").write_text("6 7\n")
+    (test_dir / "01.out").write_text("42\n")
+
+    runner = CompilerRunner({"dry_run": False})
+    try:
+        # Pass non-main file first, without explicit is_multi=True
+        success = TestcasesRunner.run_tests(runner, test_dir, [calc_c, header, main_c])
+        assert success is True
+        out, _ = capfd.readouterr()
+        assert "Passed: 1/1 (100.0%)" in out
+    finally:
+        runner.cleanup()
+
+
+def test_batch_run_multi_compilation_failure(tmp_path, capfd):
+    """Test batch test runner gracefully fails when multi-file compilation encounters errors."""
+    bad_c = tmp_path / "broken.c"
+    bad_c.write_text("syntax error here !!!")
+
+    main_c = tmp_path / "main.c"
+    main_c.write_text("""#include <stdio.h>
+int main(void) {
+    return 0;
+}
+""")
+
+    test_dir = tmp_path / "tests"
+    test_dir.mkdir()
+    (test_dir / "01.in").write_text("1\n")
+    (test_dir / "01.out").write_text("1\n")
+
+    runner = CompilerRunner({"dry_run": False})
+    try:
+        success = TestcasesRunner.run_tests(runner, test_dir, [main_c, bad_c], is_multi=True)
+        assert success is False
+    finally:
+        runner.cleanup()
+
+
+def test_batch_run_with_auto_link_cli(tmp_path, monkeypatch, capfd):
+    """Test CLI integration when combining -L and --test-dir."""
+    header = tmp_path / "helper.h"
+    header.write_text("int square(int x);\n")
+
+    helper_c = tmp_path / "helper.c"
+    helper_c.write_text("""#include "helper.h"
+int square(int x) {
+    return x * x;
+}
+""")
+
+    main_c = tmp_path / "main.c"
+    main_c.write_text("""#include <stdio.h>
+#include "helper.h"
+
+int main(void) {
+    int n;
+    if (scanf("%d", &n) == 1) {
+        printf("%d\\n", square(n));
+    }
+    return 0;
+}
+""")
+
+    test_dir = tmp_path / "tests"
+    test_dir.mkdir()
+    (test_dir / "01.in").write_text("9\n")
+    (test_dir / "01.out").write_text("81\n")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["run", "-L", "--test-dir", str(test_dir)])
+
+    from main import main
+    exit_code = main()
+    assert exit_code == 0
+    out, _ = capfd.readouterr()
+    assert "Passed: 1/1 (100.0%)" in out
+
+

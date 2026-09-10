@@ -46,6 +46,14 @@ def test_args_link_auto(monkeypatch):
     parsed = args("1.0.0")
     assert parsed.link_auto == 2
 
+    monkeypatch.setattr(sys, 'argv', ['run', '-L'])
+    parsed = args("1.0.0")
+    assert parsed.link_auto == -1
+
+    monkeypatch.setattr(sys, 'argv', ['run', '-L', '3'])
+    parsed = args("1.0.0")
+    assert parsed.link_auto == 3
+
 def test_args_verbose(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['run', '-v'])
     parsed = args("1.0.0")

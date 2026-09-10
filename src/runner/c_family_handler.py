@@ -142,4 +142,5 @@ class CFamilyHandler:
         
         if self.run_command(link_cmd, compiling=True):
             self.output_files.append(out_name)
-            self._execute_binary(bin_path=out_name)
+            return self._execute_binary(bin_path=out_name)
+        return False

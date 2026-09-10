@@ -165,11 +165,26 @@ def main():
             # Check if --test-dir is provided
             if args.test_dir:
                 from runner.test_runner import TestcasesRunner
+
+                # Check for -L auto-link mode when no files are explicitly given
+                if not args.files and args.link_auto is not None:
+                    depth = args.link_auto if args.link_auto != -1 else None
+                    src_files = runner.find_source_files(Path("."), max_depth=depth)
+                    if not src_files:
+                        raise ConfigError(f"No supported source files found via -L auto-search (depth={depth}).")
+                    Printer.info(f"Auto-found {len(src_files)} source files: {src_files}")
+                    args.files = src_files
+                    args.multi = True
+
                 if not args.files:
                     raise ConfigError("A source file must be specified with --test-dir (e.g. run solution.cpp --test-dir ./tests/)")
-                target = Path(args.files[0])
+
+                is_multi = bool(args.multi or len(args.files) > 1)
+                targets = [Path(f) for f in args.files]
+                target_arg = targets if is_multi else targets[0]
+
                 try:
-                    success = TestcasesRunner.run_tests(runner, Path(args.test_dir), target)
+                    success = TestcasesRunner.run_tests(runner, Path(args.test_dir), target_arg, is_multi=is_multi)
                     if not success and not args.watch:
                         sys.exit(1)
                 finally:
