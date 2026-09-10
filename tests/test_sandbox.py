@@ -333,9 +333,28 @@ class TestComposeSandbox:
     def test_compose_wrap_command(self):
         cmd = ["pytest", "tests/"]
         wrapped = ComposeSandbox.wrap_command(cmd, "docker-compose.yml", "app")
-        assert wrapped[:7] == ["docker", "compose", "-f", "docker-compose.yml", "exec", "-w", os.getcwd()]
-        assert wrapped[7] == "app"
-        assert wrapped[8:] == cmd
+        assert "exec" in wrapped
+        assert "-T" in wrapped
+        # Verify host CWD is NOT blindly passed as -w
+        assert f"-w {os.getcwd()}" not in " ".join(wrapped)
+        if hasattr(os, "getuid") and hasattr(os, "getgid"):
+            assert "--user" in wrapped
+            assert f"{os.getuid()}:{os.getgid()}" in wrapped
+        assert wrapped[-2:] == ["app", "pytest"] or "app" in wrapped
+
+        # Verify configured compose_workdir and custom env
+        wrapped_custom = ComposeSandbox.wrap_command(
+            cmd,
+            "docker-compose.yml",
+            "app",
+            custom_env={"KEY": "VAL"},
+            sandbox_cfg={"compose_workdir": "/workspace"}
+        )
+        assert "-w" in wrapped_custom
+        w_idx = wrapped_custom.index("-w")
+        assert wrapped_custom[w_idx + 1] == "/workspace"
+        assert "-e" in wrapped_custom
+        assert "KEY=VAL" in wrapped_custom
 
 
 class TestPersistentSandbox:

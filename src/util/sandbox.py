@@ -278,12 +278,33 @@ class ComposeSandbox:
             pass
         
     @staticmethod
-    def wrap_command(cmd: List[str], compose_file: str, service: str, custom_env: Optional[Dict[str, str]] = None) -> List[str]:
-        exec_cmd = ["docker", "compose", "-f", compose_file, "exec"]
+    def wrap_command(
+        cmd: List[str],
+        compose_file: str,
+        service: str,
+        workdir: Optional[str] = None,
+        custom_env: Optional[Dict[str, str]] = None,
+        sandbox_cfg: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
+        sandbox_cfg = sandbox_cfg or {}
+        exec_cmd = ["docker", "compose", "-f", compose_file, "exec", "-T"]
+        
+        user_opt = sandbox_cfg.get("user")
+        if user_opt:
+            exec_cmd.extend(["--user", str(user_opt)])
+        elif hasattr(os, "getuid") and hasattr(os, "getgid"):
+            exec_cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
+
         if custom_env:
             for k, v in custom_env.items():
                 exec_cmd.extend(["-e", f"{k}={v}"])
-        exec_cmd.extend(["-w", os.getcwd(), service] + cmd)
+
+        target_workdir = workdir or sandbox_cfg.get("compose_workdir")
+        if target_workdir:
+            exec_cmd.extend(["-w", str(target_workdir)])
+
+        exec_cmd.append(service)
+        exec_cmd.extend(cmd)
         return exec_cmd
 
 

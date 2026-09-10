@@ -186,7 +186,13 @@ class BaseRunner:
                 t_list = PersistentSandbox.wrap_command(t_list, custom_env=custom_env)
             elif sandbox_cfg.get("compose"):
                 svc = sandbox_cfg.get("compose_service", "app")
-                t_list = ComposeSandbox.wrap_command(t_list, sandbox_cfg["compose"], svc, custom_env=custom_env)
+                t_list = ComposeSandbox.wrap_command(
+                    t_list,
+                    sandbox_cfg["compose"],
+                    svc,
+                    custom_env=custom_env,
+                    sandbox_cfg=sandbox_cfg
+                )
             else:
                 cname = f"run-sandbox-{uuid.uuid4().hex[:12]}"
                 sandbox_cfg["container_name"] = cname
