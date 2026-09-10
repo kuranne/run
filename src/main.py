@@ -231,12 +231,10 @@ def main():
         
         if is_sandbox_enabled:
             from util.sandbox import ComposeSandbox, PersistentSandbox, ContainerSandbox
-            import atexit
             
             if sandbox_cfg.get("compose"):
                 compose_file = sandbox_cfg["compose"]
                 ComposeSandbox.setup(compose_file)
-                atexit.register(ComposeSandbox.teardown, compose_file)
             elif args.watch:
                 engine = ContainerSandbox._get_engine()
                 
@@ -263,8 +261,10 @@ def main():
                         elif args.files[0].endswith(".rb"):
                             base_image = "ruby:latest"
                             
-                PersistentSandbox.start(engine, base_image, net=args.sandbox_net, cwd=os.getcwd())
-                atexit.register(PersistentSandbox.stop)
+                compiled_exts = {".c", ".cpp", ".cc", ".cxx", ".rs", ".java", ".go"}
+                is_compiled = any(Path(f).suffix.lower() in compiled_exts for f in (args.files or []))
+                writable = is_compiled or bool(sandbox_cfg.get("writable", False))
+                PersistentSandbox.start(engine, base_image, net=args.sandbox_net, cwd=os.getcwd(), writable=writable)
 
         if args.watch:
             import time

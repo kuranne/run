@@ -330,16 +330,78 @@ class PersistentSandbox:
             cls._cleanup_registered = True
 
     @classmethod
-    def start(cls, engine: str, image: str, net: bool = False, cwd: str = ""):
+    def reap_orphaned_containers(cls, engine: Optional[str] = None) -> int:
+        """
+        Detect and terminate orphaned sleeper containers whose parent process has died.
+
+        Args:
+            engine (Optional[str]): Container engine ('docker' or 'podman'). If None, auto-detects.
+
+        Returns:
+            int: Number of orphaned containers reaped.
+        """
+        try:
+            eng = engine or ContainerSandbox._get_engine()
+        except Exception:
+            return 0
+
+        reaped_count = 0
+        try:
+            res = spc.run(
+                [eng, "ps", "-a", "--filter", "label=run.sandbox.persistent=true", "--format", "{{.ID}} {{.Label \"run.sandbox.pid\"}}"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if res.returncode != 0 or not res.stdout.strip():
+                return 0
+
+            for line in res.stdout.strip().splitlines():
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                cid = parts[0]
+                pid_str = parts[1] if len(parts) > 1 else ""
+
+                should_reap = False
+                if not pid_str or not pid_str.isdigit():
+                    should_reap = True
+                else:
+                    target_pid = int(pid_str)
+                    if target_pid <= 0 or target_pid == os.getpid():
+                        should_reap = False
+                    else:
+                        try:
+                            os.kill(target_pid, 0)
+                            should_reap = False
+                        except OSError:
+                            should_reap = True
+
+                if should_reap:
+                    spc.run([eng, "rm", "-f", cid], capture_output=True, timeout=5)
+                    reaped_count += 1
+        except Exception:
+            pass
+
+        return reaped_count
+
+    @classmethod
+    def start(cls, engine: str, image: str, net: bool = False, cwd: str = "", writable: bool = True):
         cls._register_cleanup()
+        cls.reap_orphaned_containers(engine)
         image = ContainerSandbox.validate_image_name(image)
         actual_cwd = cwd or os.getcwd()
+        mount_mode = "rw" if writable else "ro"
+        container_name = f"run-persist-{os.getpid()}-{uuid.uuid4().hex[:6]}"
         Printer.info(f"Starting persistent sandbox container ({image})...")
         cmd = [
             engine, "run", "-d", "--rm",
+            "--name", container_name,
+            "--label", "run.sandbox.persistent=true",
+            "--label", f"run.sandbox.pid={os.getpid()}",
             "--security-opt=no-new-privileges",
             "--cap-drop=ALL",
-            "-v", f"{actual_cwd}:{actual_cwd}:rw",
+            "-v", f"{actual_cwd}:{actual_cwd}:{mount_mode}",
             "-w", actual_cwd
         ]
         if hasattr(os, "getuid") and hasattr(os, "getgid"):

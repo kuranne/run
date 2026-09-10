@@ -372,9 +372,12 @@ class TestPersistentSandbox:
         monkeypatch.setattr(spc, "run", fake_run)
         PersistentSandbox.start("docker", "ubuntu:latest", net=False, cwd="/workspace")
         assert PersistentSandbox._container_id == "container-id-abc"
-        assert "--security-opt=no-new-privileges" in calls[0]
-        assert "--cap-drop=ALL" in calls[0]
-        assert "/tmp:/tmp" not in calls[0]
+        run_call = next(c for c in calls if "run" in c)
+        assert "--security-opt=no-new-privileges" in run_call
+        assert "--cap-drop=ALL" in run_call
+        assert "--label" in run_call
+        assert "run.sandbox.persistent=true" in run_call
+        assert "/tmp:/tmp" not in run_call
 
         wrapped = PersistentSandbox.wrap_command(["echo", "1"])
         assert wrapped == ["docker", "exec", "-w", os.getcwd(), "container-id-abc", "echo", "1"]
@@ -382,6 +385,40 @@ class TestPersistentSandbox:
         PersistentSandbox.stop()
         assert PersistentSandbox._container_id is None
         assert calls[-1] == ["docker", "stop", "container-id-abc"]
+
+    def test_persistent_mount_ro_for_non_compiled(self, monkeypatch):
+        calls = []
+        class FakeRun:
+            returncode = 0
+            stdout = "container-id-ro\n"
+            stderr = ""
+
+        monkeypatch.setattr(spc, "run", lambda cmd, *args, **kwargs: (calls.append(cmd), FakeRun())[1])
+        PersistentSandbox.start("docker", "python:3-slim", cwd="/workspace", writable=False)
+        run_call = next(c for c in calls if "run" in c)
+        assert "/workspace:/workspace:ro" in run_call
+        PersistentSandbox.stop()
+
+    def test_persistent_reap_orphaned_containers(self, monkeypatch):
+        rm_calls = []
+        # Return two containers: one belonging to a dead PID (999999), one belonging to self (os.getpid())
+        ps_output = f"cid-dead 999999\ncid-self {os.getpid()}\n"
+        
+        class FakeRun:
+            returncode = 0
+            stdout = ps_output
+            stderr = ""
+
+        def fake_run(cmd, *args, **kwargs):
+            if "rm" in cmd:
+                rm_calls.append(cmd)
+            return FakeRun()
+
+        monkeypatch.setattr(spc, "run", fake_run)
+        reaped = PersistentSandbox.reap_orphaned_containers("docker")
+        assert reaped == 1
+        assert len(rm_calls) == 1
+        assert rm_calls[0] == ["docker", "rm", "-f", "cid-dead"]
 
     def test_persistent_wrap_without_start_raises_error(self):
         PersistentSandbox._container_id = None
