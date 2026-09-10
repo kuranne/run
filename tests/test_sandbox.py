@@ -24,12 +24,18 @@ class TestNativeRestrictor:
         assert "--unshare-ipc" in wrapped
         assert "--unshare-pid" in wrapped
         assert "--unshare-uts" in wrapped
+        assert "--unshare-cgroup-try" in wrapped
         assert "--die-with-parent" in wrapped
         assert "--new-session" in wrapped
         assert "--unshare-net" in wrapped
         assert "--bind" in wrapped
         assert "/workspace" in wrapped
+        assert wrapped[-5] == "--"
         assert wrapped[-4:] == cmd
+
+        for masked in ["/home", "/root", "/run", "/sys"]:
+            idx = wrapped.index(masked)
+            assert wrapped[idx - 1] == "--tmpfs"
 
     def test_bwrap_network_isolation_toggle(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "linux")
@@ -49,18 +55,59 @@ class TestNativeRestrictor:
         with pytest.raises(ConfigError, match="Bubblewrap.*not found"):
             NativeRestrictor.wrap_command(["ls"], cwd="/app")
 
-    def test_macos_restriction_safety(self, monkeypatch):
+    def test_macos_restriction_raises_config_error(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "darwin")
-        cmd = ["ls", "-la"]
-        wrapped = NativeRestrictor.wrap_command(cmd)
-        assert wrapped == cmd
+        with pytest.raises(ConfigError, match="only supported on Linux.*Bubblewrap"):
+            NativeRestrictor.wrap_command(["ls", "-la"])
 
-        # Execute macos_preexec_fn safely without exceptions
-        NativeRestrictor.macos_preexec_fn()
+    def test_base_runner_restrict_on_macos_raises_config_error(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        from runner.base_runner import BaseRunner
+        runner = BaseRunner({"restrict": True})
+        with pytest.raises(ConfigError, match="only supported on Linux"):
+            runner.run_command(["echo", "hello"], compiling=False)
+
+    def test_bwrap_compiling_vs_executing_mount_mode(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/bwrap" if cmd == "bwrap" else None)
+
+        compile_cmd = ["gcc", "-c", "main.c", "-o", "main.o"]
+        wrapped_compile = NativeRestrictor.wrap_command(compile_cmd, cwd="/app", compiling=True)
+        assert "--bind" in wrapped_compile
+        assert "/app" in wrapped_compile
+
+        exec_cmd = ["./main.out"]
+        wrapped_exec = NativeRestrictor.wrap_command(exec_cmd, cwd="/app", compiling=False)
+        assert "--ro-bind" in wrapped_exec
+        assert "/app" in wrapped_exec
+
+    def test_base_runner_restrict_enforces_sandbox_on_compilation(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/bwrap" if cmd == "bwrap" else None)
+        from runner.base_runner import BaseRunner
+
+        captured_cmds = []
+
+        class FakeP:
+            returncode = 0
+
+            def communicate(self, timeout=None):
+                return (b"", b"")
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return FakeP()
+
+        monkeypatch.setattr(spc, "Popen", fake_popen)
+        runner = BaseRunner({"restrict": True})
+        runner.run_command(["gcc", "-c", "main.c"], compiling=True)
+        assert len(captured_cmds) == 1
+        assert captured_cmds[0][0] == "bwrap"
+        assert "--bind" in captured_cmds[0]
 
     def test_unsupported_os_raises_config_error(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "win32")
-        with pytest.raises(ConfigError, match="not supported on this OS"):
+        with pytest.raises(ConfigError, match="only supported on Linux"):
             NativeRestrictor.wrap_command(["dir"])
 
 

@@ -193,14 +193,11 @@ class BaseRunner:
                     sandbox_cfg=sandbox_cfg
                 )
             target_cmd = shlex.join(t_list) if use_shell else t_list
-        elif not compiling and self.flags.get("restrict"):
+        elif self.flags.get("restrict"):
             from util.sandbox import NativeRestrictor
-            if sys.platform == "darwin":
-                sandbox_preexec_fn = NativeRestrictor.macos_preexec_fn
-            else:
-                t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
-                t_list = NativeRestrictor.wrap_command(t_list, net=self.flags.get("sandbox_net", False), compiling=compiling)
-                target_cmd = shlex.join(t_list) if use_shell else t_list
+            t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
+            t_list = NativeRestrictor.wrap_command(t_list, net=self.flags.get("sandbox_net", False), compiling=compiling)
+            target_cmd = shlex.join(t_list) if use_shell else t_list
 
         spc_kwargs = {
             "shell": use_shell,

@@ -28,10 +28,15 @@ class NativeRestrictor:
                 "--dev", "/dev",
                 "--proc", "/proc",
                 "--tmpfs", "/tmp",
+                "--tmpfs", "/home",
+                "--tmpfs", "/root",
+                "--tmpfs", "/run",
+                "--tmpfs", "/sys",
                 "--unshare-user",
                 "--unshare-ipc",
                 "--unshare-pid",
                 "--unshare-uts",
+                "--unshare-cgroup-try",
                 "--die-with-parent",
                 "--new-session",
             ]
@@ -39,50 +44,21 @@ class NativeRestrictor:
                 bwrap_cmd.append("--unshare-net")
             if compiling:
                 bwrap_cmd.extend(["--bind", actual_cwd, actual_cwd])
+                cache_dir = Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache")) / "run_kuranne"
+                bwrap_cmd.extend(["--bind-try", str(cache_dir), str(cache_dir)])
             else:
                 bwrap_cmd.extend(["--ro-bind", actual_cwd, actual_cwd])
             bwrap_cmd.extend(["--chdir", actual_cwd])
+            bwrap_cmd.append("--")
             bwrap_cmd.extend(cmd)
             return bwrap_cmd
         elif sys.platform == "darwin":
-            # On macOS, handled internally via macos_preexec_fn
-            return cmd
+            raise ConfigError(
+                "--restrict is only supported on Linux (via Bubblewrap). "
+                "On macOS, please use --sandbox (Docker/Podman) for isolation."
+            )
         else:
-            raise ConfigError("--restrict is not supported on this OS. Use --sandbox instead.")
-
-    @staticmethod
-    def macos_preexec_fn():
-        """Pre-execution function for subprocess on macOS to apply sandbox_init and rlimits safely."""
-        import resource
-        try:
-            # Set CPU limit if appropriate; avoid RLIMIT_AS on 64-bit macOS as it crashes dyld
-            try:
-                resource.setrlimit(resource.RLIMIT_CPU, (60, 60))
-            except (ValueError, OSError):
-                pass
-            
-            # Apply sandbox_init if possible (might fail due to SIP on newer macOS)
-            try:
-                import ctypes
-                libc = ctypes.CDLL("/usr/lib/libc.dylib")
-                if hasattr(libc, "sandbox_init"):
-                    sandbox_init = libc.sandbox_init
-                    sandbox_init.argtypes = [ctypes.c_char_p, ctypes.c_uint64, ctypes.POINTER(ctypes.c_char_p)]
-                    sandbox_init.restype = ctypes.c_int
-                    
-                    errorbuf = ctypes.c_char_p()
-                    profile = b"no-write-except-temporary"
-                    
-                    res = sandbox_init(profile, 1, ctypes.byref(errorbuf))
-                    if res != 0:
-                        err_msg = errorbuf.value.decode('utf-8') if errorbuf.value else 'Unknown error'
-                        print(f"[WARN] macOS sandbox_init failed (SIP?): {err_msg}", file=sys.stderr)
-                        if hasattr(libc, "sandbox_free_error") and errorbuf.value:
-                            libc.sandbox_free_error(errorbuf)
-            except Exception:
-                pass
-        except Exception as e:
-            print(f"[WARN] Sandbox setup failed: {e}", file=sys.stderr)
+            raise ConfigError("--restrict is only supported on Linux (via Bubblewrap). Use --sandbox instead.")
 
 
 class ContainerSandbox:
