@@ -213,6 +213,42 @@ class TestContainerSandbox:
         with pytest.raises(ConfigError, match="Dockerfile 'nonexistent' not found"):
             ContainerSandbox._build_dockerfile("nonexistent", "docker")
 
+    def test_build_dockerfile_warns_missing_dockerignore(self, tmp_path, monkeypatch):
+        df = tmp_path / "Dockerfile"
+        df.write_text("FROM alpine\nRUN echo hello\n")
+        
+        warnings = []
+        monkeypatch.setattr("util.sandbox.Printer.warning", lambda msg: warnings.append(msg))
+        monkeypatch.setattr(spc, "run", lambda *args, **kwargs: type("FakeRun", (), {"returncode": 0, "stdout": "id\n", "stderr": ""})())
+        
+        ContainerSandbox._build_dockerfile(str(df), "docker")
+        assert any("No .dockerignore found" in w for w in warnings)
+
+    def test_build_dockerfile_with_dockerignore_no_warning(self, tmp_path, monkeypatch):
+        df = tmp_path / "Dockerfile"
+        df.write_text("FROM alpine\nRUN echo hello\n")
+        (tmp_path / ".dockerignore").write_text("node_modules\n.git\n")
+        
+        warnings = []
+        monkeypatch.setattr("util.sandbox.Printer.warning", lambda msg: warnings.append(msg))
+        monkeypatch.setattr(spc, "run", lambda *args, **kwargs: type("FakeRun", (), {"returncode": 0, "stdout": "id\n", "stderr": ""})())
+        
+        ContainerSandbox._build_dockerfile(str(df), "docker")
+        assert not any("No .dockerignore found" in w for w in warnings)
+
+    def test_build_dockerfile_copy_instruction_hash(self, tmp_path, monkeypatch):
+        df = tmp_path / "Dockerfile"
+        df.write_text("FROM alpine\nCOPY . /app\n")
+        
+        monkeypatch.setattr(spc, "run", lambda *args, **kwargs: type("FakeRun", (), {"returncode": 0, "stdout": "id\n", "stderr": ""})())
+        
+        img1 = ContainerSandbox._build_dockerfile(str(df), "docker")
+        # Touch directory / change mtime
+        new_time = os.path.getmtime(tmp_path) + 10
+        os.utime(tmp_path, (new_time, new_time))
+        img2 = ContainerSandbox._build_dockerfile(str(df), "docker")
+        assert img1 != img2
+
     def test_validate_image_name_valid(self):
         valid_images = [
             "ubuntu:latest",

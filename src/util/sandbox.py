@@ -116,8 +116,21 @@ class ContainerSandbox:
             context_dir = str(Path.cwd()) if path.resolve().is_relative_to(Path.cwd().resolve()) else str(path.parent)
         except (ValueError, AttributeError):
             context_dir = str(path.parent)
+
+        dockerignore_path = Path(context_dir) / ".dockerignore"
+        if not dockerignore_path.exists():
+            Printer.warning(f"No .dockerignore found in build context '{context_dir}'. Sensitive or large files may be included in build context.")
         
-        hash_input = content + str(path.resolve()).encode("utf-8")
+        content_str = content.decode("utf-8", errors="ignore")
+        has_copy_or_add = bool(re.search(r"^\s*(?:COPY|ADD)\b", content_str, flags=re.MULTILINE | re.IGNORECASE))
+
+        hash_input = content + str(path.resolve()).encode("utf-8") + str(Path(context_dir).resolve()).encode("utf-8")
+        if has_copy_or_add:
+            try:
+                hash_input += str(Path(context_dir).stat().st_mtime).encode("utf-8")
+            except OSError:
+                pass
+
         hash_str = hashlib.sha256(hash_input).hexdigest()[:12]
         image_name = f"run-sandbox-{hash_str}"
         
