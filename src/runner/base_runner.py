@@ -193,7 +193,7 @@ class BaseRunner:
                     sandbox_cfg=sandbox_cfg
                 )
             target_cmd = shlex.join(t_list) if use_shell else t_list
-        elif not compiling and self.flags.get("restrict"):
+        elif self.flags.get("restrict"):
             from util.sandbox import NativeRestrictor
             t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
             t_list = NativeRestrictor.wrap_command(t_list, net=self.flags.get("sandbox_net", False), compiling=compiling)

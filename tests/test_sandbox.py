@@ -61,6 +61,44 @@ class TestNativeRestrictor:
         with pytest.raises(ConfigError, match="only supported on Linux"):
             runner.run_command(["echo", "hello"], compiling=False)
 
+    def test_bwrap_compiling_vs_executing_mount_mode(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/bwrap" if cmd == "bwrap" else None)
+
+        compile_cmd = ["gcc", "-c", "main.c", "-o", "main.o"]
+        wrapped_compile = NativeRestrictor.wrap_command(compile_cmd, cwd="/app", compiling=True)
+        assert "--bind" in wrapped_compile
+        assert "/app" in wrapped_compile
+
+        exec_cmd = ["./main.out"]
+        wrapped_exec = NativeRestrictor.wrap_command(exec_cmd, cwd="/app", compiling=False)
+        assert "--ro-bind" in wrapped_exec
+        assert "/app" in wrapped_exec
+
+    def test_base_runner_restrict_enforces_sandbox_on_compilation(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/bwrap" if cmd == "bwrap" else None)
+        from runner.base_runner import BaseRunner
+
+        captured_cmds = []
+
+        class FakeP:
+            returncode = 0
+
+            def communicate(self, timeout=None):
+                return (b"", b"")
+
+        def fake_popen(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return FakeP()
+
+        monkeypatch.setattr(spc, "Popen", fake_popen)
+        runner = BaseRunner({"restrict": True})
+        runner.run_command(["gcc", "-c", "main.c"], compiling=True)
+        assert len(captured_cmds) == 1
+        assert captured_cmds[0][0] == "bwrap"
+        assert "--bind" in captured_cmds[0]
+
     def test_unsupported_os_raises_config_error(self, monkeypatch):
         monkeypatch.setattr(sys, "platform", "win32")
         with pytest.raises(ConfigError, match="only supported on Linux"):

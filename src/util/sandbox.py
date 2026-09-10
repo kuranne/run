@@ -39,6 +39,8 @@ class NativeRestrictor:
                 bwrap_cmd.append("--unshare-net")
             if compiling:
                 bwrap_cmd.extend(["--bind", actual_cwd, actual_cwd])
+                cache_dir = Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache")) / "run_kuranne"
+                bwrap_cmd.extend(["--bind-try", str(cache_dir), str(cache_dir)])
             else:
                 bwrap_cmd.extend(["--ro-bind", actual_cwd, actual_cwd])
             bwrap_cmd.extend(["--chdir", actual_cwd])
