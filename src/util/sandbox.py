@@ -1,3 +1,4 @@
+import re
 import os
 import sys
 import shutil
@@ -148,6 +149,35 @@ class ContainerSandbox:
                 base_image = "ruby:latest"
         return base_image
 
+    IMAGE_NAME_PATTERN = re.compile(
+        r"^[a-zA-Z0-9]+(?:[._-][a-zA-Z0-9]+)*(?::[0-9]+)?(?:/[a-zA-Z0-9._-]+)*(?::[a-zA-Z0-9_.-]+)?(?:@[a-zA-Z0-9]+:[a-fA-F0-9]+)?$"
+    )
+
+    @classmethod
+    def validate_image_name(cls, image: str) -> str:
+        """
+        Validate container image name to prevent option injection or invalid references.
+
+        Args:
+            image (str): Candidate container image string.
+
+        Returns:
+            str: Validated image name.
+
+        Raises:
+            ConfigError: If image name is invalid or begins with '-'.
+        """
+        if not image or not isinstance(image, str):
+            raise ConfigError("Container image name cannot be empty.")
+        clean_image = image.strip()
+        if clean_image.startswith("-"):
+            raise ConfigError(f"Invalid container image '{image}': Image name cannot start with '-'.")
+        if any(c in clean_image for c in " \t\n\r;|<>&`$()\"'\\"):
+            raise ConfigError(f"Invalid container image '{image}': Image name contains invalid characters.")
+        if not cls.IMAGE_NAME_PATTERN.match(clean_image):
+            raise ConfigError(f"Invalid container image '{image}': Must be a valid OCI container image reference.")
+        return clean_image
+
     @staticmethod
     def wrap_command(cmd: List[str], net: bool = False, compiling: bool = False, sandbox_cfg: Optional[Dict[str, Any]] = None) -> List[str]:
         sandbox_cfg = sandbox_cfg or {}
@@ -173,6 +203,7 @@ class ContainerSandbox:
         else:
             base_image = ContainerSandbox.get_heuristic_image(cmd)
                 
+        base_image = ContainerSandbox.validate_image_name(base_image)
         container_cmd.append(base_image) 
         container_cmd.extend(cmd)
         
@@ -255,6 +286,7 @@ class PersistentSandbox:
     @classmethod
     def start(cls, engine: str, image: str, net: bool = False, cwd: str = ""):
         cls._register_cleanup()
+        image = ContainerSandbox.validate_image_name(image)
         actual_cwd = cwd or os.getcwd()
         Printer.info(f"Starting persistent sandbox container ({image})...")
         cmd = [
