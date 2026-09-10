@@ -1,18 +1,12 @@
 name: CI
 
 on:
-  push:
-    branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - '.gitignore'
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths-ignore:
-      - 'docs/**'
-      - '*.md'
-      - '.gitignore'
+      - "docs/**"
+      - "*.md"
+      - ".gitignore"
   workflow_dispatch:
 
 concurrency:
@@ -30,8 +24,8 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
@@ -53,8 +47,8 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
