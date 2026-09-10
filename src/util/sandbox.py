@@ -1,5 +1,7 @@
+import re
 import os
 import sys
+import uuid
 import shutil
 import hashlib
 import signal
@@ -114,8 +116,21 @@ class ContainerSandbox:
             context_dir = str(Path.cwd()) if path.resolve().is_relative_to(Path.cwd().resolve()) else str(path.parent)
         except (ValueError, AttributeError):
             context_dir = str(path.parent)
+
+        dockerignore_path = Path(context_dir) / ".dockerignore"
+        if not dockerignore_path.exists():
+            Printer.warning(f"No .dockerignore found in build context '{context_dir}'. Sensitive or large files may be included in build context.")
         
-        hash_input = content + str(path.resolve()).encode("utf-8")
+        content_str = content.decode("utf-8", errors="ignore")
+        has_copy_or_add = bool(re.search(r"^\s*(?:COPY|ADD)\b", content_str, flags=re.MULTILINE | re.IGNORECASE))
+
+        hash_input = content + str(path.resolve()).encode("utf-8") + str(Path(context_dir).resolve()).encode("utf-8")
+        if has_copy_or_add:
+            try:
+                hash_input += str(Path(context_dir).stat().st_mtime).encode("utf-8")
+            except OSError:
+                pass
+
         hash_str = hashlib.sha256(hash_input).hexdigest()[:12]
         image_name = f"run-sandbox-{hash_str}"
         
@@ -148,8 +163,43 @@ class ContainerSandbox:
                 base_image = "ruby:latest"
         return base_image
 
+    IMAGE_NAME_PATTERN = re.compile(
+        r"^[a-zA-Z0-9]+(?:[._-][a-zA-Z0-9]+)*(?::[0-9]+)?(?:/[a-zA-Z0-9._-]+)*(?::[a-zA-Z0-9_.-]+)?(?:@[a-zA-Z0-9]+:[a-fA-F0-9]+)?$"
+    )
+
+    @classmethod
+    def validate_image_name(cls, image: str) -> str:
+        """
+        Validate container image name to prevent option injection or invalid references.
+
+        Args:
+            image (str): Candidate container image string.
+
+        Returns:
+            str: Validated image name.
+
+        Raises:
+            ConfigError: If image name is invalid or begins with '-'.
+        """
+        if not image or not isinstance(image, str):
+            raise ConfigError("Container image name cannot be empty.")
+        clean_image = image.strip()
+        if clean_image.startswith("-"):
+            raise ConfigError(f"Invalid container image '{image}': Image name cannot start with '-'.")
+        if any(c in clean_image for c in " \t\n\r;|<>&`$()\"'\\"):
+            raise ConfigError(f"Invalid container image '{image}': Image name contains invalid characters.")
+        if not cls.IMAGE_NAME_PATTERN.match(clean_image):
+            raise ConfigError(f"Invalid container image '{image}': Must be a valid OCI container image reference.")
+        return clean_image
+
     @staticmethod
-    def wrap_command(cmd: List[str], net: bool = False, compiling: bool = False, sandbox_cfg: Optional[Dict[str, Any]] = None) -> List[str]:
+    def wrap_command(
+        cmd: List[str],
+        net: bool = False,
+        compiling: bool = False,
+        sandbox_cfg: Optional[Dict[str, Any]] = None,
+        custom_env: Optional[Dict[str, str]] = None,
+    ) -> List[str]:
         sandbox_cfg = sandbox_cfg or {}
         engine = ContainerSandbox._get_engine()
         cwd = os.getcwd()
@@ -162,9 +212,22 @@ class ContainerSandbox:
             "-v", f"{cwd}:{cwd}:{mount_mode}",
             "-w", cwd
         ]
+
+        user_opt = sandbox_cfg.get("user")
+        if user_opt:
+            container_cmd.extend(["--user", str(user_opt)])
+        elif hasattr(os, "getuid") and hasattr(os, "getgid"):
+            container_cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
         
         if not net:
             container_cmd.extend(["--network", "none"])
+
+        container_name = sandbox_cfg.get("container_name") or f"run-sandbox-{uuid.uuid4().hex[:12]}"
+        container_cmd.extend(["--name", container_name])
+
+        if custom_env:
+            for k, v in custom_env.items():
+                container_cmd.extend(["-e", f"{k}={v}"])
             
         if sandbox_cfg.get("dockerfile"):
             base_image = ContainerSandbox._build_dockerfile(sandbox_cfg["dockerfile"], engine)
@@ -173,6 +236,7 @@ class ContainerSandbox:
         else:
             base_image = ContainerSandbox.get_heuristic_image(cmd)
                 
+        base_image = ContainerSandbox.validate_image_name(base_image)
         container_cmd.append(base_image) 
         container_cmd.extend(cmd)
         
@@ -227,8 +291,34 @@ class ComposeSandbox:
             pass
         
     @staticmethod
-    def wrap_command(cmd: List[str], compose_file: str, service: str) -> List[str]:
-        return ["docker", "compose", "-f", compose_file, "exec", "-w", os.getcwd(), service] + cmd
+    def wrap_command(
+        cmd: List[str],
+        compose_file: str,
+        service: str,
+        workdir: Optional[str] = None,
+        custom_env: Optional[Dict[str, str]] = None,
+        sandbox_cfg: Optional[Dict[str, Any]] = None,
+    ) -> List[str]:
+        sandbox_cfg = sandbox_cfg or {}
+        exec_cmd = ["docker", "compose", "-f", compose_file, "exec", "-T"]
+        
+        user_opt = sandbox_cfg.get("user")
+        if user_opt:
+            exec_cmd.extend(["--user", str(user_opt)])
+        elif hasattr(os, "getuid") and hasattr(os, "getgid"):
+            exec_cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
+
+        if custom_env:
+            for k, v in custom_env.items():
+                exec_cmd.extend(["-e", f"{k}={v}"])
+
+        target_workdir = workdir or sandbox_cfg.get("compose_workdir")
+        if target_workdir:
+            exec_cmd.extend(["-w", str(target_workdir)])
+
+        exec_cmd.append(service)
+        exec_cmd.extend(cmd)
+        return exec_cmd
 
 
 class PersistentSandbox:
@@ -253,17 +343,82 @@ class PersistentSandbox:
             cls._cleanup_registered = True
 
     @classmethod
-    def start(cls, engine: str, image: str, net: bool = False, cwd: str = ""):
+    def reap_orphaned_containers(cls, engine: Optional[str] = None) -> int:
+        """
+        Detect and terminate orphaned sleeper containers whose parent process has died.
+
+        Args:
+            engine (Optional[str]): Container engine ('docker' or 'podman'). If None, auto-detects.
+
+        Returns:
+            int: Number of orphaned containers reaped.
+        """
+        try:
+            eng = engine or ContainerSandbox._get_engine()
+        except Exception:
+            return 0
+
+        reaped_count = 0
+        try:
+            res = spc.run(
+                [eng, "ps", "-a", "--filter", "label=run.sandbox.persistent=true", "--format", "{{.ID}} {{.Label \"run.sandbox.pid\"}}"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if res.returncode != 0 or not res.stdout.strip():
+                return 0
+
+            for line in res.stdout.strip().splitlines():
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                cid = parts[0]
+                pid_str = parts[1] if len(parts) > 1 else ""
+
+                should_reap = False
+                if not pid_str or not pid_str.isdigit():
+                    should_reap = True
+                else:
+                    target_pid = int(pid_str)
+                    if target_pid <= 0 or target_pid == os.getpid():
+                        should_reap = False
+                    else:
+                        try:
+                            os.kill(target_pid, 0)
+                            should_reap = False
+                        except OSError:
+                            should_reap = True
+
+                if should_reap:
+                    spc.run([eng, "rm", "-f", cid], capture_output=True, timeout=5)
+                    reaped_count += 1
+        except Exception:
+            pass
+
+        return reaped_count
+
+    @classmethod
+    def start(cls, engine: str, image: str, net: bool = False, cwd: str = "", writable: bool = True):
         cls._register_cleanup()
+        cls.reap_orphaned_containers(engine)
+        image = ContainerSandbox.validate_image_name(image)
         actual_cwd = cwd or os.getcwd()
+        mount_mode = "rw" if writable else "ro"
+        container_name = f"run-persist-{os.getpid()}-{uuid.uuid4().hex[:6]}"
         Printer.info(f"Starting persistent sandbox container ({image})...")
         cmd = [
             engine, "run", "-d", "--rm",
+            "--name", container_name,
+            "--label", "run.sandbox.persistent=true",
+            "--label", f"run.sandbox.pid={os.getpid()}",
             "--security-opt=no-new-privileges",
             "--cap-drop=ALL",
-            "-v", f"{actual_cwd}:{actual_cwd}:rw",
+            "-v", f"{actual_cwd}:{actual_cwd}:{mount_mode}",
             "-w", actual_cwd
         ]
+        if hasattr(os, "getuid") and hasattr(os, "getgid"):
+            cmd.extend(["--user", f"{os.getuid()}:{os.getgid()}"])
         if not net:
             cmd.extend(["--network", "none"])
         cmd.extend([image, "tail", "-f", "/dev/null"])
@@ -284,7 +439,12 @@ class PersistentSandbox:
             spc.run([cls._engine, "stop", cid], capture_output=True)
             
     @classmethod
-    def wrap_command(cls, cmd: List[str]) -> List[str]:
+    def wrap_command(cls, cmd: List[str], custom_env: Optional[Dict[str, str]] = None) -> List[str]:
         if not cls._container_id:
             raise ExecutionError("Persistent container is not running.")
-        return [cls._engine, "exec", "-w", os.getcwd(), cls._container_id] + cmd
+        exec_cmd = [cls._engine, "exec"]
+        if custom_env:
+            for k, v in custom_env.items():
+                exec_cmd.extend(["-e", f"{k}={v}"])
+        exec_cmd.extend(["-w", os.getcwd(), cls._container_id] + cmd)
+        return exec_cmd

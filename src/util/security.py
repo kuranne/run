@@ -81,7 +81,10 @@ class SecurityManager:
 
     SAFE_ENV_WHITELIST = {
         "PATH", "HOME", "USER", "LOGNAME", "TERM", "LANG", "LC_ALL", "LC_CTYPE",
-        "TMPDIR", "PWD", "TZ", "SHELL"
+        "TMPDIR", "PWD", "TZ", "SHELL",
+        # Container daemon connectivity (SEC-R1-08)
+        "DOCKER_HOST", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "DOCKER_CONTEXT",
+        "CONTAINER_HOST", "CONTAINER_SSHKEY", "PODMAN_SOCKET"
     }
 
     @staticmethod

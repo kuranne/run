@@ -81,6 +81,19 @@ def test_strict_whitelist_sandbox_env(monkeypatch):
     assert sanitized["PATH"] == "/usr/bin:/bin"
     assert sanitized["HOME"] == "/home/user"
 
+
+def test_strict_whitelist_preserves_container_daemon_env(monkeypatch):
+    monkeypatch.setenv("DOCKER_HOST", "unix:///var/run/docker.sock")
+    monkeypatch.setenv("DOCKER_CONTEXT", "desktop-linux")
+    monkeypatch.setenv("PODMAN_SOCKET", "/run/podman/podman.sock")
+    monkeypatch.setenv("CONTAINER_HOST", "ssh://user@remote")
+
+    sanitized = SecurityManager.sanitize_execution_env(strict_whitelist=True)
+    assert sanitized.get("DOCKER_HOST") == "unix:///var/run/docker.sock"
+    assert sanitized.get("DOCKER_CONTEXT") == "desktop-linux"
+    assert sanitized.get("PODMAN_SOCKET") == "/run/podman/podman.sock"
+    assert sanitized.get("CONTAINER_HOST") == "ssh://user@remote"
+
 def test_base_runner_rejects_suspicious_flags():
     from runner.base_runner import BaseRunner
     from util.errors import CompilationError, ExecutionError
