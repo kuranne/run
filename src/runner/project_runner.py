@@ -69,6 +69,33 @@ class TaskRunner:
         cmd = shlex.split(task_cmd) + extra_args
         return runner_ref.run_command(cmd)
 
+def split_compound_command(cmd_str: str) -> List[List[str]]:
+    """
+    Split a compound shell command string (separated by '&&' or ';')
+    into individual command argument lists, respecting quotes.
+    """
+    if not cmd_str.strip():
+        return []
+    lexer = shlex.shlex(cmd_str, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = False
+    
+    subcommands: List[List[str]] = []
+    current_cmd: List[str] = []
+    
+    for token in lexer:
+        if token in ("&&", ";"):
+            if current_cmd:
+                subcommands.append(current_cmd)
+                current_cmd = []
+        else:
+            current_cmd.append(token)
+            
+    if current_cmd:
+        subcommands.append(current_cmd)
+        
+    return subcommands
+
+
 class ProjectRunner:
     """
     Generic project manifest detector and runner based on [projects] in Run.toml.
@@ -118,29 +145,17 @@ class ProjectRunner:
         Execute a project step, properly splitting compound commands (e.g. '&&' or ';')
         into sequential list-based executions without shell syntax errors.
         """
-        if "&&" in step_str:
-            subcmds = [s.strip() for s in step_str.split("&&") if s.strip()]
-            for idx, sub in enumerate(subcmds):
-                flags = extra_args if idx == len(subcmds) - 1 else []
-                cmd = shlex.split(sub) + flags
-                if not cmd:
-                    continue
-                if not runner_ref.run_command(cmd, compiling=compiling):
-                    return False
+        subcmds = split_compound_command(step_str)
+        if not subcmds:
             return True
-        elif ";" in step_str:
-            subcmds = [s.strip() for s in step_str.split(";") if s.strip()]
-            for idx, sub in enumerate(subcmds):
-                flags = extra_args if idx == len(subcmds) - 1 else []
-                cmd = shlex.split(sub) + flags
-                if not cmd:
-                    continue
-                if not runner_ref.run_command(cmd, compiling=compiling):
-                    return False
-            return True
-        else:
-            cmd = shlex.split(step_str) + extra_args
-            return runner_ref.run_command(cmd, compiling=compiling)
+        for idx, cmd in enumerate(subcmds):
+            flags = extra_args if idx == len(subcmds) - 1 else []
+            full_cmd = cmd + flags
+            if not full_cmd:
+                continue
+            if not runner_ref.run_command(full_cmd, compiling=compiling):
+                return False
+        return True
 
     @staticmethod
     def run_project(project_info: Tuple[str, Dict[str, Any], Path], runner_ref: Any,
