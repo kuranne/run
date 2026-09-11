@@ -470,7 +470,7 @@ def kill_process_tree(
         deadline = time.time() + grace_period
         while time.time() < deadline:
             if p.poll() is not None:
-                return
+                break
             time.sleep(0.02)
 
     # Escalate to SIGKILL if still running
@@ -486,6 +486,16 @@ def kill_process_tree(
             p.wait(timeout=1.0)
         except Exception:
             pass
+
+    # Clean up any terminated descendants reparented to this process (subreaper cleanup)
+    if os.name != "nt":
+        while True:
+            try:
+                wpid, _ = os.waitpid(-1, os.WNOHANG)
+                if wpid <= 0:
+                    break
+            except (ChildProcessError, OSError):
+                break
 
 
 # Enable subreaper on Linux if running in container environments

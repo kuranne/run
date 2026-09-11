@@ -308,7 +308,7 @@ int main(void) {
     (test_dir / "01.out").write_text("81\n")
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("sys.argv", ["run", "-L", "--test-dir", str(test_dir)])
+    monkeypatch.setattr("sys.argv", ["run", "--unsafe", "-L", "--test-dir", str(test_dir)])
 
     from main import main
     exit_code = main()

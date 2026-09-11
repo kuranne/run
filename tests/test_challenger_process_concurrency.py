@@ -370,6 +370,11 @@ def test_timeout_terminates_grandchild_process_tree(tmp_path, monkeypatch):
     grandchild_pid = int(pid_file.read_text().strip())
 
     time.sleep(0.5)
+    if os.name != "nt":
+        try:
+            os.waitpid(grandchild_pid, os.WNOHANG)
+        except (ChildProcessError, OSError):
+            pass
     try:
         os.kill(grandchild_pid, 0)
         is_alive = True

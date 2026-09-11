@@ -1,0 +1,13 @@
+.git
+.venv
+build
+dist
+*.egg-info
+__pycache__
+.pytest_cache
+.run_cache
+*.pyc
+*.out
+*.o
+*.obj
+*.exe

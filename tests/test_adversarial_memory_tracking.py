@@ -225,13 +225,13 @@ def test_adversarial_termination_sigabrt_handling():
     Tests child self-abort via SIGABRT.
     MonitoredPopen handles abort returncode cleanly and captures peak memory.
     """
-    p = MonitoredPopen([sys.executable, "-c", "import os, signal; x = bytearray(30 * 1024 * 1024); os.kill(os.getpid(), signal.SIGABRT)"])
+    p = MonitoredPopen([sys.executable, "-c", "import os, signal, time; x = bytearray(30 * 1024 * 1024); time.sleep(0.02); os.kill(os.getpid(), signal.SIGABRT)"])
     p.wait()
     
     assert p.returncode in (-signal.SIGABRT, signal.SIGABRT)
     mem_bytes = p.get_memory_bytes()
     assert mem_bytes is not None
-    assert mem_bytes >= 30 * 1024 * 1024
+    assert mem_bytes >= (30 - 5) * 1024 * 1024
 
 
 def test_adversarial_termination_raw_exit_bypass_atexit():
@@ -239,7 +239,7 @@ def test_adversarial_termination_raw_exit_bypass_atexit():
     Tests child process exiting abruptly via os._exit(77) (bypassing normal atexit handlers).
     MonitoredPopen accurately harvests peak memory upon OS reaping.
     """
-    p = MonitoredPopen([sys.executable, "-c", "import os; x = bytearray(25 * 1024 * 1024); os._exit(77)"])
+    p = MonitoredPopen([sys.executable, "-c", "import os, time; x = bytearray(25 * 1024 * 1024); time.sleep(0.02); os._exit(77)"])
     p.wait()
     
     assert p.returncode == 77

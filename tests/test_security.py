@@ -222,7 +222,14 @@ def test_python_handler_venv_ownership_verification(tmp_path, monkeypatch, caplo
             return getattr(self.orig, name)
 
     orig_stat = Path.stat
-    monkeypatch.setattr(Path, "stat", lambda self: MockStat(real_stat) if self.name == "python" else orig_stat(self))
+
+    def mock_stat(self, *args, **kwargs):
+        res = orig_stat(self, *args, **kwargs)
+        if self.name in ("python", "python.exe"):
+            return MockStat(res)
+        return res
+
+    monkeypatch.setattr(Path, "stat", mock_stat)
     monkeypatch.setattr(os, "getuid", lambda: 1000)
 
     # 1. Without force: skips foreign venv, logs warning
