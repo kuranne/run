@@ -1,5 +1,7 @@
+import os
 from pathlib import Path
 from util.errors import RunError
+from util.output import Printer
 
 class PythonHandler:
     """
@@ -25,7 +27,24 @@ class PythonHandler:
                         py_path = venv_path / "Scripts" / "python.exe"
                     
                     if py_path.exists():
-                        from util.output import Printer
+                        if hasattr(os, "getuid"):
+                            try:
+                                current_uid = os.getuid()
+                                owner_uid = py_path.stat().st_uid
+                                if owner_uid != current_uid:
+                                    if not self.flags.get("force", False):
+                                        Printer.warning(
+                                            f"Skipping venv '{venv}': python binary owned by UID {owner_uid} "
+                                            f"(current UID is {current_uid}). Use -f / --force to override."
+                                        )
+                                        continue
+                                    else:
+                                        Printer.warning(
+                                            f"Using venv '{venv}' with non-matching owner UID {owner_uid} due to --force"
+                                        )
+                            except OSError:
+                                continue
+
                         Printer.info(f"Using venv: {venv}")
                         return str(py_path)
 
@@ -55,7 +74,8 @@ class PythonHandler:
             Printer.error(str(e))
             return
 
+        target = f"./{fp}" if str(fp).startswith("-") else str(fp)
         if self.flags.get("debug"):
-            return self.run_command([prog, "-m", "pdb", str(fp)] + self.run_args)
+            return self.run_command([prog, "-m", "pdb", "--", target] + self.run_args)
         else:
-            return self.run_command([prog, str(fp)] + self.run_args)
+            return self.run_command([prog, "--", target] + self.run_args)

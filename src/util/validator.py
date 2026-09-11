@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+from typing import List, Union
 
 class Validator:
     """
@@ -7,29 +7,32 @@ class Validator:
     """
     
     @staticmethod
-    def validate_path(path: Path) -> bool:
+    def validate_path(path: Union[Path, str]) -> bool:
         """
-        Validate that the path is safe (e.g. no traversal if restricted).
-        For this runner, we mostly check if it's not suspicious, but since it's a runner,
-        users might run things anywhere. 
-        Mainly we want to prevent command injection from file names if they are blindly shell executed.
+        Validate that the path is safe from traversal, control characters, and dangerous shell metacharacters.
         
         Args:
-            path (Path): Path to check.
+            path (Union[Path, str]): Path to check.
 
         Returns:
-            bool: True if safe.
+            bool: True if safe, False if suspicious.
         """
-        # A simple check: ensure no shell control characters in the filename if strictly needed
-        # But 'shlex.quote' or passing list to subprocess handles execution safety.
-        # This validator is more about business logic rules if any.
-        
-        unsafe_chars = [';', '&', '|', '`', '$', '(', ')']
-        name = path.name
-        for char in unsafe_chars:
-            if char in name:
-                # While shlex handles this, it's weird to have source files with these chars
-                return False
+        path_str = str(path)
+        path_obj = Path(path)
+
+        # 1. Reject control characters (ASCII < 32: null bytes, newlines, carriage returns, etc.)
+        if any(ord(c) < 32 for c in path_str):
+            return False
+
+        # 2. Reject path traversal sequences
+        if ".." in path_obj.parts:
+            return False
+
+        # 3. Reject dangerous shell metacharacters across full path
+        unsafe_chars = {';', '&', '|', '`', '$', '(', ')', '<', '>'}
+        if any(c in unsafe_chars for c in path_str):
+            return False
+
         return True
 
     @staticmethod

@@ -9,9 +9,51 @@ preventing cumulative memory accumulation across multiple sequential executions.
 import os
 import sys
 import time
+import signal
 import threading
 import subprocess as spc
 from typing import Optional, Tuple, Any
+
+
+def _read_procfs_vmhwm(pid: int) -> Optional[int]:
+    """
+    Directly read /proc/[pid]/status to parse VmHWM in bytes.
+    Opens freshly each time to avoid userspace buffer caching across seeks.
+    """
+    proc_status = f"/proc/{pid}/status"
+    try:
+        with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(4096)
+            idx = content.find("VmHWM:")
+            if idx == -1:
+                idx = content.find("VmRSS:")
+            if idx != -1:
+                end = content.find("\n", idx)
+                parts = content[idx:end].split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    return int(parts[1]) * 1024
+    except (OSError, IOError, FileNotFoundError, ProcessLookupError):
+        pass
+    return None
+
+
+def _read_procfs_starttime(pid: int) -> Optional[int]:
+    """
+    Read /proc/[pid]/stat to extract process starttime (field 22),
+    used to detect and avoid PID recycling races.
+    """
+    proc_stat = f"/proc/{pid}/stat"
+    try:
+        with open(proc_stat, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read(1024)
+            idx = content.rfind(")")
+            if idx != -1:
+                parts = content[idx + 1:].split()
+                if len(parts) > 19 and parts[19].isdigit():
+                    return int(parts[19])
+    except (OSError, IOError, FileNotFoundError, ProcessLookupError):
+        pass
+    return None
 
 
 class ProcfsSampler:
@@ -21,40 +63,41 @@ class ProcfsSampler:
     parent fork Copy-On-Write (COW) memory contamination.
     """
 
-    def __init__(self, pid: int, interval: float = 0.0002) -> None:
+    def __init__(self, pid: int, interval: float = 0.001) -> None:
         """
         Initialize the procfs sampler for a given process ID.
 
         Args:
             pid (int): Target process ID to monitor.
-            interval (float): Polling interval in seconds.
+            interval (float): Polling interval in seconds (default: 0.001s).
         """
         self.pid = pid
         self.interval = interval
         self.peak_bytes: Optional[int] = None
+        self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._expected_starttime: Optional[int] = _read_procfs_starttime(pid)
 
     def sample(self) -> Optional[int]:
         """
-        Perform an immediate single-shot reading of /proc/[pid]/status VmHWM.
+        Perform an immediate single-shot reading of /proc/[pid]/status VmHWM,
+        guarded by thread lock and PID recycling validation.
         """
-        proc_status = f"/proc/{self.pid}/status"
-        try:
-            if os.path.exists(proc_status):
-                with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read(1024)
-                    idx = content.find("VmHWM:")
-                    if idx != -1:
-                        end = content.find("\n", idx)
-                        parts = content[idx:end].split()
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            bytes_val = int(parts[1]) * 1024
-                            if self.peak_bytes is None or bytes_val > self.peak_bytes:
-                                self.peak_bytes = bytes_val
-        except Exception:
-            pass
-        return self.peak_bytes
+        if self._expected_starttime is not None:
+            cur_starttime = _read_procfs_starttime(self.pid)
+            if (cur_starttime is not None and
+                    cur_starttime != self._expected_starttime):
+                self._stop_event.set()
+                with self._lock:
+                    return self.peak_bytes
+
+        bytes_val = _read_procfs_vmhwm(self.pid)
+        with self._lock:
+            if bytes_val is not None:
+                if self.peak_bytes is None or bytes_val > self.peak_bytes:
+                    self.peak_bytes = bytes_val
+            return self.peak_bytes
 
     def start(self) -> None:
         """Start the background sampling thread if on Linux."""
@@ -65,23 +108,9 @@ class ProcfsSampler:
 
     def _sample_loop(self) -> None:
         """Continuously read /proc/[pid]/status to capture VmHWM."""
-        proc_status = f"/proc/{self.pid}/status"
-        try:
-            with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
-                while not self._stop_event.is_set():
-                    f.seek(0)
-                    content = f.read(1024)
-                    idx = content.find("VmHWM:")
-                    if idx != -1:
-                        end = content.find("\n", idx)
-                        parts = content[idx:end].split()
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            bytes_val = int(parts[1]) * 1024
-                            if self.peak_bytes is None or bytes_val > self.peak_bytes:
-                                self.peak_bytes = bytes_val
-                    time.sleep(self.interval)
-        except (OSError, IOError, FileNotFoundError, ProcessLookupError):
-            pass
+        while not self._stop_event.is_set():
+            self.sample()
+            time.sleep(self.interval)
 
     def stop(self) -> Optional[int]:
         """
@@ -94,23 +123,9 @@ class ProcfsSampler:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=0.05)
 
-        proc_status = f"/proc/{self.pid}/status"
-        try:
-            if os.path.exists(proc_status):
-                with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read(1024)
-                    idx = content.find("VmHWM:")
-                    if idx != -1:
-                        end = content.find("\n", idx)
-                        parts = content[idx:end].split()
-                        if len(parts) >= 2 and parts[1].isdigit():
-                            bytes_val = int(parts[1]) * 1024
-                            if self.peak_bytes is None or bytes_val > self.peak_bytes:
-                                self.peak_bytes = bytes_val
-        except Exception:
-            pass
-
-        return self.peak_bytes
+        self.sample()
+        with self._lock:
+            return self.peak_bytes
 
 
 class MonitoredPopen(spc.Popen):
@@ -152,7 +167,8 @@ class MonitoredPopen(spc.Popen):
 
     def _try_wait(self, wait_flags: int) -> Tuple[int, int]:
         """
-        Reap the child process on POSIX using os.wait4 to capture per-process rusage.
+        Reap the child process on POSIX using os.wait4 to capture per-process
+        rusage.
 
         Args:
             wait_flags (int): Wait flags passed to os.wait4 / os.waitpid.
@@ -161,42 +177,26 @@ class MonitoredPopen(spc.Popen):
             Tuple[int, int]: A tuple of (pid, status).
         """
         if os.name != "nt" and hasattr(os, "wait4"):
-            # On Linux with blocking wait, sample procfs inline to guarantee capturing fast-exiting processes
-            if sys.platform.startswith("linux") and wait_flags == 0 and self.procfs_sampler:
-                proc_status = f"/proc/{self.pid}/status"
-                try:
-                    with open(proc_status, "r", encoding="utf-8", errors="ignore") as f:
-                        while True:
-                            f.seek(0)
-                            content = f.read(1024)
-                            idx = content.find("VmHWM:")
-                            if idx != -1:
-                                end = content.find("\n", idx)
-                                parts = content[idx:end].split()
-                                if len(parts) >= 2 and parts[1].isdigit():
-                                    val = int(parts[1]) * 1024
-                                    if self.procfs_sampler.peak_bytes is None or val > self.procfs_sampler.peak_bytes:
-                                        self.procfs_sampler.peak_bytes = val
-                            pid, sts, ru = os.wait4(self.pid, os.WNOHANG)
-                            if pid == self.pid:
-                                self.rusage = ru
-                                return (pid, sts)
-                            time.sleep(0.0001)
-                except (OSError, IOError, FileNotFoundError, ProcessLookupError):
-                    pass
-
             try:
                 (pid, sts, ru) = os.wait4(self.pid, wait_flags)
                 if pid != 0:
                     self.rusage = ru
+                    if self.procfs_sampler:
+                        self.procfs_sampler.sample()
                 return (pid, sts)
             except ChildProcessError:
-                return (self.pid, self.returncode if self.returncode is not None else 0)
+                ret = self.returncode if self.returncode is not None else 1
+                return (self.pid, ret)
         return super()._try_wait(wait_flags)
 
-    def _internal_poll(self, _deadstate: Optional[int] = None, _del_safe: Any = None) -> Optional[int]:
+    def _internal_poll(
+        self,
+        _deadstate: Optional[int] = None,
+        _del_safe: Any = None
+    ) -> Optional[int]:
         """
-        Non-blocking poll for process exit on POSIX using os.wait4 with WNOHANG.
+        Non-blocking poll for process exit on POSIX using os.wait4 with
+        WNOHANG.
 
         Args:
             _deadstate (Optional[int]): State to set if child is already dead.
@@ -209,7 +209,8 @@ class MonitoredPopen(spc.Popen):
             if self.returncode is None:
                 if sys.platform.startswith("linux") and self.procfs_sampler:
                     self.procfs_sampler.sample()
-                if hasattr(self, "_waitpid_lock") and not self._waitpid_lock.acquire(False):
+                if (hasattr(self, "_waitpid_lock") and
+                        not self._waitpid_lock.acquire(False)):
                     return None
                 try:
                     if self.returncode is not None:
@@ -222,8 +223,8 @@ class MonitoredPopen(spc.Popen):
                     except (ChildProcessError, OSError):
                         if _deadstate is not None:
                             self.returncode = _deadstate
-                        else:
-                            self.returncode = 0
+                        elif self.returncode is None:
+                            self.returncode = 1
                 finally:
                     if hasattr(self, "_waitpid_lock"):
                         self._waitpid_lock.release()
@@ -391,3 +392,111 @@ def normalize_memory_bytes(raw_rss: int, platform: Optional[str] = None) -> int:
         return int(raw_rss)
     return int(raw_rss * 1024)
 
+
+def set_child_subreaper() -> bool:
+    """
+    Mark current process as child subreaper (PR_SET_CHILD_SUBREAPER) on Linux.
+    Orphaned descendants will be reparented to this process instead of PID 1.
+
+    Returns:
+        bool: True if successfully configured, False otherwise.
+    """
+    if sys.platform.startswith("linux"):
+        try:
+            import ctypes
+            PR_SET_CHILD_SUBREAPER = 36
+            libc = ctypes.CDLL(None)
+            if hasattr(libc, "prctl"):
+                return libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == 0
+        except Exception:
+            pass
+    return False
+
+
+def kill_process_tree(
+    p: spc.Popen,
+    initial_sig: int = signal.SIGTERM,
+    grace_period: float = 1.0,
+) -> None:
+    """
+    Terminate a process and all descendants gracefully with escalation to
+    SIGKILL.
+
+    - On Windows: Uses taskkill /F /T /PID to terminate the process tree.
+    - On POSIX: If the process group is distinct from the runner's, sends
+      initial_sig to the entire process group (os.killpg). Waits for
+      grace_period, and escalates to SIGKILL if processes remain alive.
+
+    Args:
+        p (subprocess.Popen): Target process to terminate.
+        initial_sig (int): Initial signal to send (SIGTERM, SIGINT).
+        grace_period (float): Seconds to wait before escalating to SIGKILL.
+    """
+    if p is None or p.poll() is not None:
+        return
+
+    # Windows process tree termination
+    if os.name == "nt":
+        try:
+            spc.run(
+                ["taskkill", "/F", "/T", "/PID", str(p.pid)],
+                capture_output=True,
+                timeout=5,
+            )
+        except Exception:
+            try:
+                p.kill()
+            except Exception:
+                pass
+        return
+
+    # POSIX process group termination
+    try:
+        pgid = os.getpgid(p.pid)
+    except (ProcessLookupError, OSError):
+        return
+
+    is_own_pgrp = (pgid == os.getpgrp())
+    try:
+        if not is_own_pgrp:
+            os.killpg(pgid, initial_sig)
+        else:
+            p.send_signal(initial_sig)
+    except (ProcessLookupError, OSError):
+        pass
+
+    # Wait for process to exit within grace period
+    if grace_period > 0:
+        deadline = time.time() + grace_period
+        while time.time() < deadline:
+            if p.poll() is not None:
+                break
+            time.sleep(0.02)
+
+    # Escalate to SIGKILL if still running
+    if p.poll() is None:
+        try:
+            if not is_own_pgrp:
+                os.killpg(pgid, signal.SIGKILL)
+            else:
+                p.kill()
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            p.wait(timeout=1.0)
+        except Exception:
+            pass
+
+    # Clean up any terminated descendants reparented to this process (subreaper cleanup)
+    if os.name != "nt":
+        while True:
+            try:
+                wpid, _ = os.waitpid(-1, os.WNOHANG)
+                if wpid <= 0:
+                    break
+            except (ChildProcessError, OSError):
+                break
+
+
+# Enable subreaper on Linux if running in container environments
+set_child_subreaper()

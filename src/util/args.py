@@ -50,7 +50,7 @@ def args(__version__: str):
     build_group.add_argument("--asan", action="store_true", help="Compile with AddressSanitizer and UndefinedBehaviorSanitizer")
     build_group.add_argument("--tsan", action="store_true", help="Compile with ThreadSanitizer")
     build_group.add_argument("--sanitize", type=str, help="Compile with custom sanitizer (e.g. memory, leak)")
-    build_group.add_argument("--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files (optional depth)")
+    build_group.add_argument("-L", "--link-auto", nargs="?", const=-1, type=int, help="Auto find and link C/C++ files (optional depth)")
     build_group.add_argument("--flags", type=str, default="", help="Compiler or interpreter flags")
     build_group.add_argument("--compiler", type=str, help="Compiler or interpreter override (e.g. clang++)")
     build_group.add_argument("--out-dir", type=str, help="Output directory for compiled binaries")
@@ -59,7 +59,7 @@ def args(__version__: str):
 
     # Security & Isolation group
     sandbox_group = parser.add_argument_group("Security & Isolation")
-    sandbox_group.add_argument("--restrict", action="store_true", help="Enable native OS-level restriction (bwrap/sandbox_init)")
+    sandbox_group.add_argument("--restrict", action="store_true", help="Enable native OS-level restriction (Linux bwrap)")
     sandbox_group.add_argument("--sandbox", action="store_true", help="Enable containerized sandboxing (Docker/Podman or bwrap on Linux)")
     sandbox_group.add_argument("--sandbox-net", action="store_true", help="Enable network access within the sandbox")
 
@@ -88,12 +88,6 @@ def args(__version__: str):
         trailing_args = cli_argv[split_idx + 1:]
         cli_argv = cli_argv[:split_idx]
 
-    from pathlib import Path
-    source_exts = {
-        ".c", ".cpp", ".cc", ".cxx", ".rs", ".java", ".py", ".go",
-        ".js", ".ts", ".zig", ".rb", ".cs", ".kt", ".swift", ".php"
-    }
-
     processed_args = []
     i = 0
     while i < len(cli_argv):
@@ -106,10 +100,10 @@ def args(__version__: str):
                 i += 1
             else:
                 processed_args.append(arg)
-        elif arg == "--link-auto" and i + 1 < len(cli_argv):
+        elif arg in ("-L", "--link-auto") and i + 1 < len(cli_argv):
             next_arg = cli_argv[i + 1]
             if next_arg.lstrip("-").isdigit():
-                processed_args.append(arg)
+                processed_args.append("--link-auto")
                 processed_args.append(next_arg)
                 i += 1
             elif not next_arg.startswith("-"):
@@ -134,26 +128,25 @@ def args(__version__: str):
             elif next_arg.startswith("-"):
                 processed_args.append(f"{arg}=-")
             else:
-                ext = Path(next_arg).suffix.lower()
-                remaining = cli_argv[i + 2:]
-                has_subsequent_source = any(Path(r).suffix.lower() in source_exts for r in remaining if not r.startswith("-"))
-                if ext in source_exts and not has_subsequent_source:
-                    processed_args.append(f"{arg}=-")
-                else:
-                    processed_args.append(arg)
-                    processed_args.append(next_arg)
-                    i += 1
+                processed_args.append(arg)
+                processed_args.append(next_arg)
+                i += 1
         else:
             processed_args.append(arg)
             
         i += 1
 
     parsed = parser.parse_args(processed_args)
+    arg_list: List[str] = []
+    if parsed.argument:
+        arg_list.extend(shlex.split(parsed.argument))
     if trailing_args:
-        trailing_str = " ".join(shlex.quote(a) for a in trailing_args)
-        if parsed.argument:
-            parsed.argument = f"{parsed.argument} {trailing_str}"
-        else:
-            parsed.argument = trailing_str
+        arg_list.extend(trailing_args)
+    parsed.argument_list = arg_list
+
+    if arg_list:
+        parsed.argument = " ".join(shlex.quote(a) if (" " in a or "\t" in a or not a) else a for a in arg_list)
+    else:
+        parsed.argument = ""
 
     return parsed

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.1] - 2026-09-11
+
+### 🛡️ Security, Stability & Process Lifecycle Hardening
+
+Version `0.2.1` delivers comprehensive security hardening, process lifecycle robustness, signal propagation fixes, and sandbox boundary protections identified during in-depth security audits.
+
+### Fixed & Improved
+
+- **Process Lifecycle & Signal Propagation**:
+  - Intercepted `KeyboardInterrupt` (Ctrl+C) under detached sessions (`-M`), forwarding `SIGINT` to the child process group before escalating and exiting without orphaning background processes (`SEC-R3-01`).
+  - Added process tree termination on timeout (`kill_process_tree`) terminating multi-process grandchild trees (`gcc`, `make -j`, `cargo`) on POSIX (`os.killpg`) and Windows (`taskkill /F /T`) (`SEC-R3-02`).
+  - Added graceful termination escalation: sends `SIGTERM` first with a grace period before escalating to `SIGKILL` (`SEC-R3-05`).
+  - Enforced `--timeout` uniformly on compilation steps, raising `CompilationError` on compiler freeze (`SEC-R3-06`).
+  - Eliminated the 10,000 Hz spin-wait loop in `MonitoredPopen._try_wait` on Linux, replacing it with direct blocking `os.wait4` (`SEC-R3-07`).
+  - Prevented return code forgery on `ChildProcessError`, ensuring un-reapable child failures do not forge exit code 0 (`SEC-R3-08`).
+  - Wrapped stdin file opening in outer `try...finally`, eliminating file descriptor leaks on early configuration errors (`SEC-R3-10`).
+  - Hardened `ProcfsSampler` background polling interval to 1 ms (1,000 Hz), added `threading.Lock` thread-safety, and validated `/proc/[pid]/stat` process starttime against PID recycling races (`SEC-R3-11`, `SEC-R3-12`).
+  - Configured child subreaper (`PR_SET_CHILD_SUBREAPER`) on Linux container environments (`SEC-R3-13`).
+- **Sandbox Security & Container Isolation**:
+  - Chained previous signal handlers and added reentrancy guards in `ComposeSandbox` and `PersistentSandbox` (`SEC-R3-09`).
+  - Restricted Linux `bwrap` mounts from exposing host home directories, user credentials, and Docker daemon sockets (`SEC-R1-02`).
+  - Enforced fail-closed behavior for `--restrict` on unsupported macOS configurations (`SEC-R1-01`).
+  - Isolated Dockerfile auto-building in staged temporary build directories with context hashing and container name collision defense (`SEC-R1-03`, `SEC-R1-04`, `SEC-R1-05`).
+- **Path Traversal, Pattern & Environment Hardening**:
+  - Enforced strict workspace boundary verification on `--expect` file paths (`SEC-R2-009`).
+  - Sanitized and quoted template variable and environment variable expansions (`SEC-R2-010`, `SEC-R2-011`, `SEC-R2-012`).
+  - Replaced naive shell command concatenations with lexical analyzer parsing (`SEC-R2-013`, `SEC-R2-014`).
+  - Added ReDoS protection for glob patterns, prevented directory traversal in template file generators, and verified virtualenv ownership (`SEC-R2-006`, `SEC-R2-008`, `SEC-R2-016`, `SEC-R2-017`, `SEC-R2-018`).
+
+---
+
 ## [0.2.0] - 2026-09-09
 
 ### 🚀 Highlights

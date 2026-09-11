@@ -81,7 +81,10 @@ class SecurityManager:
 
     SAFE_ENV_WHITELIST = {
         "PATH", "HOME", "USER", "LOGNAME", "TERM", "LANG", "LC_ALL", "LC_CTYPE",
-        "TMPDIR", "PWD", "TZ", "SHELL"
+        "TMPDIR", "PWD", "TZ", "SHELL",
+        # Container daemon connectivity (SEC-R1-08)
+        "DOCKER_HOST", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "DOCKER_CONTEXT",
+        "CONTAINER_HOST", "CONTAINER_SSHKEY", "PODMAN_SOCKET"
     }
 
     @staticmethod
@@ -133,7 +136,8 @@ class SecurityManager:
     @staticmethod
     def check_suspicious_flags(flags: List[str]) -> bool:
         """
-        Check for flags that explicitly try to do arbitrary code execution or plugin loading.
+        Check for flags that explicitly try to do arbitrary code execution,
+        wrapper process invocation, compiler spec override, or plugin loading.
         
         Args:
             flags (List[str]): List of flags.
@@ -141,15 +145,39 @@ class SecurityManager:
         Returns:
             bool: True if safe, False if suspicious.
         """
-        dangerous_patterns = [
+        dangerous_substrings = [
             "-Wl,-rpath",
             "-Wl,--wrap",
-            "-fplugin=",
+            "-fplugin",
             "-x assembler",
+            "-specs=",
+            "-wrapper",
+            "-Xclang",
+            "-Clinker=",
+            "-C linker=",
+            "-Clink-arg=",
+            "-C link-arg=",
         ]
-        for flag in flags:
-            for pattern in dangerous_patterns:
+        exact_dangerous = {
+            "-specs",
+            "-wrapper",
+            "-Xclang",
+        }
+        for i, flag in enumerate(flags):
+            for pattern in dangerous_substrings:
                 if pattern in flag:
                     Printer.warning(f"Suspicious flag detected: {flag}")
+                    return False
+            if flag in exact_dangerous:
+                Printer.warning(f"Suspicious flag detected: {flag}")
+                return False
+            # Check flag pairs like -x assembler, -C linker=... or -C link-arg=...
+            if flag == "-x" and i + 1 < len(flags) and flags[i + 1].startswith("assembler"):
+                Printer.warning(f"Suspicious flag detected: -x {flags[i + 1]}")
+                return False
+            if flag == "-C" and i + 1 < len(flags):
+                next_flag = flags[i + 1]
+                if next_flag.startswith(("linker=", "link-arg=")):
+                    Printer.warning(f"Suspicious flag detected: -C {next_flag}")
                     return False
         return True

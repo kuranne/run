@@ -122,7 +122,7 @@ run --doctor
 | `-w` | `--watch` | Watch mode: re-compile and run on file change |
 | `-t` | `--time` | Measure and display execution time |
 | `-M` | `--mem`, `--memory` | Measure and display peak memory usage (combine as `-tM`) |
-| | `--restrict` | Native OS isolation (bwrap on Linux, setrlimit on macOS) |
+| | `--restrict` | Native OS isolation (Linux Bubblewrap; on macOS/Windows use `--sandbox`) |
 | | `--sandbox` | Run inside an isolated Docker/Podman container |
 | | `--sandbox-net` | Allow network access within sandboxed execution |
 | `-i` | `--stdin [file]` | Redirect standard input from file or pipe |

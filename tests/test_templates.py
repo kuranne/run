@@ -6,6 +6,10 @@ class MockConfig:
     def __init__(self, data=None):
         self.data = data or {}
 
+@pytest.fixture(autouse=True)
+def isolate_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
 def test_builtin_templates_single_file(tmp_path):
     # Test Python
     py_target = tmp_path / "app.py"
@@ -127,4 +131,18 @@ def test_file_loader_path_traversal_prevention(tmp_path):
 
     with pytest.raises(ConfigError, match="outside base directory"):
         TemplateManager._load_template_content({"file": "../secret.txt"}, base_dir=sub_dir)
+
+def test_single_file_template_path_traversal_prevention(tmp_path, monkeypatch):
+    from util.errors import ConfigError
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    malicious_target = "../../../escape.py"
+    with pytest.raises(ConfigError, match="Path traversal detected"):
+        TemplateManager.generate(malicious_target, force=True)
+
+    assert not (tmp_path / "escape.py").exists()
+
 

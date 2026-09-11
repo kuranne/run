@@ -160,16 +160,32 @@ def main():
                 return False
 
         def run_once() -> list[str]:
-            runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=args.argument)
+            runner_args = getattr(args, "argument_list", None) or args.argument
+            runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=runner_args)
             
             # Check if --test-dir is provided
             if args.test_dir:
                 from runner.test_runner import TestcasesRunner
+
+                # Check for -L auto-link mode when no files are explicitly given
+                if not args.files and args.link_auto is not None:
+                    depth = args.link_auto if args.link_auto != -1 else None
+                    src_files = runner.find_source_files(Path("."), max_depth=depth)
+                    if not src_files:
+                        raise ConfigError(f"No supported source files found via -L auto-search (depth={depth}).")
+                    Printer.info(f"Auto-found {len(src_files)} source files: {src_files}")
+                    args.files = src_files
+                    args.multi = True
+
                 if not args.files:
                     raise ConfigError("A source file must be specified with --test-dir (e.g. run solution.cpp --test-dir ./tests/)")
-                target = Path(args.files[0])
+
+                is_multi = bool(args.multi or len(args.files) > 1)
+                targets = [Path(f) for f in args.files]
+                target_arg = targets if is_multi else targets[0]
+
                 try:
-                    success = TestcasesRunner.run_tests(runner, Path(args.test_dir), target)
+                    success = TestcasesRunner.run_tests(runner, Path(args.test_dir), target_arg, is_multi=is_multi)
                     if not success and not args.watch:
                         sys.exit(1)
                 finally:
@@ -231,12 +247,10 @@ def main():
         
         if is_sandbox_enabled:
             from util.sandbox import ComposeSandbox, PersistentSandbox, ContainerSandbox
-            import atexit
             
             if sandbox_cfg.get("compose"):
                 compose_file = sandbox_cfg["compose"]
                 ComposeSandbox.setup(compose_file)
-                atexit.register(ComposeSandbox.teardown, compose_file)
             elif args.watch:
                 engine = ContainerSandbox._get_engine()
                 
@@ -263,8 +277,10 @@ def main():
                         elif args.files[0].endswith(".rb"):
                             base_image = "ruby:latest"
                             
-                PersistentSandbox.start(engine, base_image, net=args.sandbox_net, cwd=os.getcwd())
-                atexit.register(PersistentSandbox.stop)
+                compiled_exts = {".c", ".cpp", ".cc", ".cxx", ".rs", ".java", ".go"}
+                is_compiled = any(Path(f).suffix.lower() in compiled_exts for f in (args.files or []))
+                writable = is_compiled or bool(sandbox_cfg.get("writable", False))
+                PersistentSandbox.start(engine, base_image, net=args.sandbox_net, cwd=os.getcwd(), writable=writable)
 
         if args.watch:
             import time

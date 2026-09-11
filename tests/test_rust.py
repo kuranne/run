@@ -44,3 +44,31 @@ def test_find_cargo_toml(tmp_path):
     handler = DummyRustRunner()
     found = handler._find_cargo_toml(main_rs)
     assert found == cargo_toml
+
+def test_get_cargo_package_name_path_traversal_rejected(tmp_path, caplog):
+    cargo_toml = tmp_path / "Cargo.toml"
+    cargo_toml.write_bytes(b"""
+    [package]
+    name = "../../../../bin/sh"
+    version = "0.1.0"
+    """)
+
+    handler = DummyRustRunner()
+    pkg_name = handler._get_cargo_package_name(cargo_toml)
+    assert pkg_name is None
+    assert "Invalid cargo package name containing path traversal characters" in caplog.text
+
+    cargo_toml.write_bytes(b"""
+    [package]
+    name = "foo/bar"
+    version = "0.1.0"
+    """)
+    assert handler._get_cargo_package_name(cargo_toml) is None
+
+    cargo_toml.write_bytes(b"""
+    [package]
+    name = "foo\\\\bar"
+    version = "0.1.0"
+    """)
+    assert handler._get_cargo_package_name(cargo_toml) is None
+

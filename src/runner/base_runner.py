@@ -4,27 +4,29 @@ import subprocess as spc
 import time
 import shlex
 import tempfile
-from typing import List, Dict, Optional, Any
+import uuid
+import signal
+from typing import List, Dict, Optional, Any, Tuple, Union
 from pathlib import Path
 from util.config import Config
 from util.output import Printer, Colors
 from util.errors import ExecutionError, CompilationError, ConfigError
 from util.security import SecurityManager
-from util.process import MonitoredPopen
+from util.process import MonitoredPopen, kill_process_tree
 
 class BaseRunner:
     """
     Base class for runners, handling common functionality like command execution,
     platform detection, and cleanup.
     """
-    def __init__(self, op_flags: Dict[str, Any], extra_flags: str = "", run_args: str = ""):
+    def __init__(self, op_flags: Dict[str, Any], extra_flags: Union[str, List[str]] = "", run_args: Union[str, List[str]] = ""):
         """
         Initialize BaseRunner.
 
         Args:
             op_flags (Dict[str, Any]): Dictionary of operation flags (e.g., 'dry_run', 'preset').
-            extra_flags (str): String of extra compiler flags.
-            run_args (str): Arguments to pass to the executed program.
+            extra_flags (Union[str, List[str]]): Extra compiler flags as a string or list.
+            run_args (Union[str, List[str]]): Arguments to pass to the executed program.
         """
         # Platform detection
         self.is_posix = os.name == "posix"
@@ -47,17 +49,24 @@ class BaseRunner:
         
         excludes = self.config.get_exclude()
         self.output_files: List[Path] = []
+        self._active_container: Optional[Tuple[str, str]] = None
         self.exclude_exts: List[str] = ['.toml', '.lock'] + excludes.get("extensions", [])
         self.exclude_files: List[str] = ['.git', '.gitignore'] + excludes.get("files", [])
         self.exclude_dirs: List[str] = ['.git', '__pycache__', 'venv', '.venv', 'build', 'bin', 'obj', 'node_modules', '.run_cache'] + excludes.get("dirs", [])
 
-        # Clean flags from extra quotes and split into list
-        clean_flags = extra_flags.strip().strip('"').strip("'")
-        self.extra_flags = shlex.split(clean_flags) if clean_flags else []
+        # Clean flags and split into list without corrupting token quotes
+        if isinstance(extra_flags, list):
+            self.extra_flags = list(extra_flags)
+        else:
+            clean_flags = extra_flags.strip() if extra_flags else ""
+            self.extra_flags = shlex.split(clean_flags) if clean_flags else []
         
         # Run args
-        clean_run_args = run_args.strip().strip('"').strip("'")
-        self.run_args = shlex.split(clean_run_args) if clean_run_args else []
+        if isinstance(run_args, list):
+            self.run_args = list(run_args)
+        else:
+            clean_run_args = run_args.strip() if run_args else ""
+            self.run_args = shlex.split(clean_run_args) if clean_run_args else []
 
         # Inject sanitizer compiler flags
         if self.flags.get("asan"):
@@ -142,100 +151,151 @@ class BaseRunner:
 
         start_time = time.perf_counter()
         
-        # Setup stdin
         stdin_file = None
-        stdin_path = self.flags.get("stdin")
-        if not compiling and stdin_path:
-            if stdin_path == "-":
-                if self._buffered_stdin is not None:
-                    stdin_file = tempfile.TemporaryFile(mode="w+")
-                    stdin_file.write(self._buffered_stdin)
-                    stdin_file.seek(0)
-            else:
-                try:
-                    stdin_file = open(stdin_path, "r")
-                except Exception as e:
-                    Printer.error(f"Failed to open stdin file {stdin_path}: {e}")
-                    raise ExecutionError(f"Failed to open stdin file '{stdin_path}': {e}")
-
-        # Setup quiet mode for compiler or output capture for expectation
-        expect_path = self.flags.get("expect") if not compiling else None
-        if expect_path:
-            stdout_dest = spc.PIPE
-        else:
-            stdout_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
-        stderr_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
-
-        is_debug = bool(self.flags.get("debug") or self.flags.get("gdb") or self.flags.get("lldb"))
-        timeout = self.flags.get("timeout") if (not compiling and not is_debug) else None
-
-        if use_shell:
-            target_cmd = shlex.join(cmd) if isinstance(cmd, list) else str(cmd)
-        else:
-            target_cmd = list(cmd) if isinstance(cmd, (list, tuple)) else shlex.split(str(cmd))
-
-        sandbox_preexec_fn = None
-        if self.flags.get("sandbox"):
-            from util.sandbox import ContainerSandbox, PersistentSandbox, ComposeSandbox
-            t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
-            sandbox_cfg = self.config.get_sandbox_config() if hasattr(self, 'config') else {}
-            
-            if PersistentSandbox._container_id:
-                t_list = PersistentSandbox.wrap_command(t_list)
-            elif sandbox_cfg.get("compose"):
-                svc = sandbox_cfg.get("compose_service", "app")
-                t_list = ComposeSandbox.wrap_command(t_list, sandbox_cfg["compose"], svc)
-            else:
-                t_list = ContainerSandbox.wrap_command(
-                    t_list, 
-                    net=self.flags.get("sandbox_net", False), 
-                    compiling=compiling, 
-                    sandbox_cfg=sandbox_cfg
-                )
-            target_cmd = shlex.join(t_list) if use_shell else t_list
-        elif not compiling and self.flags.get("restrict"):
-            from util.sandbox import NativeRestrictor
-            if sys.platform == "darwin":
-                sandbox_preexec_fn = NativeRestrictor.macos_preexec_fn
-            else:
-                t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
-                t_list = NativeRestrictor.wrap_command(t_list, net=self.flags.get("sandbox_net", False), compiling=compiling)
-                target_cmd = shlex.join(t_list) if use_shell else t_list
-
-        spc_kwargs = {
-            "shell": use_shell,
-            "env": env,
-            "stdin": stdin_file,
-            "stdout": stdout_dest,
-            "stderr": stderr_dest
-        }
-        if sandbox_preexec_fn:
-            spc_kwargs["preexec_fn"] = sandbox_preexec_fn
-
         mem_bytes = None
         captured_stdout = ""
         p = None
         try:
-            try:
-                track_mem = (not compiling) and self.flags.get("memory", False)
-                popen_cls = MonitoredPopen if track_mem else spc.Popen
-                p = popen_cls(target_cmd, **spc_kwargs)
-                stdout_bytes, stderr_bytes = p.communicate(timeout=timeout)
-                returncode = p.returncode
-                if stdout_bytes is not None:
-                    captured_stdout = stdout_bytes.decode("utf-8", errors="ignore")
-                if track_mem and isinstance(p, MonitoredPopen):
-                    mem_bytes = p.get_memory_bytes()
-            finally:
-                if stdin_file:
+            # Setup stdin
+            stdin_path = self.flags.get("stdin")
+            if not compiling and stdin_path:
+                if stdin_path == "-":
+                    if self._buffered_stdin is not None:
+                        stdin_file = tempfile.TemporaryFile(mode="w+")
+                        stdin_file.write(self._buffered_stdin)
+                        stdin_file.seek(0)
+                else:
                     try:
-                        stdin_file.close()
+                        stdin_file = open(stdin_path, "r")
+                    except Exception as e:
+                        Printer.error(f"Failed to open stdin file {stdin_path}: {e}")
+                        raise ExecutionError(f"Failed to open stdin file '{stdin_path}': {e}")
+
+            # Setup quiet mode for compiler or output capture for expectation
+            expect_path = self.flags.get("expect") if not compiling else None
+            if expect_path:
+                exp_p = Path(expect_path).resolve()
+                allowed_roots = [Path.cwd().resolve()]
+                test_dir = self.flags.get("test_dir")
+                if test_dir:
+                    try:
+                        allowed_roots.append(Path(test_dir).resolve())
                     except Exception:
                         pass
-                if not compiling:
-                    self.last_memory_bytes = mem_bytes
+                stdin_p = self.flags.get("stdin")
+                if stdin_p and stdin_p != "-":
+                    try:
+                        sp = Path(stdin_p).resolve()
+                        allowed_roots.append(sp.parent)
+                    except Exception:
+                        pass
+                for key in ("file", "source_file", "target", "target_file"):
+                    val = self.flags.get(key)
+                    if val and isinstance(val, (str, Path)):
+                        try:
+                            p_val = Path(val).resolve()
+                            allowed_roots.append(p_val if p_val.is_dir() else p_val.parent)
+                        except Exception:
+                            pass
+                if isinstance(cmd, (list, tuple)):
+                    for arg in cmd:
+                        try:
+                            p_val = Path(arg).resolve()
+                            if p_val.exists():
+                                allowed_roots.append(p_val if p_val.is_dir() else p_val.parent)
+                        except Exception:
+                            pass
+
+                is_inside = any(
+                    exp_p.is_relative_to(root) if hasattr(exp_p, "is_relative_to")
+                    else (root == exp_p or root in exp_p.parents)
+                    for root in allowed_roots
+                )
+
+                if not is_inside:
+                    if not self.flags.get("force", False):
+                        raise ConfigError(f"Access denied: Expectation file '{expect_path}' is outside the workspace. Use -f / --force to override.")
+                    else:
+                        Printer.warning(f"Using expectation file outside workspace due to --force: {expect_path}")
+
+                stdout_dest = spc.PIPE
+            else:
+                stdout_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
+            stderr_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None
+
+            is_debug = bool(self.flags.get("debug") or self.flags.get("gdb") or self.flags.get("lldb"))
+            timeout = self.flags.get("timeout") if not is_debug else None
+
+            if use_shell:
+                target_cmd = shlex.join(cmd) if isinstance(cmd, list) else str(cmd)
+            else:
+                target_cmd = list(cmd) if isinstance(cmd, (list, tuple)) else shlex.split(str(cmd))
+
+            sandbox_preexec_fn = None
+            if self.flags.get("sandbox"):
+                from util.sandbox import ContainerSandbox, PersistentSandbox, ComposeSandbox
+                t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
+                sandbox_cfg = self.config.get_sandbox_config() if hasattr(self, 'config') else {}
+                
+                if PersistentSandbox._container_id:
+                    t_list = PersistentSandbox.wrap_command(t_list, custom_env=custom_env)
+                elif sandbox_cfg.get("compose"):
+                    svc = sandbox_cfg.get("compose_service", "app")
+                    t_list = ComposeSandbox.wrap_command(
+                        t_list,
+                        sandbox_cfg["compose"],
+                        svc,
+                        custom_env=custom_env,
+                        sandbox_cfg=sandbox_cfg
+                    )
                 else:
-                    self.last_compile_memory_bytes = mem_bytes
+                    cname = f"run-sandbox-{uuid.uuid4().hex[:12]}"
+                    sandbox_cfg["container_name"] = cname
+                    try:
+                        eng = ContainerSandbox._get_engine()
+                        self._active_container = (eng, cname)
+                    except Exception:
+                        pass
+                    t_list = ContainerSandbox.wrap_command(
+                        t_list, 
+                        net=self.flags.get("sandbox_net", False), 
+                        compiling=compiling, 
+                        sandbox_cfg=sandbox_cfg,
+                        custom_env=custom_env
+                    )
+                target_cmd = shlex.join(t_list) if use_shell else t_list
+            elif self.flags.get("restrict"):
+                from util.sandbox import NativeRestrictor
+                t_list = target_cmd if isinstance(target_cmd, list) else shlex.split(target_cmd)
+                t_list = NativeRestrictor.wrap_command(t_list, net=self.flags.get("sandbox_net", False), compiling=compiling)
+                target_cmd = shlex.join(t_list) if use_shell else t_list
+
+            spc_kwargs = {
+                "shell": use_shell,
+                "env": env,
+                "stdin": stdin_file,
+                "stdout": stdout_dest,
+                "stderr": stderr_dest
+            }
+            if sandbox_preexec_fn:
+                spc_kwargs["preexec_fn"] = sandbox_preexec_fn
+            elif os.name != "nt":
+                spc_kwargs["start_new_session"] = True
+
+            track_mem = (not compiling) and self.flags.get("memory", False)
+            popen_cls = MonitoredPopen if track_mem else spc.Popen
+            p = popen_cls(target_cmd, **spc_kwargs)
+            stdout_bytes, stderr_bytes = p.communicate(timeout=timeout)
+            returncode = p.returncode
+            if stdout_bytes is not None:
+                captured_stdout = stdout_bytes.decode("utf-8", errors="ignore")
+            if track_mem and isinstance(p, MonitoredPopen):
+                mem_bytes = p.get_memory_bytes()
+
+            if not compiling:
+                self.last_memory_bytes = mem_bytes
+            else:
+                self.last_compile_memory_bytes = mem_bytes
                 
             if not compiling and not is_debug:
                 if expect_path and captured_stdout and not self.flags.get("quiet", False):
@@ -272,21 +332,44 @@ class BaseRunner:
                     raise ExecutionError(f"Execution failed with exit code {returncode}")
             return True
             
-        except spc.TimeoutExpired:
+        except KeyboardInterrupt:
             if p is not None:
                 try:
-                    p.kill()
-                    p.wait(timeout=5)
+                    kill_process_tree(p, initial_sig=signal.SIGINT, grace_period=0.5)
+                except Exception:
+                    pass
+            raise
+        except spc.TimeoutExpired:
+            if self._active_container:
+                eng, cname = self._active_container
+                try:
+                    spc.run([eng, "kill", cname], capture_output=True, timeout=5)
+                except Exception:
+                    pass
+                self._active_container = None
+            if p is not None:
+                try:
+                    kill_process_tree(p, initial_sig=signal.SIGTERM, grace_period=1.0)
                     if track_mem and isinstance(p, MonitoredPopen):
                         mem_bytes = p.get_memory_bytes()
                         if not compiling:
                             self.last_memory_bytes = mem_bytes
                 except Exception:
                     pass
-            raise ExecutionError(f"Execution timed out after {timeout} seconds.")
+            if compiling:
+                raise CompilationError(f"Compilation timed out after {timeout} seconds.")
+            else:
+                raise ExecutionError(f"Execution timed out after {timeout} seconds.")
         except FileNotFoundError:
             cmd_name = cmd[0] if isinstance(cmd, list) and cmd else str(cmd)
             raise ExecutionError(f"Command '{cmd_name}' not found.")
+        finally:
+            if stdin_file:
+                try:
+                    stdin_file.close()
+                except Exception:
+                    pass
+            self._active_container = None
         
     def _compile_c_family(self, fp: Path):
         """

@@ -2,7 +2,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Union
 from util.output import Printer, Colors
 
 class TestcasesRunner:
@@ -69,18 +69,46 @@ class TestcasesRunner:
         return sorted(pairs, key=lambda p: cls._natural_sort_key(p[0]))
 
     @classmethod
-    def run_tests(cls, runner: Any, test_dir: Path, target_file: Path) -> bool:
+    def run_tests(
+        cls,
+        runner: Any,
+        test_dir: Path,
+        target: Union[Path, List[Path], str, List[str], None] = None,
+        is_multi: bool = False,
+        target_file: Optional[Union[Path, str]] = None,
+    ) -> bool:
         """
         Execute testsuite across all discovered testcase pairs.
 
         Args:
             runner (Any): CompilerRunner or BaseRunner instance.
             test_dir (Path): Directory containing test cases.
-            target_file (Path): Target source file to compile and test.
+            target (Union[Path, List[Path], str, List[str], None]): Target source file(s) to compile and test.
+            is_multi (bool): Whether multi-file compilation mode is enabled.
+            target_file (Optional[Union[Path, str]]): Backward-compatible alias for target.
 
         Returns:
             bool: True if all testcases passed, False otherwise.
         """
+        if target is None:
+            target = target_file
+        if target is None:
+            raise ValueError("Target file(s) must be specified for run_tests.")
+
+        if isinstance(target, (str, Path)):
+            target_files = [Path(target)]
+        elif isinstance(target, (list, tuple)):
+            target_files = [Path(p) for p in target]
+        else:
+            target_files = [Path(target)]
+
+        if not target_files:
+            Printer.error("No target files provided for run_tests.")
+            return False
+
+        if len(target_files) > 1:
+            is_multi = True
+
         pairs = cls.discover_test_pairs(test_dir)
         if not pairs:
             Printer.warning(f"No matching test pairs found in '{test_dir}'. Expected *.in + *.out or in*.txt + out*.txt.")
@@ -93,25 +121,66 @@ class TestcasesRunner:
         failed_count = 0
 
         # Phase 1: Compile once if target is a compiled language
-        ext = target_file.suffix.lower()
-        compiled_exts = {".c", ".cpp", ".cc", ".cxx", ".rs", ".java"}
-        is_compiled = ext in compiled_exts
+        is_compiled = False
         bin_path = None
 
-        if is_compiled and hasattr(runner, "get_executable_path"):
-            bin_path = runner.get_executable_path(target_file)
-            runner.flags["build_only"] = True
-            try:
-                compile_ok = runner._handle_single_file(target_file)
-                if not compile_ok:
-                    Printer.error(f"Compilation failed for {target_file}")
+        if is_multi:
+            c_exts = getattr(runner, "c_family_ext", {".c", ".cpp", ".cc", ".cxx"})
+            c_sources = [p for p in target_files if p.suffix in c_exts]
+            first_ext = target_files[0].suffix.lower()
+            lang_config = runner.config.get_language_by_extension(first_ext) if hasattr(runner, "config") and runner.config else None
+
+            if c_sources:
+                from runner.cpm import CPM
+                main_source = CPM.get_main_file(c_sources) or c_sources[0]
+                if hasattr(runner, "get_executable_path"):
+                    bin_path = runner.get_executable_path(main_source)
+                is_compiled = True
+            elif lang_config and (lang_config.get("compile") or lang_config.get("build")):
+                main_candidate = next((p for p in target_files if p.stem.lower() == "main"), target_files[0])
+                if hasattr(runner, "get_executable_path"):
+                    bin_path = runner.get_executable_path(main_candidate)
+                is_compiled = True
+            elif any(p.suffix in getattr(runner, "java_ext", {".java"}) for p in target_files):
+                is_compiled = True
+
+            if is_compiled and hasattr(runner, "_handle_multi_compile"):
+                runner.flags["build_only"] = True
+                try:
+                    runner._handle_multi_compile(target_files)
+                    if bin_path and not bin_path.exists():
+                        Printer.error(f"Multi-file compilation failed to produce binary: {bin_path}")
+                        return False
+                except Exception as e:
+                    Printer.error(f"Multi-file compilation failed: {e}")
                     return False
-            finally:
-                runner.flags["build_only"] = False
+                finally:
+                    runner.flags["build_only"] = False
+        else:
+            target_file_obj = target_files[0]
+            ext = target_file_obj.suffix.lower()
+            compiled_exts = {".c", ".cpp", ".cc", ".cxx", ".rs", ".java"}
+            is_compiled = ext in compiled_exts
+
+            if is_compiled and hasattr(runner, "get_executable_path"):
+                bin_path = runner.get_executable_path(target_file_obj)
+                runner.flags["build_only"] = True
+                try:
+                    compile_ok = runner._handle_single_file(target_file_obj)
+                    if not compile_ok:
+                        Printer.error(f"Compilation failed for {target_file_obj}")
+                        return False
+                except Exception as e:
+                    Printer.error(f"Compilation failed for {target_file_obj}: {e}")
+                    return False
+                finally:
+                    runner.flags["build_only"] = False
 
         orig_stdin = runner.flags.get("stdin")
         orig_expect = runner.flags.get("expect")
+        orig_test_dir = runner.flags.get("test_dir")
         orig_buffered_stdin = getattr(runner, "_buffered_stdin", None)
+        runner.flags["test_dir"] = str(test_dir)
 
         try:
             # Phase 2: Execute all test cases
@@ -131,10 +200,12 @@ class TestcasesRunner:
                 try:
                     if is_compiled and bin_path and bin_path.exists() and hasattr(runner, "_execute_binary"):
                         success = runner._execute_binary(bin_path)
+                    elif is_multi and hasattr(runner, "_handle_multi_compile"):
+                        success = runner._handle_multi_compile(target_files)
                     else:
-                        success = runner._handle_single_file(target_file)
+                        success = runner._handle_single_file(target_files[0])
                     elapsed = time.perf_counter() - start_t
-                    
+
                     if success:
                         passed_count += 1
                     else:
@@ -146,6 +217,10 @@ class TestcasesRunner:
             runner.flags["stdin"] = orig_stdin
             runner.flags["expect"] = orig_expect
             runner._buffered_stdin = orig_buffered_stdin
+            if orig_test_dir is not None:
+                runner.flags["test_dir"] = orig_test_dir
+            else:
+                runner.flags.pop("test_dir", None)
 
         total = len(pairs)
         print(f"\n{Colors.BOLD}{Colors.CYAN}=== Test Summary ==={Colors.RESET}")

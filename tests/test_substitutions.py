@@ -108,3 +108,40 @@ def test_env_var_substitution_with_spaces_no_quotes(monkeypatch):
     list_result = VariableSubstitutor.substitute_list(["--opt=${env:SPACED_VAR}"], context)
     assert list_result == ["--opt=hello world"]
 
+def test_substitutions_path_with_spaces_quoted():
+    """Verify paths with whitespace are quoted to prevent argument splitting (SEC-R2-010)."""
+    import shlex
+    src = Path("my workspace/main code.cpp")
+    out = Path("build output/app binary.out")
+    ctx = VariableSubstitutor.build_file_context(file_path=src, out_path=out, out_dir="build output")
+
+    template = "g++ -I${dir} ${file} -o ${out}"
+    expanded = VariableSubstitutor.substitute_string(template, ctx)
+    tokens = shlex.split(expanded)
+
+    assert tokens == ["g++", "-Imy workspace", "my workspace/main code.cpp", "-o", "build output/app binary.out"]
+
+def test_substitutions_files_consistently_quoted():
+    """Verify ${files} consistently quotes each path (SEC-R2-011)."""
+    import shlex
+    files = [Path("normal.c"), Path("has space.c"), Path("special$name.c")]
+    ctx = VariableSubstitutor.build_multi_file_context(files)
+    tokens = shlex.split(ctx["files"])
+    assert tokens == ["normal.c", "has space.c", "special$name.c"]
+
+def test_env_var_substitution_dangerous_blocked(monkeypatch):
+    """Verify dangerous environment variables are rejected during template expansion (SEC-R2-012)."""
+    monkeypatch.setenv("LD_PRELOAD", "/lib/evil.so")
+    monkeypatch.setenv("DYLD_INSERT_LIBRARIES", "/lib/evil.dylib")
+    context = {}
+    assert VariableSubstitutor.substitute_string("run ${env:LD_PRELOAD}", context) == "run "
+    assert VariableSubstitutor.substitute_string("run ${env:DYLD_INSERT_LIBRARIES}", context) == "run "
+
+def test_env_var_substitution_sanitizes_control_chars_and_quotes(monkeypatch):
+    """Verify control chars are stripped and quote_env properly quotes values (SEC-R2-012)."""
+    monkeypatch.setenv("INJECT_VAR", "foo\r\nbaz")
+    monkeypatch.setenv("SPACED_OPT", "val with spaces")
+    context = {}
+    assert VariableSubstitutor.substitute_string("${env:INJECT_VAR}", context) == "foobaz"
+    assert VariableSubstitutor.substitute_string("cmd ${env:SPACED_OPT}", context, quote_env=True) == "cmd 'val with spaces'"
+
