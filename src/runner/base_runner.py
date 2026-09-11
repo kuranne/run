@@ -169,6 +169,19 @@ class BaseRunner:
         # Setup quiet mode for compiler or output capture for expectation
         expect_path = self.flags.get("expect") if not compiling else None
         if expect_path:
+            exp_p = Path(expect_path).resolve()
+            cwd = Path.cwd().resolve()
+            try:
+                is_inside = exp_p.is_relative_to(cwd)
+            except AttributeError:
+                is_inside = (cwd == exp_p or cwd in exp_p.parents)
+
+            if not is_inside:
+                if not self.flags.get("force", False):
+                    raise ConfigError(f"Access denied: Expectation file '{expect_path}' is outside the workspace. Use -f / --force to override.")
+                else:
+                    Printer.warning(f"Using expectation file outside workspace due to --force: {expect_path}")
+
             stdout_dest = spc.PIPE
         else:
             stdout_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None

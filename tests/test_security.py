@@ -170,3 +170,27 @@ def test_core_runner_rejects_suspicious_path(tmp_path, monkeypatch, caplog):
     assert "Processing file with suspicious characters due to --force" in caplog.text
 
 
+def test_base_runner_expect_boundary_enforcement(tmp_path, monkeypatch):
+    from runner.base_runner import BaseRunner
+    from util.errors import ConfigError
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    outside = tmp_path / "outside_secret.txt"
+    outside.write_text("secret_data")
+
+    # 1. Reject --expect outside workspace without --force
+    runner = BaseRunner(op_flags={"expect": str(outside), "force": False})
+    with pytest.raises(ConfigError, match="outside the workspace"):
+        runner.run_command(["echo", "hello"], compiling=False)
+
+    # 2. Allow with --force
+    runner_force = BaseRunner(op_flags={"expect": str(outside), "force": True})
+    # Execution proceeds to check expectation; fails match but does not raise ConfigError
+    success = runner_force.run_command(["echo", "hello"], compiling=False)
+    assert success is False
+
+
+
