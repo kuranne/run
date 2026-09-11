@@ -13,6 +13,7 @@ import re
 import sys
 import time
 import subprocess
+import signal
 import pytest
 from pathlib import Path
 from typing import List, Optional
@@ -518,3 +519,77 @@ def test_real_world_multi_file_sequential_runs(tmp_path, capsys):
     runner.run_command([sys.executable, str(f4)])
     m4 = parse_last_peak_memory_bytes(capsys.readouterr().out)
     assert m4 is not None and m4 < 35 * 1024 * 1024, f"File 4 stacked: {m4/(1024*1024):.2f}MB"
+
+
+def test_procfs_sampler_thread_safety_and_pid_recycling(monkeypatch):
+    """SEC-R3-11, SEC-R3-12: Test sampler concurrency and recycling."""
+    from util.process import ProcfsSampler
+    import threading
+
+    sampler = ProcfsSampler(pid=99999, interval=0.001)
+    sampler._expected_starttime = 12345
+
+    # Simulate /proc status returning 50MB
+    monkeypatch.setattr(
+        "util.process._read_procfs_vmhwm",
+        lambda pid: 50 * 1024 * 1024
+    )
+
+    # Concurrency test: multiple threads calling sample()
+    threads = []
+    for _ in range(10):
+        t = threading.Thread(target=sampler.sample)
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sampler.peak_bytes == 50 * 1024 * 1024
+
+    # PID recycling test: starttime changes
+    monkeypatch.setattr(
+        "util.process._read_procfs_starttime",
+        lambda pid: 99999
+    )
+    # Different starttime should trigger stop event and return peak_bytes
+    res = sampler.sample()
+    assert res == 50 * 1024 * 1024
+    assert sampler._stop_event.is_set()
+
+
+def test_child_process_error_does_not_forge_zero_exit_code(monkeypatch):
+    """SEC-R3-08: Test ChildProcessError does not forge return code 0."""
+    # Mock os.wait4 to raise ChildProcessError
+    def mock_wait4(pid, flags):
+        raise ChildProcessError("No child processes")
+
+    monkeypatch.setattr(os, "wait4", mock_wait4)
+
+    p = MonitoredPopen([sys.executable, "-c", "pass"])
+
+    # In _try_wait with ChildProcessError and returncode None, must return 1
+    pid, sts = p._try_wait(0)
+    assert sts != 0
+    assert sts == 1
+
+    # In _internal_poll with _deadstate=None, returncode must be 1, not 0
+    p.returncode = None
+    ret = p._internal_poll(_deadstate=None)
+    assert ret == 1
+
+    # In _internal_poll with _deadstate=42, returncode must be 42
+    p.returncode = None
+    ret2 = p._internal_poll(_deadstate=42)
+    assert ret2 == 42
+
+
+def test_kill_process_tree_escalates_to_sigkill():
+    """SEC-R3-02, SEC-R3-05: Test kill_process_tree terminates process."""
+    from util.process import kill_process_tree
+    import subprocess
+
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    assert p.poll() is None
+
+    kill_process_tree(p, initial_sig=signal.SIGTERM, grace_period=0.5)
+    assert p.poll() is not None

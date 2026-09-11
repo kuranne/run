@@ -248,19 +248,37 @@ class ComposeSandbox:
     
     _active_files: List[str] = []
     _cleanup_registered: bool = False
+    _cleaning: bool = False
+    _previous_handlers: Dict[int, Any] = {}
 
     @classmethod
     def _register_cleanup(cls):
         if not cls._cleanup_registered:
             atexit.register(cls._cleanup_all)
+
             def _sig_handler(signum, frame):
-                cls._cleanup_all()
-                sys.exit(128 + signum)
-            try:
-                signal.signal(signal.SIGTERM, _sig_handler)
-                signal.signal(signal.SIGINT, _sig_handler)
-            except (ValueError, AttributeError):
-                pass
+                if not cls._cleaning:
+                    cls._cleaning = True
+                    try:
+                        cls._cleanup_all()
+                    except Exception:
+                        pass
+                prev = cls._previous_handlers.get(signum)
+                if callable(prev):
+                    prev(signum, frame)
+                elif prev == signal.SIG_DFL:
+                    signal.signal(signum, signal.SIG_DFL)
+                    os.kill(os.getpid(), signum)
+                else:
+                    sys.exit(128 + signum)
+
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    prev = signal.getsignal(sig)
+                    cls._previous_handlers[sig] = prev
+                    signal.signal(sig, _sig_handler)
+                except (ValueError, AttributeError):
+                    pass
             cls._cleanup_registered = True
 
     @classmethod
@@ -327,19 +345,37 @@ class PersistentSandbox:
     _container_id: Optional[str] = None
     _engine: str = "docker"
     _cleanup_registered: bool = False
+    _cleaning: bool = False
+    _previous_handlers: Dict[int, Any] = {}
 
     @classmethod
     def _register_cleanup(cls):
         if not cls._cleanup_registered:
             atexit.register(cls.stop)
+
             def _sig_handler(signum, frame):
-                cls.stop()
-                sys.exit(128 + signum)
-            try:
-                signal.signal(signal.SIGTERM, _sig_handler)
-                signal.signal(signal.SIGINT, _sig_handler)
-            except (ValueError, AttributeError):
-                pass
+                if not cls._cleaning:
+                    cls._cleaning = True
+                    try:
+                        cls.stop()
+                    except Exception:
+                        pass
+                prev = cls._previous_handlers.get(signum)
+                if callable(prev):
+                    prev(signum, frame)
+                elif prev == signal.SIG_DFL:
+                    signal.signal(signum, signal.SIG_DFL)
+                    os.kill(os.getpid(), signum)
+                else:
+                    sys.exit(128 + signum)
+
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    prev = signal.getsignal(sig)
+                    cls._previous_handlers[sig] = prev
+                    signal.signal(sig, _sig_handler)
+                except (ValueError, AttributeError):
+                    pass
             cls._cleanup_registered = True
 
     @classmethod

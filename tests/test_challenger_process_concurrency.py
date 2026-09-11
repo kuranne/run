@@ -300,3 +300,146 @@ def test_persistent_sandbox_lifecycle(monkeypatch):
     # Stop
     PersistentSandbox.stop()
     assert PersistentSandbox._container_id is None
+
+
+def test_compilation_timeout_raises_compilation_error():
+    """SEC-R3-06: Verify hanging compilation steps are timed out and raise CompilationError."""
+    runner = CompilerRunner({"timeout": 1, "quiet": True})
+    cmd = [sys.executable, "-c", "import time; time.sleep(10)"]
+    start = time.perf_counter()
+    with pytest.raises(CompilationError, match="Compilation timed out after 1 seconds"):
+        runner.run_command(cmd, compiling=True)
+    duration = time.perf_counter() - start
+    assert duration < 4.0
+
+
+def test_stdin_fd_closed_on_config_error(tmp_path, monkeypatch):
+    """SEC-R3-10: Verify stdin file descriptor is closed when early error occurs."""
+    monkeypatch.chdir(tmp_path)
+    stdin_file = tmp_path / "input.txt"
+    stdin_file.write_text("hello stdin\n")
+
+    external_expect = Path("/tmp/run_external_expect_test_xyz.txt")
+    external_expect.write_text("expected")
+
+    runner = CompilerRunner({
+        "stdin": str(stdin_file),
+        "expect": str(external_expect),
+        "force": False,
+        "quiet": True,
+    })
+
+    opened_files = []
+    real_open = open
+
+    def tracking_open(*args, **kwargs):
+        f = real_open(*args, **kwargs)
+        if str(stdin_file) in str(args[0]):
+            opened_files.append(f)
+        return f
+
+    monkeypatch.setattr("builtins.open", tracking_open)
+    with pytest.raises(ConfigError, match="outside the workspace"):
+        runner.run_command([sys.executable, "-c", "pass"])
+
+    assert len(opened_files) == 1
+    assert opened_files[0].closed is True
+
+
+def test_timeout_terminates_grandchild_process_tree(tmp_path, monkeypatch):
+    """SEC-R3-02, SEC-R3-05: Verify timeout terminates grandchild workers."""
+    monkeypatch.chdir(tmp_path)
+    pid_file = tmp_path / "grandchild.pid"
+
+    script_content = (
+        "import subprocess, sys, time\n"
+        "p = subprocess.Popen([sys.executable, '-c', 'import time; "
+        "time.sleep(30)'])\n"
+        f"with open('{pid_file}', 'w') as f:\n"
+        "    f.write(str(p.pid))\n"
+        "time.sleep(30)\n"
+    )
+    script = tmp_path / "parent_worker.py"
+    script.write_text(script_content)
+
+    runner = CompilerRunner({"timeout": 1, "quiet": True})
+    with pytest.raises(ExecutionError, match="timed out"):
+        runner.run_command([sys.executable, str(script)])
+
+    assert pid_file.exists()
+    grandchild_pid = int(pid_file.read_text().strip())
+
+    time.sleep(0.5)
+    try:
+        os.kill(grandchild_pid, 0)
+        is_alive = True
+    except (ProcessLookupError, OSError):
+        is_alive = False
+    assert not is_alive, f"Grandchild PID {grandchild_pid} leaked!"
+
+
+def test_ctrl_c_keyboard_interrupt_kills_process_tree(tmp_path, monkeypatch):
+    """SEC-R3-01: Verify KeyboardInterrupt terminates child and tree."""
+    monkeypatch.chdir(tmp_path)
+    pid_file = tmp_path / "child.pid"
+
+    script_content = (
+        "import os, time\n"
+        f"with open('{pid_file}', 'w') as f:\n"
+        "    f.write(str(os.getpid()))\n"
+        "time.sleep(30)\n"
+    )
+    script = tmp_path / "sleep_child.py"
+    script.write_text(script_content)
+
+    runner = CompilerRunner({"memory": True, "quiet": True})
+
+    from util.process import MonitoredPopen
+
+    def interrupt_comm(self, *args, **kwargs):
+        for _ in range(50):
+            if pid_file.exists() and pid_file.read_text().strip():
+                break
+            time.sleep(0.02)
+        raise KeyboardInterrupt("Simulated Ctrl+C")
+
+    monkeypatch.setattr(MonitoredPopen, "communicate", interrupt_comm)
+
+    with pytest.raises(KeyboardInterrupt):
+        runner.run_command([sys.executable, str(script)])
+
+    assert pid_file.exists()
+    child_pid = int(pid_file.read_text().strip())
+
+    time.sleep(0.3)
+    try:
+        os.kill(child_pid, 0)
+        is_alive = True
+    except (ProcessLookupError, OSError):
+        is_alive = False
+    assert not is_alive, f"Child PID {child_pid} was orphaned after Ctrl+C!"
+
+
+def test_sandbox_signal_chaining(monkeypatch):
+    """SEC-R3-09: Verify sandbox cleanups chain previous signal handlers."""
+    PersistentSandbox._cleanup_registered = False
+    PersistentSandbox._cleaning = False
+    PersistentSandbox._previous_handlers = {}
+
+    called_prev = []
+
+    def custom_handler(signum, frame):
+        called_prev.append(signum)
+
+    signal.signal(signal.SIGTERM, custom_handler)
+    try:
+        PersistentSandbox._register_cleanup()
+        assert (PersistentSandbox._previous_handlers[signal.SIGTERM] ==
+                custom_handler)
+
+        handler = signal.getsignal(signal.SIGTERM)
+        handler(signal.SIGTERM, None)
+        assert signal.SIGTERM in called_prev
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        PersistentSandbox._cleanup_registered = False
