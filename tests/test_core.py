@@ -143,3 +143,22 @@ def test_missing_stdin_file_raises_error():
     with pytest.raises(ExecutionError, match="Failed to open stdin file"):
         runner.run_command(["python3", "-c", "pass"])
 
+def test_runner_quoted_arguments_and_flags():
+    # Multi-token quoted arguments must not have quotes stripped at boundaries
+    runner = CompilerRunner(
+        {},
+        extra_flags='-DVAR="hello world" -Wall',
+        run_args="'arg1' 'arg2'"
+    )
+    assert runner.extra_flags == ['-DVAR=hello world', '-Wall']
+    assert runner.run_args == ['arg1', 'arg2']
+
+    # Structured list support
+    runner_list = CompilerRunner(
+        {},
+        extra_flags=['-O3', '-DDEBUG'],
+        run_args=['arg with space', 'arg2']
+    )
+    assert runner_list.extra_flags == ['-O3', '-DDEBUG']
+    assert runner_list.run_args == ['arg with space', 'arg2']
+
