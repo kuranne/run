@@ -22,7 +22,19 @@ def test_sanitize_execution_env(monkeypatch):
 def test_check_suspicious_flags():
     assert SecurityManager.check_suspicious_flags(["-g", "-Wall", "-O3"]) is True
     assert SecurityManager.check_suspicious_flags(["-fplugin=/tmp/evil.so"]) is False
+    assert SecurityManager.check_suspicious_flags(["-fplugin-arg-evil=1"]) is False
     assert SecurityManager.check_suspicious_flags(["-Wl,-rpath,/tmp"]) is False
+    assert SecurityManager.check_suspicious_flags(["-Wl,--wrap,malloc"]) is False
+    assert SecurityManager.check_suspicious_flags(["-x", "assembler"]) is False
+    assert SecurityManager.check_suspicious_flags(["-specs=/tmp/evil.spec"]) is False
+    assert SecurityManager.check_suspicious_flags(["-specs", "evil.spec"]) is False
+    assert SecurityManager.check_suspicious_flags(["-wrapper", "/bin/sh"]) is False
+    assert SecurityManager.check_suspicious_flags(["-wrapper=/bin/sh"]) is False
+    assert SecurityManager.check_suspicious_flags(["-Xclang", "-load"]) is False
+    assert SecurityManager.check_suspicious_flags(["-Clinker=/bin/sh"]) is False
+    assert SecurityManager.check_suspicious_flags(["-C", "linker=/bin/sh"]) is False
+    assert SecurityManager.check_suspicious_flags(["-Clink-arg=-Wl,-rpath,/tmp"]) is False
+    assert SecurityManager.check_suspicious_flags(["-C", "link-arg=-Wl,-rpath,/tmp"]) is False
 
 def test_check_root_allow_override(monkeypatch):
     monkeypatch.setattr(os, "geteuid", lambda: 0)

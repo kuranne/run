@@ -94,4 +94,5 @@ def test_node_debug_command(monkeypatch):
     assert len(executed_cmds) == 1
     assert executed_cmds[0][0] == "node"
     assert executed_cmds[0][1] == "--inspect-brk"
-    assert executed_cmds[0][2] == "app.js"
+    assert executed_cmds[0][2] == "--"
+    assert executed_cmds[0][3] == "app.js"
