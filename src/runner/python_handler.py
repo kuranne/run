@@ -55,7 +55,8 @@ class PythonHandler:
             Printer.error(str(e))
             return
 
+        target = f"./{fp}" if str(fp).startswith("-") else str(fp)
         if self.flags.get("debug"):
-            return self.run_command([prog, "-m", "pdb", str(fp)] + self.run_args)
+            return self.run_command([prog, "-m", "pdb", "--", target] + self.run_args)
         else:
-            return self.run_command([prog, str(fp)] + self.run_args)
+            return self.run_command([prog, "--", target] + self.run_args)

@@ -21,13 +21,16 @@ class JavaHandler:
         before_state = JPM.record_class_files(parent_dir)
 
         # Compile the Java file
-        cmd = [compiler] + self.extra_flags + preset_flags + [str(fp)]
+        target = f"./{fp}" if str(fp).startswith("-") else str(fp)
+        cmd = [compiler] + self.extra_flags + preset_flags + [target]
         self.run_command(cmd, compiling=True)
         
         # Extract main class and run
         main_class = JPM.get_main_class(fp)
         if not main_class:
             raise ExecutionError(f"Could not extract main class from {fp}")
+        if main_class.startswith("-"):
+            raise ExecutionError(f"Invalid main class name: {main_class}")
 
         # Track newly created or modified .class files for cleanup
         self.output_files.extend(JPM.get_new_class_files(parent_dir, before_state))
@@ -56,7 +59,8 @@ class JavaHandler:
         before_state = JPM.record_class_files(parent_dirs)
 
         # Compile all Java files
-        cmd = [compiler] + self.extra_flags + preset_flags + [str(s) for s in sources]
+        targets = [f"./{s}" if str(s).startswith("-") else str(s) for s in sources]
+        cmd = [compiler] + self.extra_flags + preset_flags + targets
         self.run_command(cmd, compiling=True)
         
         # Extract main class from the file containing the main method
@@ -64,6 +68,8 @@ class JavaHandler:
         main_class = JPM.get_main_class(main_source)
         if not main_class:
             raise ExecutionError(f"Could not extract main class from {main_source}")
+        if main_class.startswith("-"):
+            raise ExecutionError(f"Invalid main class name: {main_class}")
             
         # Track new or modified .class files for cleanup
         self.output_files.extend(JPM.get_new_class_files(parent_dirs, before_state))
