@@ -178,7 +178,9 @@ class TestcasesRunner:
 
         orig_stdin = runner.flags.get("stdin")
         orig_expect = runner.flags.get("expect")
+        orig_test_dir = runner.flags.get("test_dir")
         orig_buffered_stdin = getattr(runner, "_buffered_stdin", None)
+        runner.flags["test_dir"] = str(test_dir)
 
         try:
             # Phase 2: Execute all test cases
@@ -215,6 +217,10 @@ class TestcasesRunner:
             runner.flags["stdin"] = orig_stdin
             runner.flags["expect"] = orig_expect
             runner._buffered_stdin = orig_buffered_stdin
+            if orig_test_dir is not None:
+                runner.flags["test_dir"] = orig_test_dir
+            else:
+                runner.flags.pop("test_dir", None)
 
         total = len(pairs)
         print(f"\n{Colors.BOLD}{Colors.CYAN}=== Test Summary ==={Colors.RESET}")
