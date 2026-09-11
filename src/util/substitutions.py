@@ -37,19 +37,19 @@ class VariableSubstitutor:
         """
         ctx: Dict[str, str] = {}
         if file_path:
-            ctx["file"] = str(file_path)
+            ctx["file"] = shlex.quote(str(file_path))
             ctx["files"] = shlex.quote(str(file_path)) if " " in str(file_path) else str(file_path)
-            ctx["filename"] = file_path.name
+            ctx["filename"] = shlex.quote(file_path.name) if " " in file_path.name else file_path.name
             ctx["name"] = file_path.stem
             ctx["stem"] = file_path.stem
             ctx["ext"] = file_path.suffix
-            ctx["dir"] = str(file_path.parent)
-            ctx["parent"] = str(file_path.parent)
+            ctx["dir"] = shlex.quote(str(file_path.parent))
+            ctx["parent"] = shlex.quote(str(file_path.parent))
         if out_path:
-            ctx["out"] = str(out_path)
-            ctx["executable"] = str(out_path)
+            ctx["out"] = shlex.quote(str(out_path))
+            ctx["executable"] = shlex.quote(str(out_path))
         if out_dir:
-            ctx["out_dir"] = out_dir
+            ctx["out_dir"] = shlex.quote(str(out_dir))
         return ctx
 
     @classmethod

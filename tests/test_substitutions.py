@@ -108,3 +108,16 @@ def test_env_var_substitution_with_spaces_no_quotes(monkeypatch):
     list_result = VariableSubstitutor.substitute_list(["--opt=${env:SPACED_VAR}"], context)
     assert list_result == ["--opt=hello world"]
 
+def test_substitutions_path_with_spaces_quoted():
+    """Verify paths with whitespace are quoted to prevent argument splitting (SEC-R2-010)."""
+    import shlex
+    src = Path("my workspace/main code.cpp")
+    out = Path("build output/app binary.out")
+    ctx = VariableSubstitutor.build_file_context(file_path=src, out_path=out, out_dir="build output")
+
+    template = "g++ -I${dir} ${file} -o ${out}"
+    expanded = VariableSubstitutor.substitute_string(template, ctx)
+    tokens = shlex.split(expanded)
+
+    assert tokens == ["g++", "-Imy workspace", "my workspace/main code.cpp", "-o", "build output/app binary.out"]
+
