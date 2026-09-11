@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 from typing import Optional, List, Union
@@ -15,6 +16,11 @@ def compile_glob(pattern: str, case_sensitive: bool = True) -> re.Pattern:
     if clean_pat.endswith("/"):
         clean_pat = clean_pat[:-1]
 
+    # Collapse consecutive wildcards and redundant globstar tokens to prevent ReDoS
+    clean_pat = re.sub(r"\*{3,}", "**", clean_pat)
+    clean_pat = re.sub(r"(?:\*\*/)+", "**/", clean_pat)
+    clean_pat = re.sub(r"(?:/\*\*)+", "/**", clean_pat)
+
     i, n = 0, len(clean_pat)
     res = []
     while i < n:
@@ -25,7 +31,7 @@ def compile_glob(pattern: str, case_sensitive: bool = True) -> re.Pattern:
                 i += 1
                 if i < n and clean_pat[i] == "/":
                     i += 1
-                    res.append("(?:.*/)?")
+                    res.append("(?:[^/]+/)*")
                 else:
                     res.append(".*")
             else:
@@ -79,11 +85,11 @@ def match_path(file_path: Union[Path, str], pattern: str, root_dir: Optional[Uni
     if "/" in norm_pat:
         if root_dir is not None:
             try:
-                rel_path = path_obj.resolve().relative_to(Path(root_dir).resolve()).as_posix()
+                rel_path = Path(os.path.relpath(path_obj, root_dir)).as_posix()
             except ValueError:
-                rel_path = path_obj.as_posix()
+                rel_path = path_obj.as_posix().lstrip("/")
         else:
-            rel_path = path_obj.as_posix()
+            rel_path = path_obj.as_posix().lstrip("/")
 
         regex = compile_glob(clean_pat, case_sensitive)
         return bool(regex.match(rel_path))

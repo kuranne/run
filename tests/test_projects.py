@@ -189,4 +189,20 @@ def test_run_project_mixed_compound_operators(tmp_path, monkeypatch):
     assert runner.executed[2][0] == ["cargo", "build"]
     assert runner.executed[3][0] == ["echo", "ok"]
 
+def test_detect_project_stops_at_git_root(tmp_path):
+    # Manifest outside repository
+    (tmp_path / "Cargo.toml").write_text('[package]\nname = "outside"\n')
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / ".git").mkdir()
+
+    sub_dir = repo_dir / "sub"
+    sub_dir.mkdir()
+
+    config = Config()
+    detected = ProjectRunner.detect_project(sub_dir, config)
+    assert detected is None
+
+
 

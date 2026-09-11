@@ -43,16 +43,30 @@ class Config:
         config_path = None
         
         # 1. Search in current workspace (up to 4 levels)
-        current = start_dir if start_dir is not None else Path.cwd()
+        current = (start_dir if start_dir is not None else Path.cwd()).resolve()
+        start_dev = current.stat().st_dev if hasattr(current, "stat") else None
+
         for i in range(4):  # 0=current, 1=parent, 2=grandparent, 3=great-grandparent
             target = current / "Run.toml"
             if target.exists():
                 config_path = target
                 break
             
-            if current == current.parent:
+            # Stop upward traversal at Git repository root or filesystem boundaries
+            if (current / ".git").exists() or current == current.parent:
                 break
-            current = current.parent
+
+            parent = current.parent
+            try:
+                if start_dev is not None and parent.stat().st_dev != start_dev:
+                    break
+            except OSError:
+                break
+
+            if str(current) in ("/tmp", "/var/tmp", "/private/tmp"):
+                break
+
+            current = parent
 
         # 2. If not found in workspace, check global config directory
         if not config_path:

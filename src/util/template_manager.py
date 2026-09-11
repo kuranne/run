@@ -134,7 +134,8 @@ echo "Hello, World!"
         target_name: str,
         template_name: Optional[str] = None,
         config: Optional[Any] = None,
-        force: bool = False
+        force: bool = False,
+        base_dir: Optional[Path] = None
     ) -> bool:
         """
         Generate single-file or multi-file template scaffolding.
@@ -144,11 +145,22 @@ echo "Hello, World!"
             template_name (Optional[str]): Template identifier from Run.toml.
             config (Optional[Any]): Config instance containing custom templates.
             force (bool): Whether to overwrite existing files.
+            base_dir (Optional[Path]): Base directory for containment checks (defaults to Path.cwd()).
 
         Returns:
             bool: True if generation succeeded, False otherwise.
         """
         target = Path(target_name)
+        base = Path(base_dir).resolve() if base_dir is not None else Path.cwd().resolve()
+        target_resolved = target.resolve() if target.is_absolute() else (base / target).resolve()
+        try:
+            is_inside = target_resolved.is_relative_to(base)
+        except AttributeError:
+            is_inside = (base == target_resolved or base in target_resolved.parents)
+
+        if not is_inside:
+            raise ConfigError(f"Path traversal detected in target '{target_name}'. Destination must be inside current working directory '{base}'.")
+
         templates_cfg = config.data.get("templates", {}) if config and hasattr(config, "data") else {}
 
         # 1. Resolve template definition
@@ -206,7 +218,7 @@ echo "Hello, World!"
                 if not fname:
                     continue
                 file_dest = (dest_dir / fname).resolve()
-                raw_content = cls._load_template_content(file_entry, Path.cwd()) or ""
+                raw_content = cls._load_template_content(file_entry, base) or ""
                 interpolated = cls._interpolate(raw_content, file_dest)
                 file_dest.parent.mkdir(parents=True, exist_ok=True)
                 file_dest.write_text(interpolated, encoding="utf-8")
@@ -215,17 +227,17 @@ echo "Hello, World!"
             return True
 
         # 3. Single-file template
-        raw_content = cls._load_template_content(selected_def, Path.cwd())
+        raw_content = cls._load_template_content(selected_def, base)
         if raw_content is None:
             Printer.error(f"Could not load template content for '{template_name or target_name}'.")
             return False
 
-        if target.exists() and not force:
-            Printer.error(f"File '{target}' already exists. Use -f / --force to overwrite.")
+        if target_resolved.exists() and not force:
+            Printer.error(f"File '{target_resolved}' already exists. Use -f / --force to overwrite.")
             return False
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        interpolated = cls._interpolate(raw_content, target)
-        target.write_text(interpolated, encoding="utf-8")
-        Printer.action("CREATE", f"Generated {target}", Colors.GREEN)
+        target_resolved.parent.mkdir(parents=True, exist_ok=True)
+        interpolated = cls._interpolate(raw_content, target_resolved)
+        target_resolved.write_text(interpolated, encoding="utf-8")
+        Printer.action("CREATE", f"Generated {target_resolved}", Colors.GREEN)
         return True

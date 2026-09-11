@@ -12,8 +12,9 @@ from util.substitutions import VariableSubstitutor
 from util.errors import ExecutionError, CompilationError, ConfigError
 from util.sandbox import NativeRestrictor, ContainerSandbox, PersistentSandbox, ComposeSandbox
 
-def test_large_stdout_expect_matching(tmp_path):
+def test_large_stdout_expect_matching(tmp_path, monkeypatch):
     """Test BaseRunner with large stdout (>256KB) matching --expect file to ensure no pipe deadlock."""
+    monkeypatch.chdir(tmp_path)
     payload_size = 256 * 1024
     payload = "X" * payload_size + "\n"
     
@@ -25,8 +26,9 @@ def test_large_stdout_expect_matching(tmp_path):
     cmd = [sys.executable, "-c", f"import sys; sys.stdout.write('X' * {payload_size} + '\\n')"]
     assert runner.run_command(cmd) is True
 
-def test_large_stdout_expect_mismatch(tmp_path):
+def test_large_stdout_expect_mismatch(tmp_path, monkeypatch):
     """Test BaseRunner with large stdout (>256KB) mismatching --expect file."""
+    monkeypatch.chdir(tmp_path)
     payload_size = 256 * 1024
     expect_file = tmp_path / "expected_diff.txt"
     expect_file.write_text("Y" * payload_size + "\n")
@@ -43,8 +45,9 @@ def test_large_stdout_memory_tracking_posix():
     cmd = [sys.executable, "-c", f"import sys; sys.stdout.write('A' * {payload_size})"]
     assert runner.run_command(cmd) is True
 
-def test_large_stdout_and_expect_and_memory(tmp_path):
+def test_large_stdout_and_expect_and_memory(tmp_path, monkeypatch):
     """Test BaseRunner combining both -M and --expect with 512KB payload."""
+    monkeypatch.chdir(tmp_path)
     payload_size = 512 * 1024
     payload = "B" * payload_size
     

@@ -117,3 +117,127 @@ def test_base_runner_rejects_suspicious_flags():
     with pytest.raises(ExecutionError, match="Rejected suspicious flag"):
         runner.run_command(["./app", "-Wl,-rpath,/tmp"], compiling=False)
 
+
+def test_validator_full_path_checks():
+    from util.validator import Validator
+    from pathlib import Path
+
+    # Safe paths
+    assert Validator.validate_path(Path("main.c"))
+    assert Validator.validate_path(Path("src/nested/main.cpp"))
+    assert Validator.validate_path("simple.py")
+
+    # Path traversal
+    assert not Validator.validate_path(Path("../main.c"))
+    assert not Validator.validate_path(Path("sub/../main.c"))
+    assert not Validator.validate_path("../../../etc/passwd")
+
+    # Control characters
+    assert not Validator.validate_path("main\x00.c")
+    assert not Validator.validate_path("src/\nmain.c")
+    assert not Validator.validate_path("src/\rmain.c")
+    assert not Validator.validate_path("src/\tmain.c")
+
+    # Shell metacharacters anywhere in path
+    assert not Validator.validate_path("dir;evil/main.c")
+    assert not Validator.validate_path("main;echo.c")
+    assert not Validator.validate_path("dir|cat/main.c")
+    assert not Validator.validate_path("$(whoami).c")
+    assert not Validator.validate_path("dir`rm`/main.c")
+    assert not Validator.validate_path("dir&bg/main.c")
+    assert not Validator.validate_path("<input>.c")
+    assert not Validator.validate_path(">output>.c")
+
+
+def test_core_runner_rejects_suspicious_path(tmp_path, monkeypatch, caplog):
+    from pathlib import Path
+    from runner.core import CompilerRunner
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    # Path with traversal segment
+    runner = CompilerRunner(op_flags={"quiet": False, "force": False})
+    res = runner._handle_single_file(Path("../outside.c"))
+    assert res is False
+    assert "Refusing to process file with suspicious characters" in caplog.text
+
+    # Override with force
+    caplog.clear()
+    runner_force = CompilerRunner(op_flags={"quiet": False, "force": True})
+    runner_force._handle_single_file(Path("../outside.c"))
+    assert "Processing file with suspicious characters due to --force" in caplog.text
+
+
+def test_base_runner_expect_boundary_enforcement(tmp_path, monkeypatch):
+    from runner.base_runner import BaseRunner
+    from util.errors import ConfigError
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    outside = tmp_path / "outside_secret.txt"
+    outside.write_text("secret_data")
+
+    # 1. Reject --expect outside workspace without --force
+    runner = BaseRunner(op_flags={"expect": str(outside), "force": False})
+    with pytest.raises(ConfigError, match="outside the workspace"):
+        runner.run_command(["echo", "hello"], compiling=False)
+
+    # 2. Allow with --force
+    runner_force = BaseRunner(op_flags={"expect": str(outside), "force": True})
+    # Execution proceeds to check expectation; fails match but does not raise ConfigError
+    success = runner_force.run_command(["echo", "hello"], compiling=False)
+    assert success is False
+
+
+def test_python_handler_venv_ownership_verification(tmp_path, monkeypatch, caplog):
+    from pathlib import Path
+    from runner.python_handler import PythonHandler
+    import os
+
+    class DummyPythonRunner(PythonHandler):
+        def __init__(self, flags=None):
+            self.flags = flags or {}
+            self.is_posix = True
+
+    workspace = tmp_path / "py_workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    venv_bin = workspace / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    fake_py = venv_bin / "python"
+    fake_py.write_text("#!/bin/sh\nexit 0\n")
+
+    # Mock stat().st_uid to be different from os.getuid()
+    real_stat = fake_py.stat()
+    class MockStat:
+        def __init__(self, orig):
+            self.st_uid = 99999  # Untrusted foreign UID
+            self.orig = orig
+        def __getattr__(self, name):
+            return getattr(self.orig, name)
+
+    orig_stat = Path.stat
+    monkeypatch.setattr(Path, "stat", lambda self: MockStat(real_stat) if self.name == "python" else orig_stat(self))
+    monkeypatch.setattr(os, "getuid", lambda: 1000)
+
+    # 1. Without force: skips foreign venv, logs warning
+    runner = DummyPythonRunner(flags={"force": False})
+    exec_path = runner._get_python_executable()
+    assert exec_path != str(fake_py)
+    assert "Skipping venv '.venv': python binary owned by UID 99999" in caplog.text
+
+    # 2. With force: allows foreign venv, logs warning
+    caplog.clear()
+    runner_force = DummyPythonRunner(flags={"force": True})
+    exec_path_force = runner_force._get_python_executable()
+    assert Path(exec_path_force).resolve() == fake_py.resolve()
+    assert "Using venv '.venv' with non-matching owner UID 99999 due to --force" in caplog.text
+
+
+
+

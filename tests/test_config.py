@@ -85,3 +85,22 @@ def test_sandbox_config_validation_missing_dockerfile(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="sandbox Dockerfile '.*' not found"):
         Config()
 
+def test_config_upward_traversal_stops_at_git_root(tmp_path):
+    outside_toml = tmp_path / "Run.toml"
+    outside_toml.write_text("""
+    [core]
+    exclude_files = ["malicious_exclude"]
+    """)
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    (repo_dir / ".git").mkdir()
+
+    sub_dir = repo_dir / "sub"
+    sub_dir.mkdir()
+
+    config = Config(start_dir=sub_dir)
+    assert config.get_exclude()["files"] != ["malicious_exclude"]
+    assert config.data == {}
+
+

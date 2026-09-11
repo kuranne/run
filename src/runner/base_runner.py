@@ -169,6 +169,50 @@ class BaseRunner:
         # Setup quiet mode for compiler or output capture for expectation
         expect_path = self.flags.get("expect") if not compiling else None
         if expect_path:
+            exp_p = Path(expect_path).resolve()
+            allowed_roots = [Path.cwd().resolve()]
+            test_dir = self.flags.get("test_dir")
+            if test_dir:
+                try:
+                    allowed_roots.append(Path(test_dir).resolve())
+                except Exception:
+                    pass
+            stdin_p = self.flags.get("stdin")
+            if stdin_p and stdin_p != "-":
+                try:
+                    sp = Path(stdin_p).resolve()
+                    allowed_roots.append(sp.parent)
+                except Exception:
+                    pass
+            for key in ("file", "source_file", "target", "target_file"):
+                val = self.flags.get(key)
+                if val and isinstance(val, (str, Path)):
+                    try:
+                        p = Path(val).resolve()
+                        allowed_roots.append(p if p.is_dir() else p.parent)
+                    except Exception:
+                        pass
+            if isinstance(cmd, (list, tuple)):
+                for arg in cmd:
+                    try:
+                        p = Path(arg).resolve()
+                        if p.exists():
+                            allowed_roots.append(p if p.is_dir() else p.parent)
+                    except Exception:
+                        pass
+
+            is_inside = any(
+                exp_p.is_relative_to(root) if hasattr(exp_p, "is_relative_to")
+                else (root == exp_p or root in exp_p.parents)
+                for root in allowed_roots
+            )
+
+            if not is_inside:
+                if not self.flags.get("force", False):
+                    raise ConfigError(f"Access denied: Expectation file '{expect_path}' is outside the workspace. Use -f / --force to override.")
+                else:
+                    Printer.warning(f"Using expectation file outside workspace due to --force: {expect_path}")
+
             stdout_dest = spc.PIPE
         else:
             stdout_dest = spc.DEVNULL if self.flags.get("quiet", False) and compiling else None

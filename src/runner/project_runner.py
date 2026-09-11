@@ -143,9 +143,20 @@ class ProjectRunner:
                         manifest_path = current / manifest_file
                         if manifest_path.exists():
                             return proj_name, proj_cfg, manifest_path
-            if current == current.parent:
+            if (current / ".git").exists() or current == current.parent:
                 break
-            current = current.parent
+
+            parent = current.parent
+            try:
+                if (current.stat().st_dev if hasattr(current, "stat") else None) != (parent.stat().st_dev if hasattr(parent, "stat") else None):
+                    break
+            except OSError:
+                break
+
+            if str(current) in ("/tmp", "/var/tmp", "/private/tmp"):
+                break
+
+            current = parent
 
         return None
 

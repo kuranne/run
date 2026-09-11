@@ -127,7 +127,8 @@ def test_run_command_piped_stdin(tmp_path, capfd, monkeypatch):
     out, _ = capfd.readouterr()
     assert "ECHO: piped_secret_42" in out
 
-def test_large_stdout_pipe_no_deadlock(tmp_path):
+def test_large_stdout_pipe_no_deadlock(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     # Generates 128KB of output with memory tracking and expect active
     expect_file = tmp_path / "expected.txt"
     large_data = "A" * (128 * 1024)

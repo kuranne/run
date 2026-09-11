@@ -121,9 +121,9 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
             from util.glob_matcher import match_path, match_extension
             if not Validator.validate_path(fp):
                 if not self.flags.get("force", False):
-                    raise ConfigError(f"Refusing to process file with suspicious characters: {fp.name}. Use -f / --force to override.")
+                    raise ConfigError(f"Refusing to process file with suspicious characters: {fp}. Use -f / --force to override.")
                 else:
-                    Printer.warning(f"Processing file with suspicious characters due to --force: {fp.name}")
+                    Printer.warning(f"Processing file with suspicious characters due to --force: {fp}")
 
             if any(match_path(fp, pat, root_dir=Path.cwd()) for pat in self.exclude_files):
                 if not self.flags.get("quiet", False):
