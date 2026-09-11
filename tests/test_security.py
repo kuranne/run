@@ -193,4 +193,51 @@ def test_base_runner_expect_boundary_enforcement(tmp_path, monkeypatch):
     assert success is False
 
 
+def test_python_handler_venv_ownership_verification(tmp_path, monkeypatch, caplog):
+    from pathlib import Path
+    from runner.python_handler import PythonHandler
+    import os
+
+    class DummyPythonRunner(PythonHandler):
+        def __init__(self, flags=None):
+            self.flags = flags or {}
+            self.is_posix = True
+
+    workspace = tmp_path / "py_workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    venv_bin = workspace / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    fake_py = venv_bin / "python"
+    fake_py.write_text("#!/bin/sh\nexit 0\n")
+
+    # Mock stat().st_uid to be different from os.getuid()
+    real_stat = fake_py.stat()
+    class MockStat:
+        def __init__(self, orig):
+            self.st_uid = 99999  # Untrusted foreign UID
+            self.orig = orig
+        def __getattr__(self, name):
+            return getattr(self.orig, name)
+
+    orig_stat = Path.stat
+    monkeypatch.setattr(Path, "stat", lambda self: MockStat(real_stat) if self.name == "python" else orig_stat(self))
+    monkeypatch.setattr(os, "getuid", lambda: 1000)
+
+    # 1. Without force: skips foreign venv, logs warning
+    runner = DummyPythonRunner(flags={"force": False})
+    exec_path = runner._get_python_executable()
+    assert exec_path != str(fake_py)
+    assert "Skipping venv '.venv': python binary owned by UID 99999" in caplog.text
+
+    # 2. With force: allows foreign venv, logs warning
+    caplog.clear()
+    runner_force = DummyPythonRunner(flags={"force": True})
+    exec_path_force = runner_force._get_python_executable()
+    assert Path(exec_path_force).resolve() == fake_py.resolve()
+    assert "Using venv '.venv' with non-matching owner UID 99999 due to --force" in caplog.text
+
+
+
 
