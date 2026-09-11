@@ -280,3 +280,11 @@ def test_args_stdin_source_file_not_hijacked(monkeypatch):
     assert parsed.stdin == 'input.cpp'
     assert parsed.files == []
 
+def test_args_structured_argument_list_preservation(monkeypatch):
+    """Verify structured argument_list preserves tokens across --argument and trailing -- (SEC-R2-003)."""
+    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '--argument', 'foo "bar baz"', '--', 'arg1', 'arg with spaces'])
+    parsed = args("1.0.0")
+    assert parsed.files == ['main.py']
+    assert parsed.argument_list == ['foo', 'bar baz', 'arg1', 'arg with spaces']
+    assert parsed.argument == "foo 'bar baz' arg1 'arg with spaces'"
+

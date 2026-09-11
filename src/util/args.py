@@ -137,11 +137,16 @@ def args(__version__: str):
         i += 1
 
     parsed = parser.parse_args(processed_args)
+    arg_list: List[str] = []
+    if parsed.argument:
+        arg_list.extend(shlex.split(parsed.argument))
     if trailing_args:
-        trailing_str = " ".join(shlex.quote(a) for a in trailing_args)
-        if parsed.argument:
-            parsed.argument = f"{parsed.argument} {trailing_str}"
-        else:
-            parsed.argument = trailing_str
+        arg_list.extend(trailing_args)
+    parsed.argument_list = arg_list
+
+    if arg_list:
+        parsed.argument = " ".join(shlex.quote(a) if (" " in a or "\t" in a or not a) else a for a in arg_list)
+    else:
+        parsed.argument = ""
 
     return parsed
