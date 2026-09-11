@@ -241,3 +241,33 @@ def test_compile_glob_redos_prevention():
     assert not match_path(non_matching_path, pattern)
     assert match_path("a/b/c/target.txt", pattern)
 
+
+def test_match_path_external_symlink_exclusion(tmp_path):
+    """Verify that symlinks pointing outside workspace are matched by logical path rather than resolved target."""
+    import os
+    from util.glob_matcher import match_path
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    vendor_dir = workspace / "vendor"
+    vendor_dir.mkdir()
+
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_file = outside_dir / "external_lib.c"
+    outside_file.write_text("void external() {}")
+
+    # Symlink vendor/lib.c -> outside/external_lib.c
+    symlink_path = vendor_dir / "lib.c"
+    try:
+        symlink_path.symlink_to(outside_file)
+    except OSError:
+        pytest.skip("Symlinks not supported in this environment")
+
+    # Pattern should match vendor/lib.c even though resolved target is outside workspace
+    assert match_path(symlink_path, "vendor/**", root_dir=workspace)
+    assert match_path(symlink_path, "vendor/*.c", root_dir=workspace)
+    assert match_path(symlink_path, "vendor/lib.c", root_dir=workspace)
+    assert not match_path(symlink_path, "src/**", root_dir=workspace)
+
+
