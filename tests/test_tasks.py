@@ -53,10 +53,44 @@ def test_run_task_with_shell_operator(tmp_path, monkeypatch):
     runner = DummyRunner()
 
     TaskRunner.run_task("build", config, ["--extra"], runner)
-    assert len(runner.executed) == 1
-    cmd, use_shell, compiling = runner.executed[0]
-    assert use_shell is False
-    assert cmd == ["mkdir", "-p", "build", "&&", "cmake", "-B", "build", "--extra"]
+    assert len(runner.executed) == 2
+    cmd1, use_shell1, compiling1 = runner.executed[0]
+    assert use_shell1 is False
+    assert cmd1 == ["mkdir", "-p", "build"]
+    cmd2, use_shell2, compiling2 = runner.executed[1]
+    assert use_shell2 is False
+    assert cmd2 == ["cmake", "-B", "build", "--extra"]
+
+def test_run_task_compound_command_with_quotes(tmp_path, monkeypatch):
+    toml = tmp_path / "Run.toml"
+    toml.write_text("""
+    [tasks]
+    greet = "echo 'hello && world' && echo done"
+    """)
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    config = Config()
+    runner = DummyRunner()
+
+    TaskRunner.run_task("greet", config, [], runner)
+    assert len(runner.executed) == 2
+    assert runner.executed[0][0] == ["echo", "hello && world"]
+    assert runner.executed[1][0] == ["echo", "done"]
+
+def test_run_task_compound_command_semicolon(tmp_path, monkeypatch):
+    toml = tmp_path / "Run.toml"
+    toml.write_text("""
+    [tasks]
+    seq = "echo step1 ; echo step2 && echo step3"
+    """)
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    config = Config()
+    runner = DummyRunner()
+
+    TaskRunner.run_task("seq", config, ["arg"], runner)
+    assert len(runner.executed) == 3
+    assert runner.executed[0][0] == ["echo", "step1"]
+    assert runner.executed[1][0] == ["echo", "step2"]
+    assert runner.executed[2][0] == ["echo", "step3", "arg"]
 
 def test_run_task_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "cwd", lambda: tmp_path)

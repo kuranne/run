@@ -7,6 +7,33 @@ from util.output import Printer, Colors
 from util.errors import ExecutionError, ConfigError
 from util.substitutions import VariableSubstitutor
 
+def split_compound_command(cmd_str: str) -> List[List[str]]:
+    """
+    Split a compound shell command string (separated by '&&' or ';')
+    into individual command argument lists, respecting quotes.
+    """
+    if not cmd_str.strip():
+        return []
+    lexer = shlex.shlex(cmd_str, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = False
+    
+    subcommands: List[List[str]] = []
+    current_cmd: List[str] = []
+    
+    for token in lexer:
+        if token in ("&&", ";"):
+            if current_cmd:
+                subcommands.append(current_cmd)
+                current_cmd = []
+        else:
+            current_cmd.append(token)
+            
+    if current_cmd:
+        subcommands.append(current_cmd)
+        
+    return subcommands
+
+
 class TaskRunner:
     """
     Handles execution of custom tasks defined in [tasks] of Run.toml.
@@ -66,34 +93,17 @@ class TaskRunner:
         task_cmd = VariableSubstitutor.substitute_string(task_cmd, var_ctx)
 
         Printer.action("TASK", f"{name}: {task_cmd}", Colors.CYAN)
-        cmd = shlex.split(task_cmd) + extra_args
-        return runner_ref.run_command(cmd)
-
-def split_compound_command(cmd_str: str) -> List[List[str]]:
-    """
-    Split a compound shell command string (separated by '&&' or ';')
-    into individual command argument lists, respecting quotes.
-    """
-    if not cmd_str.strip():
-        return []
-    lexer = shlex.shlex(cmd_str, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = False
-    
-    subcommands: List[List[str]] = []
-    current_cmd: List[str] = []
-    
-    for token in lexer:
-        if token in ("&&", ";"):
-            if current_cmd:
-                subcommands.append(current_cmd)
-                current_cmd = []
-        else:
-            current_cmd.append(token)
-            
-    if current_cmd:
-        subcommands.append(current_cmd)
-        
-    return subcommands
+        subcmds = split_compound_command(task_cmd)
+        if not subcmds:
+            return True
+        for idx, cmd in enumerate(subcmds):
+            flags = extra_args if idx == len(subcmds) - 1 else []
+            full_cmd = cmd + flags
+            if not full_cmd:
+                continue
+            if not runner_ref.run_command(full_cmd):
+                return False
+        return True
 
 
 class ProjectRunner:
