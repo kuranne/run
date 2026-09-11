@@ -47,7 +47,13 @@ class RustHandler:
             with open(toml_path, "rb") as f:
                 self.cargo_toml_data = tomllib.load(f)
             name = self.cargo_toml_data.get("package", {}).get("name")
-            return str(name) if name else None
+            if not name:
+                return None
+            pkg_str = str(name).strip()
+            if "/" in pkg_str or "\\" in pkg_str or ".." in pkg_str or not pkg_str:
+                Printer.error(f"Invalid cargo package name containing path traversal characters: '{pkg_str}'")
+                return None
+            return pkg_str
         except Exception as e:
             Printer.error(f"Failed to read {toml_path}: {e}")
             return None
@@ -79,7 +85,16 @@ class RustHandler:
                 return False
 
             bin_name = f"{pkg_name}.exe" if not self.is_posix else pkg_name
-            target_bin = toml_path.parent / "target" / mode_name / bin_name
+            target_dir = (toml_path.parent / "target" / mode_name).resolve()
+            target_bin = (target_dir / bin_name).resolve()
+            try:
+                is_inside = target_bin.is_relative_to(target_dir)
+            except AttributeError:
+                is_inside = (target_dir == target_bin or target_dir in target_bin.parents)
+
+            if not is_inside:
+                Printer.error(f"Target binary '{target_bin}' escapes target directory '{target_dir}'")
+                return False
             
             if target_bin.exists():
                 return self._execute_binary(target_bin)
