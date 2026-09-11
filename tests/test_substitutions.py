@@ -121,3 +121,11 @@ def test_substitutions_path_with_spaces_quoted():
 
     assert tokens == ["g++", "-Imy workspace", "my workspace/main code.cpp", "-o", "build output/app binary.out"]
 
+def test_substitutions_files_consistently_quoted():
+    """Verify ${files} consistently quotes each path (SEC-R2-011)."""
+    import shlex
+    files = [Path("normal.c"), Path("has space.c"), Path("special$name.c")]
+    ctx = VariableSubstitutor.build_multi_file_context(files)
+    tokens = shlex.split(ctx["files"])
+    assert tokens == ["normal.c", "has space.c", "special$name.c"]
+

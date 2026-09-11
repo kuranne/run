@@ -38,7 +38,7 @@ class VariableSubstitutor:
         ctx: Dict[str, str] = {}
         if file_path:
             ctx["file"] = shlex.quote(str(file_path))
-            ctx["files"] = shlex.quote(str(file_path)) if " " in str(file_path) else str(file_path)
+            ctx["files"] = shlex.quote(str(file_path))
             ctx["filename"] = shlex.quote(file_path.name) if " " in file_path.name else file_path.name
             ctx["name"] = file_path.stem
             ctx["stem"] = file_path.stem
@@ -69,7 +69,7 @@ class VariableSubstitutor:
         first_file = file_paths[0] if file_paths else None
         ctx = cls.build_file_context(file_path=first_file, out_path=out_path, out_dir=out_dir)
         if file_paths:
-            ctx["files"] = " ".join(shlex.quote(str(p)) if " " in str(p) else str(p) for p in file_paths)
+            ctx["files"] = " ".join(shlex.quote(str(p)) for p in file_paths)
         return ctx
 
     @classmethod
