@@ -24,6 +24,13 @@ class RustHandler:
             toml = current / "Cargo.toml"
             if toml.exists():
                 return toml
+
+            if (current / ".git").exists() or current == current.parent:
+                break
+
+            if str(current) in ("/tmp", "/var/tmp", "/private/tmp"):
+                break
+
             current = current.parent
         return None
 
