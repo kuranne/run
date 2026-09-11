@@ -73,13 +73,14 @@ class VariableSubstitutor:
         return ctx
 
     @classmethod
-    def substitute_string(cls, template: str, context: Dict[str, str]) -> str:
+    def substitute_string(cls, template: str, context: Dict[str, str], quote_env: bool = False) -> str:
         """
         Replace variable placeholders in a single string.
 
         Args:
             template (str): Input string containing placeholders.
             context (Dict[str, str]): Variable replacements.
+            quote_env (bool): Whether to shell-quote environment variable expansions.
 
         Returns:
             str: String with variables replaced.
@@ -88,21 +89,31 @@ class VariableSubstitutor:
             key = match.group(1) or match.group(2)
             if key.startswith("env:"):
                 env_var = key[4:]
-                return os.environ.get(env_var, "")
+                from util.security import SecurityManager
+                if env_var in SecurityManager.DANGEROUS_ENV_VARS:
+                    from util.output import Printer
+                    Printer.warning(f"Rejected dangerous environment variable expansion in template: {env_var}")
+                    return ""
+                val = os.environ.get(env_var, "")
+                val = val.replace("\0", "").replace("\r", "").replace("\n", "")
+                if quote_env:
+                    return shlex.quote(val)
+                return val
             return context.get(key, match.group(0))
 
         return cls.VAR_PATTERN.sub(replace, template)
 
     @classmethod
-    def substitute_list(cls, templates: List[str], context: Dict[str, str]) -> List[str]:
+    def substitute_list(cls, templates: List[str], context: Dict[str, str], quote_env: bool = False) -> List[str]:
         """
         Replace variable placeholders across a list of strings.
 
         Args:
             templates (List[str]): List of strings containing placeholders.
             context (Dict[str, str]): Variable replacements.
+            quote_env (bool): Whether to shell-quote environment variable expansions.
 
         Returns:
             List[str]: New list with variables replaced.
         """
-        return [cls.substitute_string(item, context) for item in templates]
+        return [cls.substitute_string(item, context, quote_env=quote_env) for item in templates]

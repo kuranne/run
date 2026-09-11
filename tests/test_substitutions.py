@@ -129,3 +129,19 @@ def test_substitutions_files_consistently_quoted():
     tokens = shlex.split(ctx["files"])
     assert tokens == ["normal.c", "has space.c", "special$name.c"]
 
+def test_env_var_substitution_dangerous_blocked(monkeypatch):
+    """Verify dangerous environment variables are rejected during template expansion (SEC-R2-012)."""
+    monkeypatch.setenv("LD_PRELOAD", "/lib/evil.so")
+    monkeypatch.setenv("DYLD_INSERT_LIBRARIES", "/lib/evil.dylib")
+    context = {}
+    assert VariableSubstitutor.substitute_string("run ${env:LD_PRELOAD}", context) == "run "
+    assert VariableSubstitutor.substitute_string("run ${env:DYLD_INSERT_LIBRARIES}", context) == "run "
+
+def test_env_var_substitution_sanitizes_control_chars_and_quotes(monkeypatch):
+    """Verify control chars are stripped and quote_env properly quotes values (SEC-R2-012)."""
+    monkeypatch.setenv("INJECT_VAR", "foo\r\nbaz")
+    monkeypatch.setenv("SPACED_OPT", "val with spaces")
+    context = {}
+    assert VariableSubstitutor.substitute_string("${env:INJECT_VAR}", context) == "foobaz"
+    assert VariableSubstitutor.substitute_string("cmd ${env:SPACED_OPT}", context, quote_env=True) == "cmd 'val with spaces'"
+
