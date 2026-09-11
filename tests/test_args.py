@@ -236,8 +236,8 @@ def test_args_new_feature_flags(monkeypatch):
 
 def test_args_optional_flags_with_source_files(monkeypatch):
     """Test optional flags like -i and --link-auto positioned before source file arguments."""
-    # -i before source file
-    monkeypatch.setattr(sys, 'argv', ['run', '-i', 'main.c'])
+    # -i - before source file
+    monkeypatch.setattr(sys, 'argv', ['run', '-i', '-', 'main.c'])
     parsed = args("1.0.0")
     assert parsed.stdin == '-'
     assert parsed.files == ['main.c']
@@ -259,4 +259,24 @@ def test_args_optional_flags_with_source_files(monkeypatch):
     parsed = args("1.0.0")
     assert parsed.link_auto == 3
     assert parsed.files == ['main.c']
+
+def test_args_stdin_source_file_not_hijacked(monkeypatch):
+    """Verify source files passed as stdin target are not hijacked into files (SEC-R2-002)."""
+    # Source file passed to -i after source file
+    monkeypatch.setattr(sys, 'argv', ['run', 'solution.py', '-i', 'input.c'])
+    parsed = args("1.0.0")
+    assert parsed.stdin == 'input.c'
+    assert parsed.files == ['solution.py']
+
+    # Source file passed to -i before source file
+    monkeypatch.setattr(sys, 'argv', ['run', '-i', 'input.py', 'solution.py'])
+    parsed = args("1.0.0")
+    assert parsed.stdin == 'input.py'
+    assert parsed.files == ['solution.py']
+
+    # Source file passed as stdin target when no other files given
+    monkeypatch.setattr(sys, 'argv', ['run', '-i', 'input.cpp'])
+    parsed = args("1.0.0")
+    assert parsed.stdin == 'input.cpp'
+    assert parsed.files == []
 

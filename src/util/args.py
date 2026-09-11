@@ -88,12 +88,6 @@ def args(__version__: str):
         trailing_args = cli_argv[split_idx + 1:]
         cli_argv = cli_argv[:split_idx]
 
-    from pathlib import Path
-    source_exts = {
-        ".c", ".cpp", ".cc", ".cxx", ".rs", ".java", ".py", ".go",
-        ".js", ".ts", ".zig", ".rb", ".cs", ".kt", ".swift", ".php"
-    }
-
     processed_args = []
     i = 0
     while i < len(cli_argv):
@@ -134,15 +128,9 @@ def args(__version__: str):
             elif next_arg.startswith("-"):
                 processed_args.append(f"{arg}=-")
             else:
-                ext = Path(next_arg).suffix.lower()
-                remaining = cli_argv[i + 2:]
-                has_subsequent_source = any(Path(r).suffix.lower() in source_exts for r in remaining if not r.startswith("-"))
-                if ext in source_exts and not has_subsequent_source:
-                    processed_args.append(f"{arg}=-")
-                else:
-                    processed_args.append(arg)
-                    processed_args.append(next_arg)
-                    i += 1
+                processed_args.append(arg)
+                processed_args.append(next_arg)
+                i += 1
         else:
             processed_args.append(arg)
             
