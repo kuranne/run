@@ -117,3 +117,56 @@ def test_base_runner_rejects_suspicious_flags():
     with pytest.raises(ExecutionError, match="Rejected suspicious flag"):
         runner.run_command(["./app", "-Wl,-rpath,/tmp"], compiling=False)
 
+
+def test_validator_full_path_checks():
+    from util.validator import Validator
+    from pathlib import Path
+
+    # Safe paths
+    assert Validator.validate_path(Path("main.c"))
+    assert Validator.validate_path(Path("src/nested/main.cpp"))
+    assert Validator.validate_path("simple.py")
+
+    # Path traversal
+    assert not Validator.validate_path(Path("../main.c"))
+    assert not Validator.validate_path(Path("sub/../main.c"))
+    assert not Validator.validate_path("../../../etc/passwd")
+
+    # Control characters
+    assert not Validator.validate_path("main\x00.c")
+    assert not Validator.validate_path("src/\nmain.c")
+    assert not Validator.validate_path("src/\rmain.c")
+    assert not Validator.validate_path("src/\tmain.c")
+
+    # Shell metacharacters anywhere in path
+    assert not Validator.validate_path("dir;evil/main.c")
+    assert not Validator.validate_path("main;echo.c")
+    assert not Validator.validate_path("dir|cat/main.c")
+    assert not Validator.validate_path("$(whoami).c")
+    assert not Validator.validate_path("dir`rm`/main.c")
+    assert not Validator.validate_path("dir&bg/main.c")
+    assert not Validator.validate_path("<input>.c")
+    assert not Validator.validate_path(">output>.c")
+
+
+def test_core_runner_rejects_suspicious_path(tmp_path, monkeypatch, caplog):
+    from pathlib import Path
+    from runner.core import CompilerRunner
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    # Path with traversal segment
+    runner = CompilerRunner(op_flags={"quiet": False, "force": False})
+    res = runner._handle_single_file(Path("../outside.c"))
+    assert res is False
+    assert "Refusing to process file with suspicious characters" in caplog.text
+
+    # Override with force
+    caplog.clear()
+    runner_force = CompilerRunner(op_flags={"quiet": False, "force": True})
+    runner_force._handle_single_file(Path("../outside.c"))
+    assert "Processing file with suspicious characters due to --force" in caplog.text
+
+
