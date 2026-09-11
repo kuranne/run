@@ -216,3 +216,28 @@ exclude_extensions = [".bak"]
         res2 = runner._handle_single_file(ext_skip)
         assert res2 is None
         assert "exclude extensions" in caplog.text
+
+
+def test_compile_glob_redos_prevention():
+    """Verify that nested/repeated globstars do not cause exponential backtracking (ReDoS)."""
+    import time
+    from util.glob_matcher import compile_glob, match_path
+
+    # Adversarial nested glob pattern with repeating wildcards
+    pattern = "**/**/**/**/**/**/**/target.txt"
+    # Adversarial deep path that does NOT match at the end
+    non_matching_path = "/".join(["segment"] * 25) + "/mismatch.txt"
+
+    start_time = time.perf_counter()
+    regex = compile_glob(pattern)
+    matched = regex.match(non_matching_path)
+    elapsed = time.perf_counter() - start_time
+
+    assert matched is None
+    # Must complete in well under 0.1s (typically < 1ms)
+    assert elapsed < 0.1
+
+    # Also check match_path with repeated globstars
+    assert not match_path(non_matching_path, pattern)
+    assert match_path("a/b/c/target.txt", pattern)
+

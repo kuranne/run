@@ -15,6 +15,11 @@ def compile_glob(pattern: str, case_sensitive: bool = True) -> re.Pattern:
     if clean_pat.endswith("/"):
         clean_pat = clean_pat[:-1]
 
+    # Collapse consecutive wildcards and redundant globstar tokens to prevent ReDoS
+    clean_pat = re.sub(r"\*{3,}", "**", clean_pat)
+    clean_pat = re.sub(r"(?:\*\*/)+", "**/", clean_pat)
+    clean_pat = re.sub(r"(?:/\*\*)+", "/**", clean_pat)
+
     i, n = 0, len(clean_pat)
     res = []
     while i < n:
@@ -25,7 +30,7 @@ def compile_glob(pattern: str, case_sensitive: bool = True) -> re.Pattern:
                 i += 1
                 if i < n and clean_pat[i] == "/":
                     i += 1
-                    res.append("(?:.*/)?")
+                    res.append("(?:[^/]+/)*")
                 else:
                     res.append(".*")
             else:
