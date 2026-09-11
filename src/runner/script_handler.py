@@ -65,6 +65,11 @@ class ScriptHandler:
             pass
         return ""
 
+    @staticmethod
+    def _format_script_path(fp: Path) -> str:
+        s = str(fp)
+        return f"./{s}" if s.startswith("-") else s
+
     def _handle_bash_execution(self, fp: Path):
         """
         Handle Bash/Shell script execution.
@@ -79,7 +84,8 @@ class ScriptHandler:
             Printer.error(str(e))
             return False
         
-        return self.run_command([prog, str(fp)] + self.run_args)
+        target = self._format_script_path(fp)
+        return self.run_command([prog, "--", target] + self.run_args)
 
     def _handle_ruby_execution(self, fp: Path):
         """
@@ -95,7 +101,8 @@ class ScriptHandler:
             Printer.error(str(e))
             return False
         
-        return self.run_command([prog, str(fp)] + self.run_args)
+        target = self._format_script_path(fp)
+        return self.run_command([prog, "--", target] + self.run_args)
 
     def _handle_node_execution(self, fp: Path):
         """
@@ -111,10 +118,11 @@ class ScriptHandler:
             Printer.error(str(e))
             return False
         
+        target = self._format_script_path(fp)
         if self.flags.get("debug"):
-            return self.run_command([prog, "--inspect-brk", str(fp)] + self.run_args)
+            return self.run_command([prog, "--inspect-brk", "--", target] + self.run_args)
         else:
-            return self.run_command([prog, str(fp)] + self.run_args)
+            return self.run_command([prog, "--", target] + self.run_args)
 
     def _handle_perl_execution(self, fp: Path):
         """
@@ -130,7 +138,8 @@ class ScriptHandler:
             Printer.error(str(e))
             return False
         
-        return self.run_command([prog, str(fp)] + self.run_args)
+        target = self._format_script_path(fp)
+        return self.run_command([prog, "--", target] + self.run_args)
 
     def _handle_lua_execution(self, fp: Path):
         """
@@ -146,4 +155,5 @@ class ScriptHandler:
             Printer.error(str(e))
             return False
         
-        return self.run_command([prog, str(fp)] + self.run_args)
+        target = self._format_script_path(fp)
+        return self.run_command([prog, "--", target] + self.run_args)

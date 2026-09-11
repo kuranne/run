@@ -143,3 +143,118 @@ def test_missing_stdin_file_raises_error():
     with pytest.raises(ExecutionError, match="Failed to open stdin file"):
         runner.run_command(["python3", "-c", "pass"])
 
+def test_runner_quoted_arguments_and_flags():
+    # Multi-token quoted arguments must not have quotes stripped at boundaries
+    runner = CompilerRunner(
+        {},
+        extra_flags='-DVAR="hello world" -Wall',
+        run_args="'arg1' 'arg2'"
+    )
+    assert runner.extra_flags == ['-DVAR=hello world', '-Wall']
+    assert runner.run_args == ['arg1', 'arg2']
+
+    # Structured list support
+    runner_list = CompilerRunner(
+        {},
+        extra_flags=['-O3', '-DDEBUG'],
+        run_args=['arg with space', 'arg2']
+    )
+    assert runner_list.extra_flags == ['-O3', '-DDEBUG']
+    assert runner_list.run_args == ['arg with space', 'arg2']
+
+def test_python_interpreter_option_separator(monkeypatch):
+    """Test Python interpreter uses -- option separator and ./ path normalization (SEC-R2-005)."""
+    runner = CompilerRunner({}, extra_flags="", run_args=["foo", "bar"])
+    commands_run = []
+    monkeypatch.setattr(runner, "run_command", lambda cmd, **kwargs: (commands_run.append(cmd), True)[1])
+    monkeypatch.setattr(runner, "_get_python_executable", lambda: "python3")
+
+    hyphen_script = Path("-c.py")
+    runner._handle_python_execution(hyphen_script)
+    assert len(commands_run) == 1
+    assert commands_run[0] == ["python3", "--", "./-c.py", "foo", "bar"]
+
+    runner.flags["debug"] = True
+    runner._handle_python_execution(hyphen_script)
+    assert len(commands_run) == 2
+    assert commands_run[1] == ["python3", "-m", "pdb", "--", "./-c.py", "foo", "bar"]
+
+def test_node_interpreter_option_separator(monkeypatch):
+    """Test Node.js interpreter uses -- option separator and ./ path normalization (SEC-R2-005)."""
+    runner = CompilerRunner({}, extra_flags="", run_args=["arg1"])
+    commands_run = []
+    monkeypatch.setattr(runner, "run_command", lambda cmd, **kwargs: (commands_run.append(cmd), True)[1])
+    monkeypatch.setattr(runner, "_get_interpreter_path", lambda names: "node")
+
+    runner._handle_node_execution(Path("-e.js"))
+    assert len(commands_run) == 1
+    assert commands_run[0] == ["node", "--", "./-e.js", "arg1"]
+
+    runner.flags["debug"] = True
+    runner._handle_node_execution(Path("-e.js"))
+    assert len(commands_run) == 2
+    assert commands_run[1] == ["node", "--inspect-brk", "--", "./-e.js", "arg1"]
+
+def test_bash_interpreter_option_separator(monkeypatch):
+    """Test Bash interpreter uses -- option separator and ./ path normalization (SEC-R2-005)."""
+    runner = CompilerRunner({}, extra_flags="", run_args=[])
+    commands_run = []
+    monkeypatch.setattr(runner, "run_command", lambda cmd, **kwargs: (commands_run.append(cmd), True)[1])
+    monkeypatch.setattr(runner, "_get_interpreter_path", lambda names: "bash")
+
+    runner._handle_bash_execution(Path("-s.sh"))
+    assert len(commands_run) == 1
+    assert commands_run[0] == ["bash", "--", "./-s.sh"]
+
+def test_ruby_perl_lua_interpreter_option_separator(monkeypatch):
+    """Test Ruby, Perl, and Lua interpreters use -- option separator (SEC-R2-005)."""
+    runner = CompilerRunner({}, extra_flags="", run_args=[])
+    commands_run = []
+    monkeypatch.setattr(runner, "run_command", lambda cmd, **kwargs: (commands_run.append(cmd), True)[1])
+
+    monkeypatch.setattr(runner, "_get_interpreter_path", lambda names: "ruby")
+    runner._handle_ruby_execution(Path("-r.rb"))
+    assert commands_run[-1] == ["ruby", "--", "./-r.rb"]
+
+    monkeypatch.setattr(runner, "_get_interpreter_path", lambda names: "perl")
+    runner._handle_perl_execution(Path("-e.pl"))
+    assert commands_run[-1] == ["perl", "--", "./-e.pl"]
+
+    monkeypatch.setattr(runner, "_get_interpreter_path", lambda names: "lua")
+    runner._handle_lua_execution(Path("-l.lua"))
+    assert commands_run[-1] == ["lua", "--", "./-l.lua"]
+
+def test_java_path_normalization_and_main_class_validation(monkeypatch):
+    """Test Java compiler path normalization and main class rejection of hyphens (SEC-R2-005)."""
+    from util.errors import ExecutionError
+    runner = CompilerRunner({}, extra_flags="", run_args=[])
+    commands_run = []
+    monkeypatch.setattr(runner, "run_command", lambda cmd, **kwargs: (commands_run.append(cmd), True)[1])
+    monkeypatch.setattr("runner.java_handler.JPM.record_class_files", lambda dirs: set())
+    monkeypatch.setattr("runner.java_handler.JPM.get_new_class_files", lambda dirs, before: [])
+    monkeypatch.setattr("runner.java_handler.JPM.get_main_class", lambda fp: "ValidMain")
+
+    runner._handle_java_single_file(Path("-Main.java"))
+    assert any("./-Main.java" in cmd for cmd in commands_run)
+
+    monkeypatch.setattr("runner.java_handler.JPM.get_main_class", lambda fp: "-InvalidMain")
+    with pytest.raises(ExecutionError, match="Invalid main class name"):
+        runner._handle_java_single_file(Path("Main.java"))
+
+def test_c_and_rust_source_path_normalization(monkeypatch):
+    """Test C/C++ and Rust compiler invocations prefix hyphens with ./ (SEC-R2-005)."""
+    runner = CompilerRunner({}, extra_flags="", run_args=[])
+    commands_run = []
+    monkeypatch.setattr(runner, "run_command", lambda cmd, **kwargs: (commands_run.append(cmd), True)[1])
+    monkeypatch.setattr(runner, "_execute_binary", lambda out: True)
+
+    runner._handle_c_family_single_file(Path("-main.c"))
+    compile_cmd = next(c for c in commands_run if "-o" in c)
+    assert "./-main.c" in compile_cmd
+
+    commands_run.clear()
+    monkeypatch.setattr(runner, "_find_cargo_toml", lambda fp: None)
+    runner._handle_rust_execution(Path("-main.rs"))
+    rustc_cmd = next(c for c in commands_run if "-o" in c)
+    assert "./-main.rs" in rustc_cmd
+

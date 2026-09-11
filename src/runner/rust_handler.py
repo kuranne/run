@@ -121,7 +121,8 @@ class RustHandler:
                 return self._execute_binary(out_name)
 
             preset_flags = self.config.get_preset_flags(self.preset, "rust")
-            cmd = [compiler] + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
+            source_str = f"./{fp}" if str(fp).startswith("-") else str(fp)
+            cmd = [compiler] + self.extra_flags + preset_flags + [source_str, "-o", str(out_name)]
             
             if not self.run_command(cmd, compiling=True):
                 return False

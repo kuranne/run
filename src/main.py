@@ -160,7 +160,8 @@ def main():
                 return False
 
         def run_once() -> list[str]:
-            runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=args.argument)
+            runner_args = getattr(args, "argument_list", None) or args.argument
+            runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=runner_args)
             
             # Check if --test-dir is provided
             if args.test_dir:

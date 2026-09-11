@@ -88,12 +88,6 @@ def args(__version__: str):
         trailing_args = cli_argv[split_idx + 1:]
         cli_argv = cli_argv[:split_idx]
 
-    from pathlib import Path
-    source_exts = {
-        ".c", ".cpp", ".cc", ".cxx", ".rs", ".java", ".py", ".go",
-        ".js", ".ts", ".zig", ".rb", ".cs", ".kt", ".swift", ".php"
-    }
-
     processed_args = []
     i = 0
     while i < len(cli_argv):
@@ -134,26 +128,25 @@ def args(__version__: str):
             elif next_arg.startswith("-"):
                 processed_args.append(f"{arg}=-")
             else:
-                ext = Path(next_arg).suffix.lower()
-                remaining = cli_argv[i + 2:]
-                has_subsequent_source = any(Path(r).suffix.lower() in source_exts for r in remaining if not r.startswith("-"))
-                if ext in source_exts and not has_subsequent_source:
-                    processed_args.append(f"{arg}=-")
-                else:
-                    processed_args.append(arg)
-                    processed_args.append(next_arg)
-                    i += 1
+                processed_args.append(arg)
+                processed_args.append(next_arg)
+                i += 1
         else:
             processed_args.append(arg)
             
         i += 1
 
     parsed = parser.parse_args(processed_args)
+    arg_list: List[str] = []
+    if parsed.argument:
+        arg_list.extend(shlex.split(parsed.argument))
     if trailing_args:
-        trailing_str = " ".join(shlex.quote(a) for a in trailing_args)
-        if parsed.argument:
-            parsed.argument = f"{parsed.argument} {trailing_str}"
-        else:
-            parsed.argument = trailing_str
+        arg_list.extend(trailing_args)
+    parsed.argument_list = arg_list
+
+    if arg_list:
+        parsed.argument = " ".join(shlex.quote(a) if (" " in a or "\t" in a or not a) else a for a in arg_list)
+    else:
+        parsed.argument = ""
 
     return parsed

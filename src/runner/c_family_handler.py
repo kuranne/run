@@ -31,7 +31,8 @@ class CFamilyHandler:
 
         from util.output import Printer
         Printer.action("COMPILE", f"{source.name} -> object")
-        cmd = [compiler, "-c", str(source), "-o", str(obj_file)] + extra_cmd
+        source_str = f"./{source}" if str(source).startswith("-") else str(source)
+        cmd = [compiler, "-c", source_str, "-o", str(obj_file)] + extra_cmd
         
         try:
             self.run_command(cmd, compiling=True)
@@ -63,7 +64,8 @@ class CFamilyHandler:
             Printer.info(f"Using cached binary: {out_name}")
             return self._execute_binary(out_name)
         
-        cmd = [compiler] + self.extra_flags + preset_flags + [str(fp), "-o", str(out_name)]
+        source_str = f"./{fp}" if str(fp).startswith("-") else str(fp)
+        cmd = [compiler] + self.extra_flags + preset_flags + [source_str, "-o", str(out_name)]
         
         self.run_command(cmd, compiling=True)
         

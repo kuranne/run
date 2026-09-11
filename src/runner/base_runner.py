@@ -5,7 +5,7 @@ import time
 import shlex
 import tempfile
 import uuid
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Tuple, Union
 from pathlib import Path
 from util.config import Config
 from util.output import Printer, Colors
@@ -18,14 +18,14 @@ class BaseRunner:
     Base class for runners, handling common functionality like command execution,
     platform detection, and cleanup.
     """
-    def __init__(self, op_flags: Dict[str, Any], extra_flags: str = "", run_args: str = ""):
+    def __init__(self, op_flags: Dict[str, Any], extra_flags: Union[str, List[str]] = "", run_args: Union[str, List[str]] = ""):
         """
         Initialize BaseRunner.
 
         Args:
             op_flags (Dict[str, Any]): Dictionary of operation flags (e.g., 'dry_run', 'preset').
-            extra_flags (str): String of extra compiler flags.
-            run_args (str): Arguments to pass to the executed program.
+            extra_flags (Union[str, List[str]]): Extra compiler flags as a string or list.
+            run_args (Union[str, List[str]]): Arguments to pass to the executed program.
         """
         # Platform detection
         self.is_posix = os.name == "posix"
@@ -53,13 +53,19 @@ class BaseRunner:
         self.exclude_files: List[str] = ['.git', '.gitignore'] + excludes.get("files", [])
         self.exclude_dirs: List[str] = ['.git', '__pycache__', 'venv', '.venv', 'build', 'bin', 'obj', 'node_modules', '.run_cache'] + excludes.get("dirs", [])
 
-        # Clean flags from extra quotes and split into list
-        clean_flags = extra_flags.strip().strip('"').strip("'")
-        self.extra_flags = shlex.split(clean_flags) if clean_flags else []
+        # Clean flags and split into list without corrupting token quotes
+        if isinstance(extra_flags, list):
+            self.extra_flags = list(extra_flags)
+        else:
+            clean_flags = extra_flags.strip() if extra_flags else ""
+            self.extra_flags = shlex.split(clean_flags) if clean_flags else []
         
         # Run args
-        clean_run_args = run_args.strip().strip('"').strip("'")
-        self.run_args = shlex.split(clean_run_args) if clean_run_args else []
+        if isinstance(run_args, list):
+            self.run_args = list(run_args)
+        else:
+            clean_run_args = run_args.strip() if run_args else ""
+            self.run_args = shlex.split(clean_run_args) if clean_run_args else []
 
         # Inject sanitizer compiler flags
         if self.flags.get("asan"):
