@@ -54,7 +54,7 @@ class CustomLanguageHandler(LanguageHandler):
 
         # 1. Template-driven compiler
         if compile_template:
-            expanded_cmd = VariableSubstitutor.substitute_string(compile_template, var_ctx)
+            expanded_cmd = VariableSubstitutor.substitute_string(compile_template, var_ctx, quote_env=True)
             cmd = shlex.split(expanded_cmd)
             if ctx.extra_flags or preset_flags:
                 cmd = [cmd[0]] + ctx.extra_flags + preset_flags + cmd[1:]
@@ -62,14 +62,14 @@ class CustomLanguageHandler(LanguageHandler):
                 return False
             ctx.output_files.append(out_name)
             if run_template and run_template.strip() not in ("${out}", "{out}", "$out", "out"):
-                expanded_run = VariableSubstitutor.substitute_string(run_template, var_ctx)
+                expanded_run = VariableSubstitutor.substitute_string(run_template, var_ctx, quote_env=True)
                 run_cmd = shlex.split(expanded_run) + execute_args + ctx.run_args
                 return ctx.run_command(run_cmd)
             return ctx.execute_binary(out_name, args=execute_args)
 
         # 2. Template-driven interpreter / direct command
         if command_template:
-            expanded_cmd = VariableSubstitutor.substitute_string(command_template, var_ctx)
+            expanded_cmd = VariableSubstitutor.substitute_string(command_template, var_ctx, quote_env=True)
             cmd = shlex.split(expanded_cmd)
             if ctx.extra_flags or preset_flags:
                 cmd = [cmd[0]] + ctx.extra_flags + preset_flags + cmd[1:]
@@ -122,7 +122,7 @@ class CustomLanguageHandler(LanguageHandler):
 
         # 1. Template-driven compiler for multi-file
         if compile_template:
-            expanded_cmd = VariableSubstitutor.substitute_string(compile_template, var_ctx)
+            expanded_cmd = VariableSubstitutor.substitute_string(compile_template, var_ctx, quote_env=True)
             cmd = shlex.split(expanded_cmd)
             if ctx.extra_flags or preset_flags:
                 cmd = [cmd[0]] + ctx.extra_flags + preset_flags + cmd[1:]
@@ -130,14 +130,14 @@ class CustomLanguageHandler(LanguageHandler):
                 return False
             ctx.output_files.append(out_name)
             if run_template and run_template.strip() not in ("${out}", "{out}", "$out", "out"):
-                expanded_run = VariableSubstitutor.substitute_string(run_template, var_ctx)
+                expanded_run = VariableSubstitutor.substitute_string(run_template, var_ctx, quote_env=True)
                 run_cmd = shlex.split(expanded_run) + execute_args + ctx.run_args
                 return ctx.run_command(run_cmd)
             return ctx.execute_binary(out_name, args=execute_args)
 
         # 2. Template-driven interpreter / direct command for multi-file
         if command_template:
-            expanded_cmd = VariableSubstitutor.substitute_string(command_template, var_ctx)
+            expanded_cmd = VariableSubstitutor.substitute_string(command_template, var_ctx, quote_env=True)
             cmd = shlex.split(expanded_cmd)
             if ctx.extra_flags or preset_flags:
                 cmd = [cmd[0]] + ctx.extra_flags + preset_flags + cmd[1:]

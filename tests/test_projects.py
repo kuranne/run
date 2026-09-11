@@ -130,3 +130,63 @@ def test_run_project_compound_command(tmp_path, monkeypatch):
     assert cmd3 == ["./build/app", "--port", "8080"]
     assert compiling is False
 
+def test_run_project_compound_command_with_quotes(tmp_path, monkeypatch):
+    toml = tmp_path / "Run.toml"
+    toml.write_text("""
+    [projects.quoted_project]
+    file = "test.txt"
+    build = "echo 'hello && world' && echo done"
+    run = "echo \\"step1;step2\\""
+    """)
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("dummy")
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    config = Config()
+    runner = DummyRunner()
+
+    detected = ProjectRunner.detect_project(tmp_path, config)
+    assert detected is not None
+
+    success = ProjectRunner.run_project(detected, runner)
+    assert success is True
+    assert len(runner.executed) == 3
+
+    cmd1, _, compiling1 = runner.executed[0]
+    assert cmd1 == ["echo", "hello && world"]
+    assert compiling1 is True
+
+    cmd2, _, compiling2 = runner.executed[1]
+    assert cmd2 == ["echo", "done"]
+    assert compiling2 is True
+
+    cmd3, _, compiling3 = runner.executed[2]
+    assert cmd3 == ["echo", "step1;step2"]
+    assert compiling3 is False
+
+def test_run_project_mixed_compound_operators(tmp_path, monkeypatch):
+    toml = tmp_path / "Run.toml"
+    toml.write_text("""
+    [projects.mixed_project]
+    file = "test.txt"
+    build = "cargo check ; cargo test && cargo build"
+    run = "echo ok"
+    """)
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("dummy")
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
+    config = Config()
+    runner = DummyRunner()
+
+    detected = ProjectRunner.detect_project(tmp_path, config)
+    assert detected is not None
+
+    success = ProjectRunner.run_project(detected, runner)
+    assert success is True
+    assert len(runner.executed) == 4
+
+    assert runner.executed[0][0] == ["cargo", "check"]
+    assert runner.executed[1][0] == ["cargo", "test"]
+    assert runner.executed[2][0] == ["cargo", "build"]
+    assert runner.executed[3][0] == ["echo", "ok"]
+
+

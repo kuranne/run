@@ -37,19 +37,19 @@ class VariableSubstitutor:
         """
         ctx: Dict[str, str] = {}
         if file_path:
-            ctx["file"] = str(file_path)
-            ctx["files"] = shlex.quote(str(file_path)) if " " in str(file_path) else str(file_path)
-            ctx["filename"] = file_path.name
+            ctx["file"] = shlex.quote(str(file_path))
+            ctx["files"] = shlex.quote(str(file_path))
+            ctx["filename"] = shlex.quote(file_path.name) if " " in file_path.name else file_path.name
             ctx["name"] = file_path.stem
             ctx["stem"] = file_path.stem
             ctx["ext"] = file_path.suffix
-            ctx["dir"] = str(file_path.parent)
-            ctx["parent"] = str(file_path.parent)
+            ctx["dir"] = shlex.quote(str(file_path.parent))
+            ctx["parent"] = shlex.quote(str(file_path.parent))
         if out_path:
-            ctx["out"] = str(out_path)
-            ctx["executable"] = str(out_path)
+            ctx["out"] = shlex.quote(str(out_path))
+            ctx["executable"] = shlex.quote(str(out_path))
         if out_dir:
-            ctx["out_dir"] = out_dir
+            ctx["out_dir"] = shlex.quote(str(out_dir))
         return ctx
 
     @classmethod
@@ -69,17 +69,18 @@ class VariableSubstitutor:
         first_file = file_paths[0] if file_paths else None
         ctx = cls.build_file_context(file_path=first_file, out_path=out_path, out_dir=out_dir)
         if file_paths:
-            ctx["files"] = " ".join(shlex.quote(str(p)) if " " in str(p) else str(p) for p in file_paths)
+            ctx["files"] = " ".join(shlex.quote(str(p)) for p in file_paths)
         return ctx
 
     @classmethod
-    def substitute_string(cls, template: str, context: Dict[str, str]) -> str:
+    def substitute_string(cls, template: str, context: Dict[str, str], quote_env: bool = False) -> str:
         """
         Replace variable placeholders in a single string.
 
         Args:
             template (str): Input string containing placeholders.
             context (Dict[str, str]): Variable replacements.
+            quote_env (bool): Whether to shell-quote environment variable expansions.
 
         Returns:
             str: String with variables replaced.
@@ -88,21 +89,31 @@ class VariableSubstitutor:
             key = match.group(1) or match.group(2)
             if key.startswith("env:"):
                 env_var = key[4:]
-                return os.environ.get(env_var, "")
+                from util.security import SecurityManager
+                if env_var in SecurityManager.DANGEROUS_ENV_VARS:
+                    from util.output import Printer
+                    Printer.warning(f"Rejected dangerous environment variable expansion in template: {env_var}")
+                    return ""
+                val = os.environ.get(env_var, "")
+                val = val.replace("\0", "").replace("\r", "").replace("\n", "")
+                if quote_env:
+                    return shlex.quote(val)
+                return val
             return context.get(key, match.group(0))
 
         return cls.VAR_PATTERN.sub(replace, template)
 
     @classmethod
-    def substitute_list(cls, templates: List[str], context: Dict[str, str]) -> List[str]:
+    def substitute_list(cls, templates: List[str], context: Dict[str, str], quote_env: bool = False) -> List[str]:
         """
         Replace variable placeholders across a list of strings.
 
         Args:
             templates (List[str]): List of strings containing placeholders.
             context (Dict[str, str]): Variable replacements.
+            quote_env (bool): Whether to shell-quote environment variable expansions.
 
         Returns:
             List[str]: New list with variables replaced.
         """
-        return [cls.substitute_string(item, context) for item in templates]
+        return [cls.substitute_string(item, context, quote_env=quote_env) for item in templates]
