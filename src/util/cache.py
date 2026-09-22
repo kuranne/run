@@ -29,6 +29,8 @@ class CacheManager:
             
         self.cache_dir = base_cache / "run_kuranne" / project_hash
         self.objs_dir = self.cache_dir / "objs"
+        self.bin_dir = self.cache_dir / "bin"
+        self.src_dir = self.cache_dir / "src"
         self.cache_file = self.cache_dir / "cache.json"
         self.cache_data: Dict[str, str] = {}
         self._load_cache()
@@ -47,6 +49,33 @@ class CacheManager:
                 pass
                 
         return self.objs_dir / f"{path_hash}_{source_path.name}.o"
+
+    def get_cached_binary_path(self, source_path: Path) -> Path:
+        """
+        Get a unique path for the compiled binary in the cache directory.
+        Uses SHA-256 of source absolute path to ensure uniqueness.
+        """
+        path_hash = hashlib.sha256(str(source_path.absolute()).encode()).hexdigest()[:16]
+        if not self.bin_dir.exists():
+            try:
+                self.bin_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+        ext = ".exe" if sys.platform == "win32" else ".out"
+        return self.bin_dir / f"{path_hash}_{source_path.stem}{ext}"
+
+    def get_sanitized_source_path(self, source_path: Path, ext: str = ".c") -> Path:
+        """
+        Get a unique path for the preprocessed/sanitized source file in the cache directory.
+        """
+        path_hash = hashlib.sha256(str(source_path.absolute()).encode()).hexdigest()[:16]
+        if not self.src_dir.exists():
+            try:
+                self.src_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+        clean_ext = ext if ext.startswith(".") else f".{ext}"
+        return self.src_dir / f"{path_hash}_{source_path.stem}{clean_ext}"
 
     def _load_cache(self):
         """Load cache from disk."""
@@ -114,7 +143,16 @@ class CacheManager:
         visited.add(file_path)
 
         c_exts = {'.c', '.cpp', '.cc', '.h', '.hpp', '.cxx', '.hxx'}
-        if file_path.suffix.lower() not in c_exts:
+        is_c = file_path.suffix.lower() in c_exts
+        if not is_c and file_path.is_file():
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    head = f.read(1024)
+                    if head.startswith("#!") and ("run" in head.split("\n", 1)[0] or "#include" in head):
+                        is_c = True
+            except Exception:
+                pass
+        if not is_c:
             return includes
 
         include_pattern = re.compile(r'#\s*include\s*"([^"]+)"')
@@ -145,7 +183,16 @@ class CacheManager:
         hash_sha.update(self_hash.encode())
 
         c_exts = {'.c', '.cpp', '.cc'}
-        if file_path.suffix.lower() in c_exts:
+        is_c = file_path.suffix.lower() in c_exts
+        if not is_c and file_path.is_file():
+            try:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    head = f.read(1024)
+                    if head.startswith("#!") and ("run" in head.split("\n", 1)[0] or "#include" in head):
+                        is_c = True
+            except Exception:
+                pass
+        if is_c:
             includes = self._get_c_includes(file_path)
             for inc in sorted(includes, key=lambda p: str(p)):
                 inc_hash = self.get_file_hash(inc)
@@ -220,14 +267,15 @@ class CacheManager:
         """Clear all cache and cached object binaries."""
         with self._lock:
             self.cache_data = {}
-            if self.objs_dir.exists():
-                try:
-                    for obj in self.objs_dir.iterdir():
-                        if obj.is_file():
-                            obj.unlink()
-                    self.objs_dir.rmdir()
-                except OSError:
-                    pass
+            for d in (self.objs_dir, self.bin_dir, self.src_dir):
+                if d.exists():
+                    try:
+                        for obj in d.iterdir():
+                            if obj.is_file():
+                                obj.unlink()
+                        d.rmdir()
+                    except OSError:
+                        pass
 
             if self.cache_file.exists():
                 try:

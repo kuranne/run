@@ -165,7 +165,7 @@ class CompilerRunner(BaseRunner, RustHandler, PythonHandler, JavaHandler,
                     case ".java":
                         res = self._handle_java_single_file(fp)
                     case _ if ext in self.c_family_ext:
-                        res = self._handle_c_family_single_file(fp)
+                        res = self._handle_c_family_single_file(fp, detected_ext=ext)
                     case _:
                         raise ConfigError(f"Unsupported extension: {ext}")
             return True if res is None else bool(res)

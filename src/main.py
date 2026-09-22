@@ -161,6 +161,20 @@ def main():
 
         def run_once() -> list[str]:
             runner_args = getattr(args, "argument_list", None) or args.argument
+            if isinstance(runner_args, str):
+                runner_args = shlex.split(runner_args) if runner_args else []
+            else:
+                runner_args = list(runner_args) if runner_args else []
+
+            # Check if first file is an executed script with a 'run' shebang
+            if args.files and not getattr(args, "multi", False):
+                from runner.script_handler import ScriptHandler
+                first_fp = Path(args.files[0])
+                if first_fp.is_file() and ScriptHandler.is_run_shebang(first_fp):
+                    if len(args.files) > 1:
+                        runner_args = runner_args + list(args.files[1:])
+                        args.files = [args.files[0]]
+
             runner = CompilerRunner(op_flags=operator_flags, extra_flags=args.flags, run_args=runner_args)
             
             # Check if --test-dir is provided

@@ -42,38 +42,93 @@ class CFamilyHandler:
         except Exception:
             return None
 
-    def _handle_c_family_single_file(self, fp: Path):
+    def _handle_c_family_single_file(self, fp: Path, detected_ext: Optional[str] = None):
         """
         Handle single C/C++ file compilation and execution.
+        Supports native shebang execution (e.g. #!/usr/bin/env run) with persistent caching,
+        1:1 line preservation, and inline directives.
 
         Args:
             fp (Path): Path to the C/C++ source file.
+            detected_ext (Optional[str]): Explicit or heuristic extension if fp is extensionless.
         """
-        ext = fp.suffix.lower()
+        ext = (detected_ext or fp.suffix).lower()
+        if not ext and hasattr(self, '_detect_language_from_shebang'):
+            ext = self._detect_language_from_shebang(fp)
+        if not ext:
+            ext = ".c"
+
         lang = "c" if ext == ".c" else "cpp"
         default_compiler = "gcc" if lang == "c" else "g++"
         compiler = self.config.get_runner(lang, default_compiler)
-        
         preset_flags = self.config.get_preset_flags(self.preset, lang)
 
-        out_name = self.get_executable_path(fp)
-        
+        # Check for shebang line
+        has_shebang = False
+        try:
+            with open(fp, "r", encoding="utf-8", errors="ignore") as f:
+                first_line = f.readline()
+                has_shebang = first_line.startswith("#!")
+        except Exception:
+            pass
+
+        inline_flags = []
+        if has_shebang and hasattr(self, 'extract_inline_directives'):
+            inline_flags = self.extract_inline_directives(fp)
+
+        # Determine binary output path
+        if has_shebang and self.cache:
+            out_name = self.cache.get_cached_binary_path(fp)
+        else:
+            out_name = self.get_executable_path(fp)
+
         # Check cache before compiling
         if self.cache and not self.cache.is_changed(fp, out_name):
             from util.output import Printer
-            Printer.info(f"Using cached binary: {out_name}")
+            if not self.flags.get("quiet", False):
+                Printer.info(f"Using cached binary: {out_name}")
             return self._execute_binary(out_name)
-        
-        source_str = f"./{fp}" if str(fp).startswith("-") else str(fp)
-        cmd = [compiler] + self.extra_flags + preset_flags + [source_str, "-o", str(out_name)]
-        
+
+        if has_shebang:
+            # Preprocess source to replace shebang with #line 2 directive (preserving line numbers 1:1)
+            if self.cache:
+                sanitized_source = self.cache.get_sanitized_source_path(fp, ext=ext)
+            else:
+                import tempfile
+                tmp_f = tempfile.NamedTemporaryFile("w", suffix=ext, delete=False, encoding="utf-8")
+                sanitized_source = Path(tmp_f.name)
+                tmp_f.close()
+                self.output_files.append(sanitized_source)
+
+            with open(fp, "r", encoding="utf-8", errors="ignore") as f:
+                orig_lines = f.readlines()
+
+            escaped_fp = str(fp.resolve().as_posix()).replace('\\', '\\\\').replace('"', '\\"')
+            sanitized_line1 = f'#line 2 "{escaped_fp}"\n'
+            with open(sanitized_source, "w", encoding="utf-8") as f:
+                f.write(sanitized_line1)
+                if len(orig_lines) > 1:
+                    f.writelines(orig_lines[1:])
+
+            source_str = f"./{sanitized_source}" if str(sanitized_source).startswith("-") else str(sanitized_source)
+            cmd = [compiler] + self.extra_flags + inline_flags + preset_flags
+            # Ensure local headers relative to the original file can be resolved
+            parent_dir = str(fp.parent.resolve())
+            cmd.extend([f"-I{parent_dir}", source_str, "-o", str(out_name)])
+        else:
+            source_str = f"./{fp}" if str(fp).startswith("-") else str(fp)
+            cmd = [compiler] + self.extra_flags + preset_flags + [source_str, "-o", str(out_name)]
+
         self.run_command(cmd, compiling=True)
-        
+
         # Update cache after successful compilation
         if self.cache:
             self.cache.update_cache(fp, out_name)
-        
-        self.output_files.append(out_name)
+
+        # Workspace binary is tracked for cleanup unless it's a shebang binary in cache
+        if not (has_shebang and self.cache):
+            self.output_files.append(out_name)
+
         return self._execute_binary(out_name)
 
     def _handle_multi_c_family(self, sources: List[Path], all_paths: List[Path]):

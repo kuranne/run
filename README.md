@@ -20,6 +20,7 @@ A smart, high-performance build system, test runner, and developer productivity 
 ## Features
 
 - **Multi-Language Support**: Automatically detects and runs C/C++, Rust, Python, Java, Go, Zig, Node.js, Ruby, Perl, Lua, and Bash.
+- **C/C++ Scripting & Shebang Execution**: Run C and C++ programs as executable scripts with `#!/usr/bin/env run`, persistent binary caching, inline directives (`// run: -lm`), and zero workspace pollution.
 - **Smart Compilation**: Compiles C/C++/Rust/Java automatically before execution and cleans up temporary binaries.
 - **CPM (C Project Manager)**: Multi-file compilation with automatic `main()` entrypoint detection regardless of file ordering.
 - **Built-in Testing & Benchmarks**: Real-time execution time (`-t`), peak memory tracking (`-M`), output expectation diffs (`--expect`), and batch testcase runner (`--test-dir`).

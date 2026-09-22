@@ -243,3 +243,42 @@ int main() {
 
 See [Templates & Scaffolding Guide](templates_and_scaffolding.md) for full details on multi-file templates.
 
+---
+
+## C/C++ Shebang Scripting
+
+`run` supports native, executable C and C++ scripts (inspired by `ryanmjacobs/c`).
+
+### Usage
+
+Add a shebang on line 1, make the file executable, and run it:
+
+```c
+#!/usr/bin/env run
+// run: -O2 -lm
+#include <stdio.h>
+#include <math.h>
+
+int main(int argc, char *argv[]) {
+    printf("sqrt(49) = %.1f\n", sqrt(49.0));
+    for (int i = 1; i < argc; i++) {
+        printf("arg[%d] = %s\n", i, argv[i]);
+    }
+    return 0;
+}
+```
+
+```bash
+chmod +x calc.c
+./calc.c foo bar
+```
+
+### Key Capabilities
+
+1. **Persistent Binary Caching**: Binaries are compiled directly into `~/.cache/run_kuranne/<hash>/bin/` and cached with composite SHA-256 hashes of the source file and local `#include` headers. Subsequent script invocations execute instantly without re-compilation.
+2. **1:1 Line Number Preservation**: The shebang line is replaced with `#line 2 "<file>"` during compilation, ensuring compiler errors and debugger symbols point accurately to your original script and line numbers.
+3. **Inline Compiler Directives**: Embed compiler flags directly in the script using `// run: <flags>` or `// flags: <flags>` (e.g. `// run: -lm -O3 -pthread`).
+4. **Extensionless Scripts**: Run extensionless scripts (e.g. `chmod +x my_tool && ./my_tool`) with automatic heuristic detection for C vs. C++ (or explicit `// lang: cpp`).
+5. **Zero Workspace Clutter**: No `.out` or temporary files are generated in your working directory.
+
+
