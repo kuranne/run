@@ -9,8 +9,8 @@
 //! existing-ancestor canonicalization.
 
 use std::collections::BTreeMap;
-use std::ffi::OsString;
 use std::fs;
+use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -138,42 +138,104 @@ fn civil_from_unix_days(z: i64) -> LocalDate {
     }
 }
 
-/// Canonicalize `path` by resolving its deepest existing ancestor and normalizing remaining components.
-///
-/// Defeats symlink escapes while supporting paths whose leaf (or intermediate
-/// directories) do not yet exist on disk.
-fn canonicalize_with_existing_ancestor(path: &Path) -> Result<PathBuf, RunError> {
+/// Maximum symbolic link hops followed when resolving containment paths.
+const MAX_SYMLINK_DEPTH: usize = 40;
+
+/// Lexically normalize `path` onto an absolute path, failing closed if `..` escapes root.
+fn lexical_normalize(path: &Path) -> Result<PathBuf, RunError> {
     let abs = std::path::absolute(path).map_err(RunError::Io)?;
-    if let Ok(canon) = fs::canonicalize(&abs) {
-        return Ok(canon);
-    }
-
-    let mut cur = abs.as_path();
-    let mut tail: Vec<OsString> = Vec::new();
-    while !cur.exists() {
-        if let Some(name) = cur.file_name() {
-            tail.push(name.to_os_string());
-        } else {
-            break;
-        }
-        match cur.parent() {
-            Some(parent) => cur = parent,
-            None => break,
-        }
-    }
-
-    let mut resolved = fs::canonicalize(cur).unwrap_or_else(|_| cur.to_path_buf());
-    for part in tail.into_iter().rev() {
-        let part_path = Path::new(&part);
-        match part_path.components().next() {
-            Some(Component::CurDir) => {}
-            Some(Component::ParentDir) => {
-                let _ = resolved.pop();
+    let mut out = PathBuf::new();
+    let mut normal_depth = 0usize;
+    for comp in abs.components() {
+        match comp {
+            Component::Prefix(p) => out.push(p.as_os_str()),
+            Component::RootDir => out.push(Component::RootDir.as_os_str()),
+            Component::CurDir => {}
+            Component::Normal(seg) => {
+                out.push(seg);
+                normal_depth += 1;
             }
-            _ => resolved.push(part),
+            Component::ParentDir => {
+                if normal_depth == 0 {
+                    return Err(RunError::config(format!(
+                        "Path traversal detected: '{}' escapes root (outside base directory).",
+                        path.display()
+                    )));
+                }
+                out.pop();
+                normal_depth -= 1;
+            }
         }
     }
-    Ok(resolved)
+    Ok(out)
+}
+
+/// Walk every prefix component of a lexically normalized path using `fs::symlink_metadata`.
+///
+/// Resolves both existing and dangling symlinks up to [`MAX_SYMLINK_DEPTH`] hops so
+/// dangling symlinks targeting paths outside `base` cannot bypass containment.
+fn resolve_normalized_with_symlinks(normalized: &Path, depth: usize) -> Result<PathBuf, RunError> {
+    let mut current = PathBuf::new();
+    let mut comps = normalized.components();
+    while let Some(comp) = comps.next() {
+        match comp {
+            Component::Prefix(p) => current.push(p.as_os_str()),
+            Component::RootDir => current.push(Component::RootDir.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(RunError::config(format!(
+                    "Path traversal detected: unexpected parent segment in '{}'.",
+                    normalized.display()
+                )));
+            }
+            Component::Normal(seg) => {
+                current.push(seg);
+                match fs::symlink_metadata(&current) {
+                    Ok(meta) if meta.file_type().is_symlink() => {
+                        if depth >= MAX_SYMLINK_DEPTH {
+                            return Err(RunError::config(format!(
+                                "Too many levels of symbolic links resolving '{}'.",
+                                normalized.display()
+                            )));
+                        }
+                        let link_target = fs::read_link(&current).map_err(RunError::Io)?;
+                        let combined = if link_target.is_absolute() {
+                            link_target
+                        } else {
+                            let parent = current.parent().unwrap_or_else(|| Path::new("/"));
+                            parent.join(link_target)
+                        };
+                        let mut full = lexical_normalize(&combined)?;
+                        for rem in comps {
+                            full.push(rem.as_os_str());
+                        }
+                        return resolve_normalized_with_symlinks(&full, depth + 1);
+                    }
+                    Ok(_) => {}
+                    Err(e)
+                        if e.kind() == io::ErrorKind::NotFound
+                            || e.kind() == io::ErrorKind::NotADirectory =>
+                    {
+                        for rem in comps {
+                            current.push(rem.as_os_str());
+                        }
+                        break;
+                    }
+                    Err(e) => return Err(RunError::Io(e)),
+                }
+            }
+        }
+    }
+    Ok(current)
+}
+
+/// Canonicalize `path` by lexically normalizing `..` and resolving every existing/dangling symlink prefix.
+///
+/// Defeats `nonexistent/../../escape` and dangling symlink escapes while supporting
+/// paths whose leaf or intermediate directories do not yet exist on disk.
+fn canonicalize_with_existing_ancestor(path: &Path) -> Result<PathBuf, RunError> {
+    let normalized = lexical_normalize(path)?;
+    resolve_normalized_with_symlinks(&normalized, 0)
 }
 
 /// Resolve `path` relative to `base` and verify it stays strictly within `base`.
@@ -700,6 +762,90 @@ content = "pwned"
             .expect_err("single file traversal must fail");
         assert!(err.to_string().contains("Path traversal detected"));
         assert!(!tmp.join("escape.py").exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Regression test: single-file target with `nonexistent/../../escape.py` must be rejected atomically.
+    #[test]
+    fn test_single_file_nonexistent_parent_traversal_rejected() {
+        let tmp = make_temp_dir("nonexistent_single");
+        let ws = tmp.join("workspace");
+        fs::create_dir_all(&ws).expect("mkdir workspace");
+
+        let err = TemplateManager::generate(
+            "nonexistent/../../escape.py",
+            None,
+            None,
+            true,
+            Some(&ws),
+        )
+        .expect_err("nonexistent/../../escape.py must fail closed");
+        assert!(matches!(err, RunError::Config(_)));
+        assert!(!ws.join("nonexistent").exists());
+        assert!(!tmp.join("escape.py").exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Regression test: multi-file template with valid first entry and `a/../../escape.txt` writes zero files.
+    #[test]
+    fn test_multi_file_nonexistent_parent_traversal_atomic_zero_writes() {
+        let tmp = make_temp_dir("nonexistent_multi");
+        let ws = tmp.join("workspace");
+        fs::create_dir_all(&ws).expect("mkdir workspace");
+
+        let cfg = Config::from_toml_str(
+            r#"
+[templates.atomic_escape]
+[[templates.atomic_escape.files]]
+name = "dir_one/first.txt"
+content = "should never be created"
+[[templates.atomic_escape.files]]
+name = "a/../../escape.txt"
+content = "escaped"
+"#,
+            None,
+            None,
+        )
+        .expect("parse cfg");
+
+        let err = TemplateManager::generate(
+            "proj",
+            Some("atomic_escape"),
+            Some(&cfg),
+            true,
+            Some(&ws),
+        )
+        .expect_err("a/../../escape.txt must fail closed");
+        assert!(matches!(err, RunError::Config(_)));
+        assert!(!ws.join("proj").join("dir_one").join("first.txt").exists());
+        assert!(!ws.join("escape.txt").exists());
+        assert!(!tmp.join("escape.txt").exists());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Regression test: dangling symlink targeting outside `base_dir` must be rejected for both `force = false` and `force = true`.
+    #[cfg(unix)]
+    #[test]
+    fn test_dangling_symlink_escape_rejected() {
+        let tmp = make_temp_dir("dangling_symlink");
+        let ws = tmp.join("workspace");
+        let outside = tmp.join("outside");
+        fs::create_dir_all(&ws).expect("mkdir workspace");
+        fs::create_dir_all(&outside).expect("mkdir outside");
+
+        let outside_target = outside.join("created.py");
+        std::os::unix::fs::symlink(&outside_target, ws.join("dangling.py"))
+            .expect("create dangling symlink");
+
+        for force in [false, true] {
+            let err = TemplateManager::generate("dangling.py", None, None, force, Some(&ws))
+                .expect_err("dangling symlink outside base_dir must be rejected");
+            assert!(matches!(err, RunError::Config(_)));
+            assert!(!outside_target.exists());
+        }
 
         let _ = fs::remove_dir_all(&tmp);
     }
