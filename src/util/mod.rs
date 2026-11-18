@@ -2,4 +2,6 @@
 
 pub mod env;
 pub mod errors;
+pub mod glob;
 pub mod output;
+pub mod substitutions;
