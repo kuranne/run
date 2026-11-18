@@ -204,3 +204,163 @@ suspicious_flag_substrings = [
     "-wrapper", "-Xclang", "-Clinker=", "-C linker=", "-Clink-arg=", "-C link-arg=",
 ]
 suspicious_flag_exact = ["-specs", "-wrapper", "-Xclang"]
+
+[package.metadata.run.doctor]
+truncation_limit = 60
+ellipsis = "..."
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "C / C++"
+tools = [
+    ["gcc", "--version"],
+    ["g++", "--version"],
+    ["clang", "--version"],
+    ["clang++", "--version"],
+    ["make", "--version"],
+    ["cmake", "--version"],
+    ["ninja", "--version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "Rust"
+tools = [
+    ["rustc", "--version"],
+    ["cargo", "--version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "Python"
+tools = [
+    ["python3", "--version"],
+    ["pip", "--version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "Java"
+tools = [
+    ["javac", "-version"],
+    ["java", "-version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "JavaScript / TypeScript"
+tools = [
+    ["node", "--version"],
+    ["bun", "--version"],
+    ["deno", "--version"],
+    ["npm", "--version"],
+    ["ts-node", "--version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "Go"
+tools = [
+    ["go", "version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "Zig"
+tools = [
+    ["zig", "version"],
+]
+
+[package.metadata.run.templates.builtins]
+".c" = '''#include <stdio.h>
+
+int main(void) {
+    printf("Hello, World!\n");
+    return 0;
+}
+'''
+".cpp" = '''#include <iostream>
+
+using namespace std;
+
+int main() {
+    cout << "Hello, World!" << endl;
+    return 0;
+}
+'''
+".cc" = '''#include <iostream>
+
+using namespace std;
+
+int main() {
+    cout << "Hello, World!" << endl;
+    return 0;
+}
+'''
+".py" = '''def main():
+    print("Hello, World!")
+
+if __name__ == "__main__":
+    main()
+'''
+".rs" = '''fn main() {
+    println!("Hello, World!");
+}
+'''
+".java" = '''public class {{name}} {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}
+'''
+".go" = '''package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello, World!")
+}
+'''
+".zig" = '''const std = @import("std");
+
+pub fn main() !void {
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("Hello, World!\n", .{});
+}
+'''
+".js" = '''console.log("Hello, World!");
+'''
+".ts" = '''console.log("Hello, World!");
+'''
+".sh" = '''#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Hello, World!"
+'''
+
+[package.metadata.run.init]
+[package.metadata.run.init.filename_techs]
+"Cargo.toml" = "rust_cargo"
+"CMakeLists.txt" = "cmake"
+"go.mod" = "go"
+"build.zig" = "zig"
+"package.json" = "node"
+"Makefile" = "make"
+
+[package.metadata.run.init.extension_techs]
+".cpp" = "cpp"
+".cc" = "cpp"
+".cxx" = "cpp"
+".hpp" = "cpp"
+".c" = "c"
+".h" = "c"
+".py" = "python"
+".rs" = "rust"
+".java" = "java"
+".go" = "go"
+".zig" = "zig"
+
+[package.metadata.run.init.debug_presets]
+cpp = ["-g", "-Wall", "-Wextra", "-std=c++20", "-O0"]
+c = ["-g", "-Wall", "-Wextra", "-O0"]
+rust = ["-g"]
+java = ["-g"]
+
+[package.metadata.run.init.release_presets]
+cpp = ["-O3", "-std=c++20", "-march=native", "-DNDEBUG"]
+c = ["-O3", "-march=native", "-DNDEBUG"]
+rust = ["-C", "opt-level=3"]
+java = ["-O"]
