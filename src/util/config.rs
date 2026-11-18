@@ -349,19 +349,19 @@ fn log_config_loaded(path: &Path) {
     }
 }
 
-/// Check whether a configured relative/absolute path exists directly, relative to `base_dir`, or `cwd`.
+/// Check whether a configured relative/absolute path resolves to an existing regular file directly, relative to `base_dir`, or `cwd`.
 fn configured_file_exists(raw_path: &str, base_dir: Option<&Path>) -> bool {
     let p = Path::new(raw_path);
-    if p.exists() {
+    if p.is_file() {
         return true;
     }
     if let Some(dir) = base_dir
-        && dir.join(p).exists()
+        && dir.join(p).is_file()
     {
         return true;
     }
     if let Ok(cwd) = std::env::current_dir()
-        && cwd.join(p).exists()
+        && cwd.join(p).is_file()
     {
         return true;
     }
@@ -467,7 +467,7 @@ fn validate_toml_table(
                     "sandbox 'image' must be a non-empty string".to_string(),
                 ));
             }
-            if trimmed.starts_with('-') || trimmed.contains(' ') {
+            if trimmed.starts_with('-') || trimmed.chars().any(char::is_whitespace) {
                 return Err(RunError::Config(format!(
                     "Invalid sandbox image name '{img}'"
                 )));
@@ -1068,5 +1068,55 @@ type = "compiler"
                 "error should mention deprecated section [{section}]: {err}"
             );
         }
+    }
+
+    /// Verify `[sandbox].image` rejects any whitespace (` `, `\t`, `\n`, `\r`).
+    #[test]
+    fn test_sandbox_image_rejects_any_whitespace() {
+        for bad_image in [
+            "ubuntu --privileged",
+            "ubuntu\t--privileged",
+            "ubuntu\n--privileged",
+            "ubuntu\r--privileged",
+        ] {
+            let escaped = bad_image
+                .replace('\t', "\\t")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r");
+            let content = format!("[sandbox]\nimage = \"{escaped}\"\n");
+            let err = Config::from_toml_str(&content, None, None).unwrap_err();
+            assert!(
+                matches!(err, RunError::Config(_)),
+                "expected Config error for image {escaped:?}"
+            );
+            assert!(
+                err.to_string().contains("Invalid sandbox image name"),
+                "unexpected error message: {err}"
+            );
+        }
+    }
+
+    /// Verify `[sandbox].dockerfile` and `[sandbox].compose` reject directories.
+    #[test]
+    fn test_sandbox_dockerfile_and_compose_reject_directories() {
+        let dir = make_temp_dir("sandbox_dirs");
+        let subdir = dir.join("subdir");
+        fs::create_dir_all(&subdir).unwrap();
+
+        for (key, value) in [
+            ("dockerfile", subdir.display().to_string()),
+            ("dockerfile", "subdir".to_string()),
+            ("compose", subdir.display().to_string()),
+            ("compose", "subdir".to_string()),
+        ] {
+            let content = format!("[sandbox]\n{key} = \"{value}\"\n");
+            let err = Config::from_toml_str(&content, None, Some(&dir)).unwrap_err();
+            assert!(
+                matches!(err, RunError::Config(_)),
+                "expected Config error when sandbox.{key} points to directory {value}"
+            );
+        }
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

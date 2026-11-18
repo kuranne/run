@@ -415,6 +415,9 @@ pub fn parse_dotenv(content: &str) -> Vec<(String, String)> {
         }
 
         let value = parse_dotenv_value(raw_val);
+        if value.contains('\0') {
+            continue;
+        }
         entries.push((key.to_string(), value));
     }
 
@@ -453,6 +456,8 @@ fn parse_dotenv_value(raw_val: &str) -> String {
         } else {
             rest.to_string()
         }
+    } else if s.starts_with('#') {
+        String::new()
     } else {
         let mut prev_ws = false;
         let mut cut = s.len();
@@ -479,6 +484,9 @@ pub fn apply_dotenv_entries(
     let mut report = DotenvReport::default();
 
     for (key, val) in entries {
+        if key.contains('\0') || val.contains('\0') {
+            continue;
+        }
         if is_dangerous_env_var(&key) {
             report.skipped_dangerous.push(key);
             continue;
@@ -515,6 +523,9 @@ pub fn load_dotenv_with_overwrite(dir: &Path, overwrite: bool) -> Result<DotenvR
     let mut report = DotenvReport::default();
 
     for (key, val) in entries {
+        if key.contains('\0') || val.contains('\0') {
+            continue;
+        }
         if is_dangerous_env_var(&key) {
             report.skipped_dangerous.push(key);
             continue;
@@ -524,8 +535,9 @@ pub fn load_dotenv_with_overwrite(dir: &Path, overwrite: bool) -> Result<DotenvR
             continue;
         }
         // SAFETY: Called during single-threaded CLI startup before spawning worker
-        // threads or child processes. Unit tests verify `.env` application logic
-        // via pure `apply_dotenv_entries` rather than mutating process-global env.
+        // threads or child processes, and both `key` and `val` are NUL-free. Unit
+        // tests verify `.env` application logic via pure `apply_dotenv_entries`
+        // rather than mutating process-global env.
         unsafe {
             std::env::set_var(&key, &val);
         }
@@ -659,6 +671,59 @@ mod tests {
         let report = load_dotenv(&dir).expect("missing .env should succeed");
         assert!(report.loaded.is_empty());
         assert!(report.skipped_dangerous.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Verify empty `.env` values followed by `#` comments parse as empty while unquoted `abc#123` stays intact.
+    #[test]
+    fn test_parse_dotenv_empty_and_inline_hash_comments() {
+        let input = "FOO= # inline comment after empty\nBAR=#comment\nVAL=abc#123\nVAL_WS=abc # trailing\nQUOTED=\"#literal\"\n";
+        let parsed = parse_dotenv(input);
+        assert_eq!(
+            parsed,
+            vec![
+                ("FOO".to_string(), String::new()),
+                ("BAR".to_string(), String::new()),
+                ("VAL".to_string(), "abc#123".to_string()),
+                ("VAL_WS".to_string(), "abc".to_string()),
+                ("QUOTED".to_string(), "#literal".to_string()),
+            ]
+        );
+    }
+
+    /// Verify `.env` entries containing NUL bytes in values are skipped without panicking.
+    #[test]
+    fn test_dotenv_nul_byte_in_value_skipped_without_panic() {
+        let parsed = parse_dotenv(
+            "PROBE_NUL_VAL=hello\0world\nPROBE_QUOTED_NUL=\"a\0b\"\nPROBE_AFTER_NUL=ok\n",
+        );
+        assert_eq!(
+            parsed,
+            vec![("PROBE_AFTER_NUL".to_string(), "ok".to_string())]
+        );
+
+        let mut env_map = BTreeMap::new();
+        let report = apply_dotenv_entries(
+            vec![
+                ("DIRECT_NUL".to_string(), "bad\0val".to_string()),
+                ("VALID".to_string(), "good".to_string()),
+            ],
+            &mut env_map,
+            true,
+        );
+        assert_eq!(report.loaded.len(), 1);
+        assert_eq!(report.loaded.get("VALID").map(String::as_str), Some("good"));
+        assert!(!env_map.contains_key("DIRECT_NUL"));
+
+        let dir = make_temp_dir("nul_dotenv");
+        fs::write(
+            dir.join(".env"),
+            "PROBE_NUL_VAL=hello\0world\nPROBE_QUOTED_NUL=\"a\0b\"\n",
+        )
+        .expect("write .env with NUL");
+        let load_report =
+            load_dotenv_with_overwrite(&dir, true).expect("NUL .env should not panic or fail");
+        assert!(load_report.loaded.is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 }
