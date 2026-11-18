@@ -111,15 +111,18 @@ impl ConfigInitializer {
             return;
         };
         for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
             let path = entry.path();
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            if path.is_dir() {
+            if ft.is_dir() {
                 if ignore_dirs.iter().any(|ignored| ignored == name_str.as_ref()) {
                     continue;
                 }
                 Self::scan_dir(&path, ignore_dirs, init_meta, detected);
-            } else if path.is_file() {
+            } else if ft.is_file() || (ft.is_symlink() && path.is_file()) {
                 if let Some(tech) = init_meta.filename_techs.get(name_str.as_ref()) {
                     detected.insert(tech.clone());
                 }
@@ -392,6 +395,22 @@ mod tests {
         assert!(fs::read_to_string(&toml_path)
             .expect("read")
             .contains("[tasks]"));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Regression test: cyclic directory symlinks must not cause infinite recursion or stack overflow.
+    #[cfg(unix)]
+    #[test]
+    fn test_detect_technologies_ignores_cyclic_directory_symlinks() {
+        let tmp = make_temp_dir("cyclic_symlink");
+        fs::write(tmp.join("main.rs"), "fn main() {}\n").expect("write main.rs");
+        std::os::unix::fs::symlink(&tmp, tmp.join("self_loop")).expect("create self loop symlink");
+        std::os::unix::fs::symlink("..", tmp.join("parent_loop"))
+            .expect("create parent loop symlink");
+
+        let techs = ConfigInitializer::detect_technologies(&tmp);
+        assert!(techs.contains("rust"));
 
         let _ = fs::remove_dir_all(&tmp);
     }

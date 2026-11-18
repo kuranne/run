@@ -628,13 +628,12 @@ impl MonitoredChild {
 
     /// Terminate the child and its entire process tree, escalating to `SIGKILL` after `grace_period`.
     pub fn kill_process_tree(&mut self, initial_sig: i32, grace_period: Duration) {
-        if self.try_wait().ok().flatten().is_some() {
-            self.finish_pipes();
-            return;
-        }
-
         #[cfg(windows)]
         {
+            if self.try_wait().ok().flatten().is_some() {
+                self.finish_pipes();
+                return;
+            }
             let _ = initial_sig;
             let _ = grace_period;
             kill_windows_process_tree(self.pid, &mut self.child);
@@ -650,22 +649,37 @@ impl MonitoredChild {
         #[cfg(unix)]
         {
             let target_pid = self.pid as libc::pid_t;
+            // Query process group before `try_wait` reaps `target_pid` (`getpgid` returns ESRCH once reaped).
             // SAFETY: `getpgid` reads kernel process group state without dereferencing pointers.
-            let pgid = unsafe { libc::getpgid(target_pid) };
-            if pgid < 0 {
-                let _ = self.try_wait();
-                self.finish_pipes();
-                return;
-            }
+            let raw_pgid = unsafe { libc::getpgid(target_pid) };
+            let pgid = if raw_pgid >= 0 {
+                raw_pgid
+            } else {
+                // `spawn` places the child in its own process group (`process_group(0)`).
+                target_pid
+            };
             // SAFETY: `getpgrp` takes no arguments and cannot fail.
             let own_pgrp = unsafe { libc::getpgrp() };
             let is_own_pgrp = pgid == own_pgrp;
+            let track_pgrp = !is_own_pgrp && pgid > 1;
+
+            if self.try_wait().ok().flatten().is_some()
+                && (!track_pgrp || !is_process_group_alive(pgid))
+            {
+                self.finish_pipes();
+                return;
+            }
+
+            if raw_pgid < 0 && !track_pgrp {
+                self.finish_pipes();
+                return;
+            }
 
             // SAFETY: Sends `initial_sig` to the isolated child process group or PID.
             unsafe {
                 if !is_own_pgrp {
                     libc::killpg(pgid, initial_sig);
-                } else {
+                } else if self.exit_status.is_none() {
                     libc::kill(target_pid, initial_sig);
                 }
             }
@@ -673,19 +687,22 @@ impl MonitoredChild {
             if !grace_period.is_zero() {
                 let deadline = Instant::now() + grace_period;
                 while Instant::now() < deadline {
-                    if self.try_wait().ok().flatten().is_some() {
+                    let child_exited = self.try_wait().ok().flatten().is_some();
+                    if child_exited && (!track_pgrp || !is_process_group_alive(pgid)) {
                         break;
                     }
                     thread::sleep(Duration::from_millis(10));
                 }
             }
 
-            if self.exit_status.is_none() {
+            let still_active =
+                self.exit_status.is_none() || (track_pgrp && is_process_group_alive(pgid));
+            if still_active {
                 // SAFETY: Escalates to `SIGKILL` for the isolated child process group or PID.
                 unsafe {
                     if !is_own_pgrp {
                         libc::killpg(pgid, libc::SIGKILL);
-                    } else {
+                    } else if self.exit_status.is_none() {
                         libc::kill(target_pid, libc::SIGKILL);
                     }
                 }
@@ -693,7 +710,8 @@ impl MonitoredChild {
                     Duration::from_secs(PackageMetadata::get().limits.wait_after_kill_secs);
                 let deadline = Instant::now() + wait_limit;
                 while Instant::now() < deadline {
-                    if self.try_wait().ok().flatten().is_some() {
+                    let child_exited = self.try_wait().ok().flatten().is_some();
+                    if child_exited && (!track_pgrp || !is_process_group_alive(pgid)) {
                         break;
                     }
                     thread::sleep(Duration::from_millis(5));
@@ -702,20 +720,41 @@ impl MonitoredChild {
 
             // Reap any orphaned descendants belonging strictly to this child's process group
             // (so concurrent test threads' children are never stolen).
-            if !is_own_pgrp && pgid > 1 {
-                loop {
-                    let mut st: libc::c_int = 0;
-                    // SAFETY: `-pgid` scopes reaping strictly to `self`'s isolated process group.
-                    let w = unsafe { libc::waitpid(-pgid, &mut st, libc::WNOHANG) };
-                    if w <= 0 {
-                        break;
-                    }
-                }
+            if track_pgrp && self.exit_status.is_some() {
+                reap_process_group_zombies(pgid);
             }
 
             self.finish_pipes();
         }
     }
+}
+
+/// Reap any already-terminated zombie descendants belonging strictly to `pgid`.
+#[cfg(unix)]
+fn reap_process_group_zombies(pgid: libc::pid_t) {
+    if pgid <= 1 {
+        return;
+    }
+    loop {
+        let mut st: libc::c_int = 0;
+        // SAFETY: `-pgid` scopes reaping strictly to the isolated child process group.
+        let w = unsafe { libc::waitpid(-pgid, &mut st, libc::WNOHANG) };
+        if w <= 0 {
+            break;
+        }
+    }
+}
+
+/// Reap zombie descendants in `pgid` and return `true` if any live process remains in `pgid`.
+#[cfg(unix)]
+fn is_process_group_alive(pgid: libc::pid_t) -> bool {
+    reap_process_group_zombies(pgid);
+    // SAFETY: Signal `0` probes process-group liveness without delivering a signal.
+    let rc = unsafe { libc::killpg(pgid, 0) };
+    if rc == 0 {
+        return true;
+    }
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// Terminate a Windows process tree using `taskkill /F /T /PID`, falling back to `child.kill()`.
@@ -1065,5 +1104,77 @@ mod tests {
         assert!(enabled);
         #[cfg(not(target_os = "linux"))]
         assert!(!enabled);
+    }
+
+    /// Regression test: if direct child exits on `SIGTERM` while a grandchild ignores `SIGTERM`
+    /// and holds stdout/stderr pipes open, `kill_process_tree` must escalate to `SIGKILL`
+    /// and avoid deadlocking `finish_pipes()`.
+    #[cfg(unix)]
+    #[test]
+    fn test_timeout_escalates_sigkill_for_sigterm_ignoring_grandchild() {
+        if !has_python3() {
+            return;
+        }
+        let pid_file = std::env::temp_dir().join(format!(
+            "run_proc_sigign_grandchild_{}.pid",
+            std::process::id()
+        ));
+        let tmp_pid_file = pid_file.with_extension("pid.tmp");
+        let _ = std::fs::remove_file(&pid_file);
+        let _ = std::fs::remove_file(&tmp_pid_file);
+
+        // `sh` keeps default SIGTERM handling so it dies immediately on SIGTERM, while the
+        // `python3` grandchild installs `SIG_IGN` for SIGTERM, inherits stdout/stderr pipes,
+        // and atomically publishes its PID before sleeping.
+        let py_snippet = format!(
+            "import os, pathlib, signal, time; \
+             signal.signal(signal.SIGTERM, signal.SIG_IGN); \
+             tmp = pathlib.Path({:?}); \
+             tmp.write_text(str(os.getpid())); \
+             tmp.rename({:?}); \
+             time.sleep(30)",
+            tmp_pid_file.to_string_lossy(),
+            pid_file.to_string_lossy()
+        );
+        let sh_script = format!("python3 -c '{}' & wait", py_snippet.replace('\'', "'\"'\"'"));
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(&sh_script)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut proc = MonitoredChild::spawn(&mut cmd).expect("spawn sh tree");
+        for _ in 0..80 {
+            if pid_file.exists() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        assert!(pid_file.exists(), "grandchild pid file was not written");
+        let grandchild_pid: i32 = std::fs::read_to_string(&pid_file)
+            .expect("read pid file")
+            .trim()
+            .parse()
+            .expect("parse grandchild pid");
+
+        let started = Instant::now();
+        let out = proc
+            .wait_with_timeout(Some(Duration::from_millis(250)), None)
+            .expect("wait_with_timeout");
+        let elapsed = started.elapsed();
+
+        assert!(out.timed_out);
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "wait_with_timeout took too long ({elapsed:?}), possible pipe deadlock"
+        );
+
+        // SAFETY: `kill(pid, 0)` probes liveness without sending a signal.
+        let rc = unsafe { libc::kill(grandchild_pid, 0) };
+        let errno = std::io::Error::last_os_error().raw_os_error();
+        let _ = std::fs::remove_file(&pid_file);
+        let _ = std::fs::remove_file(&tmp_pid_file);
+        assert_eq!(rc, -1, "grandchild pid {grandchild_pid} survived kill_process_tree");
+        assert_eq!(errno, Some(libc::ESRCH));
     }
 }

@@ -95,6 +95,10 @@ pub trait SandboxEnv {
         args: &[String],
         timeout: Option<Duration>,
     ) -> Result<ExecOutput, RunError>;
+    /// Emit a sandbox warning message (defaults to [`Printer::global`]).
+    fn warn(&self, msg: &str) {
+        Printer::global().warning(msg);
+    }
 }
 
 /// Production [`SandboxEnv`] implementation backed by the host OS and [`MonitoredChild`].
@@ -163,6 +167,9 @@ impl SandboxEnv for SystemSandboxEnv {
         }
         #[cfg(unix)]
         {
+            if pid > i32::MAX as u32 {
+                return false;
+            }
             // SAFETY: Signal `0` validates existence/permissions without delivering a signal.
             let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
             if rc == 0 {
@@ -172,14 +179,17 @@ impl SandboxEnv for SystemSandboxEnv {
         }
         #[cfg(windows)]
         {
-            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::Foundation::{
+                CloseHandle, ERROR_ACCESS_DENIED, GetLastError,
+            };
             use windows_sys::Win32::System::Threading::{
                 OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
             };
             // SAFETY: Standard Win32 handle open/close for PID existence check.
             let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
             if handle.is_null() {
-                false
+                // SAFETY: `GetLastError` reads thread-local last-error code.
+                unsafe { GetLastError() == ERROR_ACCESS_DENIED }
             } else {
                 // SAFETY: `handle` was just checked non-null.
                 unsafe { CloseHandle(handle) };
@@ -502,30 +512,41 @@ impl ContainerSandbox {
         engine: &str,
         env: &dyn SandboxEnv,
     ) -> Result<String, RunError> {
-        if !dockerfile_path.exists() {
+        let cwd = env.cwd()?;
+        let df_fs_path = if dockerfile_path.is_relative() {
+            cwd.join(dockerfile_path)
+        } else {
+            dockerfile_path.to_path_buf()
+        };
+        if !df_fs_path.exists() {
             return Err(RunError::config(format!(
                 "Dockerfile '{}' not found.",
                 dockerfile_path.display()
             )));
         }
-        let content = fs::read(dockerfile_path).map_err(RunError::Io)?;
-        let cwd = env.cwd()?;
+        let content = fs::read(&df_fs_path).map_err(RunError::Io)?;
         let cwd_canon = fs::canonicalize(&cwd).unwrap_or_else(|_| cwd.clone());
-        let df_canon = fs::canonicalize(dockerfile_path)
-            .unwrap_or_else(|_| std::path::absolute(dockerfile_path).unwrap_or_else(|_| dockerfile_path.to_path_buf()));
+        let df_canon = fs::canonicalize(&df_fs_path)
+            .unwrap_or_else(|_| std::path::absolute(&df_fs_path).unwrap_or_else(|_| df_fs_path.clone()));
 
         let context_dir = if df_canon.starts_with(&cwd_canon) {
             cwd.clone()
         } else {
             dockerfile_path
                 .parent()
+                .filter(|p| !p.as_os_str().is_empty())
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| PathBuf::from("."))
         };
+        let context_fs_dir = if context_dir.is_relative() {
+            cwd.join(&context_dir)
+        } else {
+            context_dir.clone()
+        };
 
-        let dockerignore = context_dir.join(".dockerignore");
+        let dockerignore = context_fs_dir.join(".dockerignore");
         if !dockerignore.exists() {
-            Printer::global().warning(&format!(
+            env.warn(&format!(
                 "No .dockerignore found in build context '{}'. Sensitive or large files may be included in build context.",
                 context_dir.display()
             ));
@@ -534,14 +555,14 @@ impl ContainerSandbox {
         let content_str = String::from_utf8_lossy(&content);
         let has_copy_or_add = copy_add_regex().is_match(&content_str);
 
-        let ctx_canon = fs::canonicalize(&context_dir).unwrap_or_else(|_| context_dir.clone());
+        let ctx_canon = fs::canonicalize(&context_fs_dir).unwrap_or_else(|_| context_fs_dir.clone());
         let mut hasher = Sha256::new();
         hasher.update(&content);
         hasher.update(df_canon.to_string_lossy().as_bytes());
         hasher.update(ctx_canon.to_string_lossy().as_bytes());
 
         if has_copy_or_add
-            && let Ok(meta) = fs::metadata(&context_dir)
+            && let Ok(meta) = fs::metadata(&context_fs_dir)
             && let Ok(mtime) = meta.modified()
             && let Ok(since_epoch) = mtime.duration_since(UNIX_EPOCH)
         {
@@ -625,7 +646,11 @@ impl ContainerSandbox {
             cwd,
         ];
 
-        if let Some(user_opt) = sandbox_cfg.and_then(|c| c.user.as_deref()) {
+        if let Some(user_opt) = sandbox_cfg
+            .and_then(|c| c.user.as_deref())
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
             container_cmd.push("--user".into());
             container_cmd.push(user_opt.to_string());
         } else if let Some((uid, gid)) = env.uid_gid() {
@@ -822,7 +847,11 @@ impl ComposeSandbox {
             "-T".into(),
         ];
 
-        if let Some(user_opt) = sandbox_cfg.and_then(|c| c.user.as_deref()) {
+        if let Some(user_opt) = sandbox_cfg
+            .and_then(|c| c.user.as_deref())
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+        {
             exec_cmd.push("--user".into());
             exec_cmd.push(user_opt.to_string());
         } else if let Some((uid, gid)) = env.uid_gid() {
@@ -929,7 +958,7 @@ impl PersistentSandbox {
             let should_reap = if pid_str.is_empty() {
                 true
             } else if let Ok(target_pid) = pid_str.parse::<u32>() {
-                target_pid > 0 && target_pid != current_pid && !env.is_pid_alive(target_pid)
+                target_pid == 0 || (target_pid != current_pid && !env.is_pid_alive(target_pid))
             } else {
                 true
             };
@@ -1129,6 +1158,8 @@ mod tests {
         home: Option<PathBuf>,
         /// Recorded `(program, args)` invocations.
         calls: Mutex<Vec<(String, Vec<String>)>>,
+        /// Recorded warning messages emitted via [`SandboxEnv::warn`].
+        warnings: Mutex<Vec<String>>,
         /// Custom responder mapping `(program, args)` to [`ExecOutput`].
         responder: SandboxResponder,
     }
@@ -1146,6 +1177,7 @@ mod tests {
                 xdg_cache: None,
                 home: Some(PathBuf::from("/home/tester")),
                 calls: Mutex::new(Vec::new()),
+                warnings: Mutex::new(Vec::new()),
                 responder: Box::new(|_, _| ExecOutput {
                     code: 0,
                     stdout: String::new(),
@@ -1157,6 +1189,11 @@ mod tests {
         /// Return recorded subprocess invocations.
         fn recorded_calls(&self) -> Vec<(String, Vec<String>)> {
             self.calls.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+
+        /// Return recorded warning messages.
+        fn recorded_warnings(&self) -> Vec<String> {
+            self.warnings.lock().unwrap_or_else(|e| e.into_inner()).clone()
         }
     }
 
@@ -1215,6 +1252,14 @@ mod tests {
                 .unwrap_or_else(|e| e.into_inner())
                 .push((program.to_string(), args.to_vec()));
             Ok((self.responder)(program, args))
+        }
+
+        /// Capture warning messages for `.dockerignore` assertions.
+        fn warn(&self, msg: &str) {
+            self.warnings
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(msg.to_string());
         }
     }
 
@@ -1462,7 +1507,7 @@ mod tests {
     fn test_container_build_dockerfile_caching_and_copy_mtime() {
         let tmp = make_temp_dir("dockerfile");
         let df = tmp.join("Dockerfile");
-        fs::write(&df, "FROM alpine\nRUN echo hello\n").expect("write Dockerfile");
+        fs::write(&df, "FROM alpine\nCOPY . /app\n").expect("write Dockerfile");
 
         let mut env = MockSandboxEnv::linux_default();
         env.cwd = tmp.clone();
@@ -1482,16 +1527,25 @@ mod tests {
             }
         });
 
+        // Missing `.dockerignore` must emit a warning.
         let img = ContainerSandbox::build_dockerfile_with(&df, "docker", &env)
             .expect("build cached");
         assert!(img.starts_with("run-sandbox-"));
+        assert!(env
+            .recorded_warnings()
+            .iter()
+            .any(|w| w.contains("No .dockerignore found in build context")));
 
-        // Missing Dockerfile errors
+        // Missing Dockerfile errors.
         assert!(
             ContainerSandbox::build_dockerfile_with(&tmp.join("missing"), "docker", &env).is_err()
         );
 
-        // Build triggered when `images -q` returns empty
+        // Creating `.dockerignore` suppresses the warning AND updates directory mtime (`COPY`),
+        // invalidating the cached image tag.
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(tmp.join(".dockerignore"), "target/\n").expect("write .dockerignore");
+
         let env_rebuild = MockSandboxEnv {
             os: HostOs::Linux,
             bins: HashSet::from(["docker".into()]),
@@ -1502,6 +1556,7 @@ mod tests {
             xdg_cache: None,
             home: None,
             calls: Mutex::new(Vec::new()),
+            warnings: Mutex::new(Vec::new()),
             responder: Box::new(|_, _| ExecOutput {
                 code: 0,
                 stdout: String::new(),
@@ -1510,11 +1565,58 @@ mod tests {
         };
         let img2 = ContainerSandbox::build_dockerfile_with(&df, "docker", &env_rebuild)
             .expect("rebuild");
-        assert_eq!(img, img2);
+        assert!(env_rebuild.recorded_warnings().is_empty());
+        assert_ne!(
+            img, img2,
+            "COPY context mtime change must invalidate Dockerfile image hash"
+        );
         assert!(env_rebuild
             .recorded_calls()
             .iter()
             .any(|(p, a)| p == "docker" && a.first().map(String::as_str) == Some("build")));
+
+        // Updating directory mtime again via new context file changes the hash again.
+        std::thread::sleep(Duration::from_millis(20));
+        fs::write(tmp.join("payload.txt"), "v2").expect("write payload");
+        let img3 = ContainerSandbox::build_dockerfile_with(&df, "docker", &env_rebuild)
+            .expect("rebuild after context mtime change");
+        assert_ne!(img2, img3);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Regression test: bare `"Dockerfile"` symlinked outside `cwd` must pass `"."` (never `""`) as build context.
+    #[cfg(unix)]
+    #[test]
+    fn test_bare_symlinked_dockerfile_outside_cwd_uses_dot_context() {
+        let tmp = make_temp_dir("bare_symlink_df");
+        let ws = tmp.join("workspace");
+        let outside = tmp.join("outside");
+        fs::create_dir_all(&ws).expect("mkdir ws");
+        fs::create_dir_all(&outside).expect("mkdir outside");
+
+        let outside_df = outside.join("Dockerfile");
+        fs::write(&outside_df, "FROM alpine\nRUN echo ok\n").expect("write outside Dockerfile");
+        std::os::unix::fs::symlink(&outside_df, ws.join("Dockerfile"))
+            .expect("symlink Dockerfile");
+
+        let mut env = MockSandboxEnv::linux_default();
+        env.cwd = ws.clone();
+        let img = ContainerSandbox::build_dockerfile_with(Path::new("Dockerfile"), "docker", &env)
+            .expect("build symlinked bare Dockerfile");
+        assert!(img.starts_with("run-sandbox-"));
+
+        let calls = env.recorded_calls();
+        let build_call = calls
+            .iter()
+            .find(|(prog, args)| prog == "docker" && args.first().map(String::as_str) == Some("build"))
+            .expect("docker build invocation");
+        let ctx_arg = build_call.1.last().expect("build context arg");
+        assert_eq!(ctx_arg, ".", "bare symlinked Dockerfile context must be '.'");
+        assert!(env
+            .recorded_warnings()
+            .iter()
+            .any(|w| w.contains("build context '.'")));
 
         let _ = fs::remove_dir_all(&tmp);
     }
@@ -1609,7 +1711,7 @@ mod tests {
                 if args.first().map(String::as_str) == Some("ps") {
                     ExecOutput {
                         code: 0,
-                        stdout: "cid-dead 999999\ncid-self 4242\ncid-badpid abc\n".into(),
+                        stdout: "cid-dead 999999\ncid-self 4242\ncid-badpid abc\ncid-zero 0\n".into(),
                         stderr: String::new(),
                     }
                 } else if args.first().map(String::as_str) == Some("run") {
@@ -1629,9 +1731,11 @@ mod tests {
             ..MockSandboxEnv::linux_default()
         };
 
-        // Reap orphans directly: dead PID 999999 and non-numeric pid reap, live self PID 4242 kept.
+        // Reap orphans directly: dead PID 999999, non-numeric pid, and pid 0 reap; live self PID 4242 kept.
         let reaped = PersistentSandbox::reap_orphaned_containers_with(Some("docker"), &env);
-        assert_eq!(reaped, 2);
+        assert_eq!(reaped, 3);
+        assert!(!SystemSandboxEnv.is_pid_alive(0));
+        assert!(!SystemSandboxEnv.is_pid_alive(u32::MAX));
 
         persist
             .start_with(
@@ -1668,5 +1772,42 @@ mod tests {
             env.recorded_calls().last().expect("stop call"),
             &("docker".into(), strs(&["stop", "container-id-abc"]))
         );
+    }
+
+    /// Regression test: empty or whitespace-only `sandbox_cfg.user` must not emit `--user ""`.
+    #[test]
+    fn test_empty_or_whitespace_sandbox_user_falls_back_to_host_uid_gid() {
+        let mut env = MockSandboxEnv::linux_default();
+        env.bins.insert("docker".into());
+
+        for blank_user in ["", "   ", "\t"] {
+            let cfg = SandboxConfig {
+                user: Some(blank_user.to_string()),
+                ..SandboxConfig::default()
+            };
+            let container_cmd = ContainerSandbox::wrap_command_with(
+                &strs(&["echo", "hi"]),
+                false,
+                false,
+                Some(&cfg),
+                None,
+                &env,
+            )
+            .expect("wrap container");
+            assert!(container_cmd.contains(&"1000:1000".to_string()));
+            assert!(!container_cmd.contains(&blank_user.to_string()));
+
+            let compose_cmd = ComposeSandbox::wrap_command_with(
+                &strs(&["echo", "hi"]),
+                "docker-compose.yml",
+                "app",
+                None,
+                None,
+                Some(&cfg),
+                &env,
+            );
+            assert!(compose_cmd.contains(&"1000:1000".to_string()));
+            assert!(!compose_cmd.contains(&blank_user.to_string()));
+        }
     }
 }

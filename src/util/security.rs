@@ -391,4 +391,19 @@ mod tests {
         assert!(!Validator::validate_path("<input>.c"));
         assert!(!Validator::validate_path(">output>.c"));
     }
+
+    /// Regression test: concatenated `-xassembler`, `-xassembler-with-cpp`, `-Clinker=`, and `-Clink-arg=` must be rejected.
+    #[test]
+    fn test_check_suspicious_flags_concatenated_forms() {
+        let s = |vals: &[&str]| vals.iter().map(|v| (*v).to_string()).collect::<Vec<_>>();
+
+        assert!(!SecurityManager::check_suspicious_flags(&s(&["-xassembler"])));
+        assert!(!SecurityManager::check_suspicious_flags(&s(&[
+            "-xassembler-with-cpp"
+        ])));
+        assert!(!SecurityManager::check_suspicious_flags(&s(&["-Clinker=/bin/sh"])));
+        assert!(!SecurityManager::check_suspicious_flags(&s(&[
+            "-Clink-arg=-Wl,-rpath"
+        ])));
+    }
 }

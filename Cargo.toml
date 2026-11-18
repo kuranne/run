@@ -200,7 +200,7 @@ safe_env_whitelist = [
     "CONTAINER_HOST", "CONTAINER_SSHKEY", "PODMAN_SOCKET",
 ]
 suspicious_flag_substrings = [
-    "-Wl,-rpath", "-Wl,--wrap", "-fplugin", "-x assembler", "-specs=",
+    "-Wl,-rpath", "-Wl,--wrap", "-fplugin", "-x assembler", "-xassembler", "-specs=",
     "-wrapper", "-Xclang", "-Clinker=", "-C linker=", "-Clink-arg=", "-C link-arg=",
 ]
 suspicious_flag_exact = ["-specs", "-wrapper", "-Xclang"]

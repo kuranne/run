@@ -90,10 +90,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-/// Compute truncated hex SHA-256 prefix of a path's lexical absolute string.
+/// Compute truncated hex SHA-256 prefix of a lexically normalized absolute path.
 fn path_hash_prefix(path: &Path, prefix_len: usize) -> String {
     let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-    let digest = sha256_hex(abs.to_string_lossy().as_bytes());
+    let normalized: PathBuf = abs.components().collect();
+    let digest = sha256_hex(normalized.to_string_lossy().as_bytes());
     digest.chars().take(prefix_len).collect()
 }
 
@@ -486,26 +487,34 @@ impl CacheManager {
         self.save_cache_locked(&guard);
     }
 
-    /// Clear all in-memory cache entries and remove cached object/binary/source files and directories.
+    /// Clear all in-memory cache entries and remove cached object/binary/source files, symlinks, and directories.
     pub fn clear(&self) {
         let mut guard = self.cache_data.lock().unwrap_or_else(|e| e.into_inner());
         guard.clear();
 
         for dir in [&self.objs_dir, &self.bin_dir, &self.src_dir] {
-            if dir.exists() {
-                if let Ok(entries) = fs::read_dir(dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.is_file() {
-                            let _ = fs::remove_file(&path);
+            if let Ok(dir_meta) = fs::symlink_metadata(dir) {
+                if dir_meta.file_type().is_dir() {
+                    if let Ok(entries) = fs::read_dir(dir) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if let Ok(meta) = fs::symlink_metadata(&path) {
+                                if meta.file_type().is_dir() {
+                                    let _ = fs::remove_dir_all(&path);
+                                } else {
+                                    let _ = fs::remove_file(&path);
+                                }
+                            }
                         }
                     }
+                    let _ = fs::remove_dir(dir);
+                } else {
+                    let _ = fs::remove_file(dir);
                 }
-                let _ = fs::remove_dir(dir);
             }
         }
 
-        if self.cache_file.exists() {
+        if fs::symlink_metadata(&self.cache_file).is_ok() {
             let _ = fs::remove_file(&self.cache_file);
         }
 
@@ -755,6 +764,52 @@ mod tests {
 
         let reloaded = make_manager(&tmp);
         assert!(!reloaded.is_changed(&main_c, None));
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Regression test: trailing slashes on `project_root` hash to the exact same cache bucket.
+    #[test]
+    fn test_trailing_slash_cache_bucket_equivalence() {
+        let tmp = make_temp_dir("trailing_slash");
+        let proj = tmp.join("proj");
+        fs::create_dir_all(&proj).expect("mkdir proj");
+        let cache_base = tmp.join("cache_home").join("run");
+
+        let with_no_slash = CacheManager::with_cache_base(&proj, &cache_base).expect("no slash");
+        let trailing_str = format!("{}/", proj.display());
+        let with_slash =
+            CacheManager::with_cache_base(Path::new(&trailing_str), &cache_base).expect("slash");
+        assert_eq!(with_no_slash.cache_dir, with_slash.cache_dir);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Regression test: `clear()` unlinks dangling symlinks in `objs/`/`bin/`/`src/` and removes empty directories.
+    #[cfg(unix)]
+    #[test]
+    fn test_clear_removes_dangling_symlinks() {
+        let tmp = make_temp_dir("clear_dangling");
+        let manager = make_manager(&tmp);
+        fs::create_dir_all(&manager.objs_dir).expect("mkdir objs");
+        fs::create_dir_all(&manager.bin_dir).expect("mkdir bin");
+        fs::create_dir_all(&manager.src_dir).expect("mkdir src");
+
+        let obj_link = manager.objs_dir.join("dangling.o");
+        let bin_link = manager.bin_dir.join("dangling.out");
+        let src_link = manager.src_dir.join("dangling.c");
+        std::os::unix::fs::symlink(tmp.join("missing_obj"), &obj_link).expect("symlink obj");
+        std::os::unix::fs::symlink(tmp.join("missing_bin"), &bin_link).expect("symlink bin");
+        std::os::unix::fs::symlink(tmp.join("missing_src"), &src_link).expect("symlink src");
+
+        manager.clear();
+        assert!(fs::symlink_metadata(&obj_link).is_err());
+        assert!(fs::symlink_metadata(&bin_link).is_err());
+        assert!(fs::symlink_metadata(&src_link).is_err());
+        assert!(!manager.objs_dir.exists());
+        assert!(!manager.bin_dir.exists());
+        assert!(!manager.src_dir.exists());
+        assert!(!manager.cache_dir.exists());
 
         let _ = fs::remove_dir_all(&tmp);
     }
