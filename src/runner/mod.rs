@@ -10,13 +10,17 @@ pub mod core;
 pub mod custom_handler;
 pub mod handler;
 pub mod java_handler;
+pub mod project;
 pub mod python_handler;
 pub mod rust_handler;
 pub mod script_handler;
+pub mod test_runner;
 
 pub use base::BaseRunner;
 pub use core::CompilerRunner;
 pub use handler::{ExecutionContext, HandlerRegistry, LanguageHandler, RunnerOptions};
+pub use project::{split_compound_command, ProjectRunner, TaskRunner};
+pub use test_runner::TestcasesRunner;
 
 /// Minimal RAII temporary directory helper for `#[cfg(test)]` modules (avoids adding `tempfile` crate).
 #[cfg(test)]
