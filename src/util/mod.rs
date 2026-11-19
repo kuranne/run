@@ -1,5 +1,6 @@
 //! Utility subsystems for configuration, environment, output, globs, substitutions, caching, security, processes, sandboxing, and CLI scaffolding.
 
+pub mod args;
 pub mod cache;
 pub mod completion;
 pub mod config;

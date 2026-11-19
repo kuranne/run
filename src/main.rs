@@ -1,71 +1,638 @@
-//! CLI binary entrypoint for `run`.
+//! Binary entry point for the `run` CLI.
 //!
-//! Keeps `src/main.rs` strictly limited to CLI parsing (`clap` derive) and
-//! high-level dispatch into the `run` library (`src/lib.rs`).
+//! Separates argument parsing, CLI dispatch, sandbox lifecycle orchestration,
+//! and `--watch` polling from the core execution library crate [`run`].
 
-#![warn(missing_docs)]
+use std::collections::HashMap;
+use std::fs;
+use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
 
-use std::path::Path;
-use std::process::ExitCode;
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::terminal;
+use crossterm::tty::IsTty;
 
-use clap::Parser;
-use run::util::config::Config;
+use run::runner::{CompilerRunner, ProjectRunner, TaskRunner, TestcasesRunner};
+use run::util::args::CliArgs;
+use run::util::cache::CacheManager;
+use run::util::completion::CompletionGenerator;
+use run::util::config::{Config, SandboxConfig};
+use run::util::doctor::Doctor;
 use run::util::env::load_dotenv;
 use run::util::errors::RunError;
+use run::util::init_config::ConfigInitializer;
 use run::util::output::{Printer, Verbosity};
+use run::util::sandbox::{ComposeSandbox, ContainerSandbox, PersistentSandbox};
+use run::util::security::SecurityManager;
+use run::util::template_manager::TemplateManager;
 
-/// Command-line interface definition powered by `clap` derive macros.
-#[derive(Debug, Parser)]
-#[command(
-    name = "run",
-    version = env!("CARGO_PKG_VERSION"),
-    about = "Professional Auto Compiler & Runner"
-)]
-struct Cli {
-    /// Target source files, task name, or template target.
-    #[arg(value_name = "FILES")]
-    files: Vec<String>,
+/// Global termination flag flipped on `SIGINT` / Ctrl+C so watch mode exits cleanly.
+static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-    /// Silence compiler output and informational logs.
-    #[arg(short = 'q', long = "quiet")]
-    quiet: bool,
-
-    /// Increase verbosity (-v for debug logs, -vv for trace diagnostics).
-    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count)]
-    verbose: u8,
-
-    /// Disable ANSI color codes in output.
-    #[arg(long = "no-color")]
-    no_color: bool,
+/// Async-signal-safe `SIGINT` handler flagging watch loop termination.
+#[cfg(unix)]
+extern "C" fn handle_sigint(_sig: libc::c_int) {
+    STOP_REQUESTED.store(true, Ordering::Relaxed);
 }
 
-/// Entrypoint for the `run` CLI binary.
-fn main() -> ExitCode {
-    let cli = Cli::parse();
-    let verbosity = Verbosity::from_cli(cli.quiet, cli.verbose);
-    let printer = Printer::init_global(verbosity, cli.no_color);
-
-    if cli.verbose >= 1 && !cli.quiet {
-        printer.debug("Debug logging enabled");
+/// Register a minimal `SIGINT` handler on Unix during `--watch` mode.
+#[cfg(unix)]
+fn install_sigint_handler() {
+    unsafe {
+        libc::signal(libc::SIGINT, handle_sigint as *const () as usize);
     }
+}
 
-    match run_cli(&cli) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            printer.error(&err.to_string());
-            ExitCode::FAILURE
+/// Windows fallback stub (Ctrl+C during terminal polling is handled via `crossterm::event`).
+#[cfg(not(unix))]
+fn install_sigint_handler() {}
+
+/// RAII guard restoring terminal raw mode cleanly even across early returns.
+struct RawModeGuard(bool);
+
+impl RawModeGuard {
+    /// Enable raw mode if `stdin` is attached to an interactive terminal.
+    fn enter_if_tty() -> Self {
+        if io::stdin().is_tty() && terminal::enable_raw_mode().is_ok() {
+            Self(true)
+        } else {
+            Self(false)
         }
     }
 }
 
-/// Execute M1 startup initialization (`.env` loading and `Run.toml` discovery).
-fn run_cli(cli: &Cli) -> Result<(), RunError> {
-    let cwd = std::env::current_dir()?;
-    let _dotenv_report = load_dotenv(&cwd)?;
-    let _config = Config::load(Some(&cwd), None)?;
-    if !cli.files.is_empty() {
-        // M3/M4 will dispatch file, task, and project execution here.
-        let _ = Path::new(&cli.files[0]);
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        if self.0 {
+            let _ = terminal::disable_raw_mode();
+        }
     }
-    Ok(())
+}
+
+/// Outcome returned by [`run_once`] to drive exit codes and `--watch` tracked files.
+struct RunOutcome {
+    /// Process exit code (`0` on success, `1` on config/compile/runtime failure).
+    exit_code: i32,
+    /// Candidate files whose modification times should be monitored in `--watch` mode.
+    watch_files: Vec<PathBuf>,
+    /// Cached piped stdin bytes for reuse across watch re-runs.
+    captured_stdin: Option<Vec<u8>>,
+}
+
+/// Apply sandbox CLI overrides onto a [`SandboxConfig`] instance.
+fn apply_sandbox_overrides(sb: &mut SandboxConfig, cli: &CliArgs) {
+    if let Some(ref img) = cli.sandbox_image {
+        sb.image = Some(img.clone());
+    }
+    if let Some(ref df) = cli.sandbox_dockerfile {
+        sb.dockerfile = Some(df.clone());
+    }
+    if let Some(ref comp) = cli.sandbox_compose {
+        sb.compose = Some(comp.clone());
+    }
+    if let Some(ref svc) = cli.sandbox_service {
+        sb.compose_service = Some(svc.clone());
+    }
+}
+
+/// Read `-i -` stdin once before execution when stdin is piped so `--watch` can replay it.
+fn read_piped_stdin_once(cli: &CliArgs) -> Option<Vec<u8>> {
+    if cli.stdin.as_deref() == Some("-") && !io::stdin().is_tty() {
+        let mut buf = Vec::new();
+        if io::Read::read_to_end(&mut io::stdin(), &mut buf).is_ok() {
+            return Some(buf);
+        }
+    }
+    None
+}
+
+/// Prompt interactively (or read one line) when `run` is invoked with no target files or project.
+fn prompt_for_file() -> Option<PathBuf> {
+    print!("[ INPUT ] No file given. Enter file to run: ");
+    let _ = io::stdout().flush();
+
+    let mut line = String::new();
+    match io::stdin().lock().read_line(&mut line) {
+        Ok(0) | Err(_) => None,
+        Ok(_) => {
+            let trimmed = line.trim().trim_matches(|c| c == '"' || c == '\'');
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(trimmed))
+            }
+        }
+    }
+}
+
+/// Perform sandbox setup (compose, Dockerfile build, or persistent container start) before execution.
+fn prepare_sandbox(
+    runner: &mut CompilerRunner,
+    cli: &CliArgs,
+    target_files: &[PathBuf],
+    cwd: &Path,
+) -> Result<(bool, Option<String>), RunError> {
+    let mut sb = runner.base.sandbox_config.clone();
+    apply_sandbox_overrides(&mut sb, cli);
+    runner.base.sandbox_config = sb.clone();
+
+    let effective_sandbox = runner.base.options.sandbox || sb.compose.is_some();
+    if !effective_sandbox {
+        return Ok((false, None));
+    }
+
+    if let Some(ref compose_file) = sb.compose {
+        ComposeSandbox::setup(compose_file)?;
+        return Ok((true, None));
+    }
+
+    let engine = ContainerSandbox::get_engine()?;
+
+    if let Some(ref df_path) = sb.dockerfile {
+        let image_tag = ContainerSandbox::build_dockerfile(Path::new(df_path), &engine)?;
+        runner.base.sandbox_config.image = Some(image_tag.clone());
+        sb.image = Some(image_tag);
+    }
+
+    if cli.sandbox_keep {
+        let image = sb.image.clone().unwrap_or_else(|| {
+            let first_ext = target_files
+                .first()
+                .and_then(|p| p.extension())
+                .and_then(|e| e.to_str())
+                .map(|e| format!(".{e}"))
+                .unwrap_or_default();
+            ContainerSandbox::get_heuristic_image_for_ext(&first_ext)
+        });
+        let allow_net = runner.base.options.sandbox_net;
+        PersistentSandbox::start(
+            &engine,
+            &image,
+            allow_net,
+            Some(cwd),
+            cli.sandbox_rebuild,
+        )?;
+        return Ok((false, None));
+    }
+
+    Ok((false, None))
+}
+
+/// Tear down ephemeral compose services started for this invocation unless `--sandbox-keep` was requested.
+fn cleanup_sandbox(started_compose: bool, cli: &CliArgs) {
+    if started_compose && !cli.sandbox_keep {
+        ComposeSandbox::teardown_all();
+    }
+}
+
+/// Snapshot modification times for all candidate watch paths (including `Run.toml`).
+fn collect_mtimes(paths: &[PathBuf], cwd: &Path) -> HashMap<PathBuf, SystemTime> {
+    let mut map = HashMap::new();
+    for p in paths {
+        if let Ok(meta) = fs::metadata(p)
+            && let Ok(mtime) = meta.modified()
+        {
+            map.insert(p.clone(), mtime);
+        }
+    }
+    let run_toml = cwd.join("Run.toml");
+    if run_toml.is_file()
+        && let Ok(meta) = fs::metadata(&run_toml)
+        && let Ok(mtime) = meta.modified()
+    {
+        map.insert(run_toml, mtime);
+    }
+    map
+}
+
+/// Execute a single invocation of the CLI pipeline (config load -> target resolution -> run -> cleanup).
+fn run_once(
+    cli: &CliArgs,
+    printer: Printer,
+    cwd: &Path,
+    prebuffered_stdin: Option<&Vec<u8>>,
+) -> RunOutcome {
+    let config = match Config::load(Some(cwd), None) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            printer.error(&err.to_string());
+            return RunOutcome {
+                exit_code: 1,
+                watch_files: Vec::new(),
+                captured_stdin: prebuffered_stdin.cloned(),
+            };
+        }
+    };
+
+    if cli.clean_cache {
+        match CacheManager::new(cwd) {
+            Ok(cache) => {
+                cache.clear();
+                printer.info("Cleaned build cache.");
+            }
+            Err(err) => {
+                printer.error(&format!("Failed to clean cache: {err}"));
+                return RunOutcome {
+                    exit_code: 1,
+                    watch_files: Vec::new(),
+                    captured_stdin: prebuffered_stdin.cloned(),
+                };
+            }
+        }
+        if cli.files.is_empty() && cli.new_target.is_none() && cli.all.is_none() {
+            return RunOutcome {
+                exit_code: 0,
+                watch_files: Vec::new(),
+                captured_stdin: prebuffered_stdin.cloned(),
+            };
+        }
+    }
+
+    if let Some(ref target) = cli.new_target {
+        let code = match TemplateManager::generate(
+            target,
+            cli.template.as_deref(),
+            Some(&config),
+            cli.force,
+            Some(cwd),
+        ) {
+            Ok(true) => 0,
+            Ok(false) => 1,
+            Err(err) => {
+                printer.error(&err.to_string());
+                1
+            }
+        };
+        return RunOutcome {
+            exit_code: code,
+            watch_files: Vec::new(),
+            captured_stdin: prebuffered_stdin.cloned(),
+        };
+    }
+
+    let options = cli.to_runner_options();
+    let flags_str = cli.flags_str();
+    let args_str = cli.args_str();
+    let mut runner = match CompilerRunner::new(
+        options,
+        flags_str.as_deref(),
+        args_str.as_deref(),
+        config.clone(),
+        printer,
+    ) {
+        Ok(r) => r,
+        Err(err) => {
+            printer.error(&err.to_string());
+            return RunOutcome {
+                exit_code: 1,
+                watch_files: Vec::new(),
+                captured_stdin: prebuffered_stdin.cloned(),
+            };
+        }
+    };
+
+    if let Some(bytes) = prebuffered_stdin {
+        runner.base.set_buffered_stdin(Some(bytes.clone()));
+    }
+    let captured_stdin = prebuffered_stdin
+        .cloned()
+        .or_else(|| runner.base.buffered_stdin().map(|b| b.to_vec()));
+
+    apply_sandbox_overrides(&mut runner.base.sandbox_config, cli);
+
+    // 1. Check for configured [tasks.<name>] execution when first positional is not an existing path.
+    if !cli.files.is_empty()
+        && !Path::new(&cli.files[0]).exists()
+        && TaskRunner::is_task(&cli.files[0], &config)
+    {
+        let mut task_args: Vec<String> = cli.files[1..].to_vec();
+        task_args.extend(runner.base.run_args.clone());
+
+        let (started_compose, _) = match prepare_sandbox(&mut runner, cli, &[], cwd) {
+            Ok(res) => res,
+            Err(err) => {
+                printer.error(&err.to_string());
+                return RunOutcome {
+                    exit_code: 1,
+                    watch_files: Vec::new(),
+                    captured_stdin,
+                };
+            }
+        };
+
+        let ok = match TaskRunner::run_task(&cli.files[0], &config, &task_args, &mut runner.base) {
+            Ok(res) => res,
+            Err(err) => {
+                printer.error(&err.to_string());
+                false
+            }
+        };
+        cleanup_sandbox(started_compose, cli);
+        runner.cleanup();
+        return RunOutcome {
+            exit_code: i32::from(!ok),
+            watch_files: Vec::new(),
+            captured_stdin,
+        };
+    }
+
+    // 2. No files provided: handle -L/--all, ProjectRunner detection, or interactive prompt.
+    if cli.files.is_empty() && cli.all.is_none() {
+        if let Some(proj_info) = ProjectRunner::detect_project(cwd, &config, Some(&printer)) {
+            let watch_files = ProjectRunner::get_watch_files(&proj_info.2);
+            let (started_compose, _) = match prepare_sandbox(&mut runner, cli, &[], cwd) {
+                Ok(res) => res,
+                Err(err) => {
+                    printer.error(&err.to_string());
+                    return RunOutcome {
+                        exit_code: 1,
+                        watch_files,
+                        captured_stdin,
+                    };
+                }
+            };
+
+            let extra_flags = runner.base.extra_flags.clone();
+            let run_args = runner.base.run_args.clone();
+            let ok = match ProjectRunner::run_project(
+                &proj_info,
+                &mut runner.base,
+                &extra_flags,
+                &run_args,
+            ) {
+                Ok(res) => res,
+                Err(err) => {
+                    printer.error(&err.to_string());
+                    false
+                }
+            };
+            cleanup_sandbox(started_compose, cli);
+            runner.cleanup();
+            return RunOutcome {
+                exit_code: i32::from(!ok),
+                watch_files,
+                captured_stdin,
+            };
+        }
+
+        if let Some(prompted) = prompt_for_file() {
+            if !prompted.exists() && !cli.dry_run {
+                printer.error(&format!("Path not found: {}", prompted.display()));
+                return RunOutcome {
+                    exit_code: 1,
+                    watch_files: Vec::new(),
+                    captured_stdin,
+                };
+            }
+            let target_files = vec![prompted.clone()];
+            let (started_compose, _) = match prepare_sandbox(&mut runner, cli, &target_files, cwd)
+            {
+                Ok(res) => res,
+                Err(err) => {
+                    printer.error(&err.to_string());
+                    return RunOutcome {
+                        exit_code: 1,
+                        watch_files: target_files,
+                        captured_stdin,
+                    };
+                }
+            };
+            let ok = runner.compile_and_run(&target_files, cli.multi);
+            cleanup_sandbox(started_compose, cli);
+            runner.cleanup();
+            return RunOutcome {
+                exit_code: i32::from(!ok),
+                watch_files: target_files,
+                captured_stdin,
+            };
+        }
+
+        return RunOutcome {
+            exit_code: 1,
+            watch_files: Vec::new(),
+            captured_stdin,
+        };
+    }
+
+    // 3. Collect explicit target files/directories or -L/--all discovery under cwd.
+    let max_depth = cli.all.and_then(|d| usize::try_from(d).ok());
+    let mut target_files: Vec<PathBuf> = Vec::new();
+
+    if cli.files.is_empty() && cli.all.is_some() {
+        let discovered = runner.find_source_files(cwd, max_depth);
+        if discovered.is_empty() {
+            printer.warning("No source files found.");
+            return RunOutcome {
+                exit_code: 0,
+                watch_files: Vec::new(),
+                captured_stdin,
+            };
+        }
+        target_files = discovered;
+    } else {
+        for raw_target in &cli.files {
+            let p = PathBuf::from(raw_target);
+            if p.is_dir() {
+                let discovered = runner.find_source_files(&p, max_depth);
+                if discovered.is_empty() {
+                    printer.warning(&format!("No source files found in {}", p.display()));
+                } else {
+                    target_files.extend(discovered);
+                }
+            } else if p.exists() || cli.dry_run {
+                target_files.push(p);
+            } else {
+                printer.error(&format!("File or directory not found: {}", p.display()));
+                return RunOutcome {
+                    exit_code: 1,
+                    watch_files: Vec::new(),
+                    captured_stdin,
+                };
+            }
+        }
+    }
+
+    if target_files.is_empty() {
+        printer.warning("No runnable source files found.");
+        return RunOutcome {
+            exit_code: 0,
+            watch_files: Vec::new(),
+            captured_stdin,
+        };
+    }
+
+    let (started_compose, _) = match prepare_sandbox(&mut runner, cli, &target_files, cwd) {
+        Ok(res) => res,
+        Err(err) => {
+            printer.error(&err.to_string());
+            return RunOutcome {
+                exit_code: 1,
+                watch_files: target_files,
+                captured_stdin,
+            };
+        }
+    };
+
+    let ok = if let Some(ref td_str) = cli.test_dir {
+        let td = Path::new(td_str);
+        if !td.is_dir() {
+            printer.error(&format!("Test directory not found: {}", td.display()));
+            false
+        } else {
+            TestcasesRunner::run_tests(&mut runner, td, &target_files, cli.multi)
+        }
+    } else {
+        runner.compile_and_run(&target_files, cli.multi)
+    };
+
+    cleanup_sandbox(started_compose, cli);
+    runner.cleanup();
+
+    RunOutcome {
+        exit_code: i32::from(!ok),
+        watch_files: target_files,
+        captured_stdin,
+    }
+}
+
+/// Entry point handling early completion hooks, utility flags, single runs, and `--watch`.
+fn real_main() -> i32 {
+    // Handle dynamic shell completion callback (`--_complete <presets|tasks|templates>`).
+    let raw_args: Vec<String> = std::env::args().collect();
+    if raw_args.get(1).map(String::as_str) == Some("--_complete")
+        && let Some(query_type) = raw_args.get(2)
+    {
+        let cfg = Config::load(None, None).ok();
+        let out = CompletionGenerator::handle_internal_complete(query_type, cfg.as_ref());
+        if !out.is_empty() {
+            println!("{out}");
+        }
+        return 0;
+    }
+
+    let cli = CliArgs::parse_env();
+
+    if let Some(ref shell) = cli.completion {
+        if shell.eq_ignore_ascii_case("auto") {
+            println!("{}", CompletionGenerator::get_install_instructions());
+            return 0;
+        }
+        let Some(script) = CompletionGenerator::generate(shell) else {
+            eprintln!("Unsupported shell for completion: {shell}");
+            return 1;
+        };
+        println!("{script}");
+        return 0;
+    }
+
+    let verbosity = Verbosity::from_cli(cli.quiet, cli.verbose);
+    let printer = Printer::init_global(verbosity, cli.no_color);
+
+    if let Some(ref dir) = cli.directory
+        && let Err(err) = std::env::set_current_dir(dir)
+    {
+        printer.error(&format!("Failed to change directory to '{dir}': {err}"));
+        return 1;
+    }
+
+    if let Err(err) = SecurityManager::check_root(cli.unsafe_mode) {
+        printer.error(&err.to_string());
+        return 1;
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let _ = load_dotenv(&cwd);
+
+    if cli.doctor {
+        return Doctor::diagnose(printer.colors());
+    }
+
+    if cli.init {
+        return i32::from(!ConfigInitializer::init_config(&cwd, cli.force));
+    }
+
+    if cli.sandbox_stop {
+        PersistentSandbox::stop();
+        ComposeSandbox::teardown_all();
+        return 0;
+    }
+
+    if !cli.watch {
+        return run_once(&cli, printer, &cwd, None).exit_code;
+    }
+
+    install_sigint_handler();
+    let initial_stdin = read_piped_stdin_once(&cli);
+    let mut outcome = run_once(&cli, printer, &cwd, initial_stdin.as_ref());
+
+    printer.info(
+        "Watch mode enabled. Watching for changes... (Press Ctrl+C to exit, 'c' or Enter to re-run)",
+    );
+
+    let mut tracked_mtimes = collect_mtimes(&outcome.watch_files, &cwd);
+
+    while !STOP_REQUESTED.load(Ordering::Relaxed) {
+        let mut trigger_rerun = false;
+        let poll_window = Duration::from_millis(500);
+        let start = Instant::now();
+
+        let _raw_guard = RawModeGuard::enter_if_tty();
+        while !STOP_REQUESTED.load(Ordering::Relaxed) {
+            let elapsed = start.elapsed();
+            if elapsed >= poll_window {
+                break;
+            }
+            let remaining = poll_window - elapsed;
+            let step = remaining.min(Duration::from_millis(100));
+
+            if io::stdin().is_tty() && event::poll(step).unwrap_or(false) {
+                if let Ok(Event::Key(key)) = event::read() {
+                    if key.code == KeyCode::Char('c')
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        STOP_REQUESTED.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    if matches!(
+                        key.code,
+                        KeyCode::Enter | KeyCode::Char('c') | KeyCode::Char('C')
+                    ) {
+                        trigger_rerun = true;
+                        break;
+                    }
+                }
+            } else {
+                thread::sleep(step);
+            }
+        }
+        drop(_raw_guard);
+
+        if STOP_REQUESTED.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let new_mtimes = collect_mtimes(&outcome.watch_files, &cwd);
+        if !trigger_rerun && new_mtimes != tracked_mtimes {
+            trigger_rerun = true;
+        }
+
+        if trigger_rerun {
+            printer.separator();
+            printer.info("Change detected, re-running...");
+            let cached = outcome.captured_stdin.as_ref();
+            outcome = run_once(&cli, printer, &cwd, cached);
+            tracked_mtimes = collect_mtimes(&outcome.watch_files, &cwd);
+        }
+    }
+
+    printer.info("Watch mode stopped.");
+    0
+}
+
+/// CLI entrypoint delegating immediately to [`real_main`].
+fn main() {
+    std::process::exit(real_main());
 }
