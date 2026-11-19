@@ -1,5 +1,67 @@
 //! Language handlers, execution engine, and project/task/test runners.
 //!
-//! This module is a minimal M1 placeholder and will host `handler`
-//! (`LanguageHandler`, `HandlerRegistry`, `ExecutionContext`), `base`, `core`,
-//! language-specific handlers, `project`, and `test_runner` in M3–M4.
+//! Organizes compilation and runtime execution around [`LanguageHandler`],
+//! [`HandlerRegistry`], [`ExecutionContext`], [`BaseRunner`], and
+//! [`CompilerRunner`].
+
+pub mod base;
+pub mod c_family;
+pub mod core;
+pub mod custom_handler;
+pub mod handler;
+pub mod java_handler;
+pub mod python_handler;
+pub mod rust_handler;
+pub mod script_handler;
+
+pub use base::BaseRunner;
+pub use core::CompilerRunner;
+pub use handler::{ExecutionContext, HandlerRegistry, LanguageHandler, RunnerOptions};
+
+/// Minimal RAII temporary directory helper for `#[cfg(test)]` modules (avoids adding `tempfile` crate).
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Monotonic sequence counter preventing collisions across parallel tests.
+    static SEQ: AtomicU64 = AtomicU64::new(1);
+
+    /// RAII temporary directory automatically deleted on drop.
+    pub struct TempDir {
+        /// Path to the created temporary directory.
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        /// Create a uniquely named directory under `std::env::temp_dir()`.
+        pub fn new() -> std::io::Result<Self> {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "run_runner_test_{}_{}_{}",
+                std::process::id(),
+                nanos,
+                seq
+            ));
+            fs::create_dir_all(&path)?;
+            Ok(Self { path })
+        }
+
+        /// Return the path to this temporary directory.
+        pub fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        /// Remove the temporary directory recursively on drop.
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
