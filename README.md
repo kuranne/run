@@ -53,22 +53,22 @@ A smart, high-performance build system, test runner, and developer productivity 
 ## Installation
 
 ### Requirements
-- **Python 3.11+**
+- **Rust toolchain (`cargo` / `rustc`)**
 - **Git**
 - Linux, macOS, or Windows
 
 ### Linux / macOS
 ```bash
-git clone https://github.com/kuranne/run.git ~/.local/share/run_kuranne
-cd ~/.local/share/run_kuranne
+git clone https://github.com/kuranne/run.git ~/.local/share/run
+cd ~/.local/share/run
 ./setup.sh
 ```
 
 ### Windows (PowerShell)
 ```powershell
 Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-git clone https://github.com/kuranne/run.git "$HOME\AppData\Local\run_kuranne"
-cd "$HOME\AppData\Local\run_kuranne"
+git clone https://github.com/kuranne/run.git "$HOME\AppData\Local\run"
+cd "$HOME\AppData\Local\run"
 .\setup.ps1
 ```
 
@@ -79,9 +79,9 @@ cd "$HOME\AppData\Local\run_kuranne"
 To update `run` to the latest version:
 
 ```bash
-cd ~/.local/share/run_kuranne  # Or your installation directory
+cd ~/.local/share/run  # Or your installation directory
 git pull
-./setup.sh                    # On Windows: .\setup.ps1
+./setup.sh             # On Windows: .\setup.ps1
 ```
 
 ---
@@ -148,8 +148,8 @@ run --doctor
 `run` searches for configuration in the following order:
 1. **Workspace Directory** (Highest Priority): `./Run.toml`, `../Run.toml`, up to 4 parent levels.
 2. **Global Config Directory** (Lowest Priority):
-   - Linux/macOS: `~/.config/run_kuranne/Run.toml` (or `$XDG_CONFIG_HOME/run_kuranne/Run.toml`)
-   - Windows: `%APPDATA%\run_kuranne\Run.toml`
+   - Linux/macOS: `~/.config/run/Run.toml` (or `$XDG_CONFIG_HOME/run/Run.toml`)
+   - Windows: `%APPDATA%\run\Run.toml`
 
 ### Basic `Run.toml` Example
 

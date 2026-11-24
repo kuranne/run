@@ -18,7 +18,7 @@
 # exclude_files = ["test_private.cpp", "*.tmp", "tests/**/*.mock.c"]
 
 # exclude_dirs (List[str]): Directory names or glob patterns to skip during directory walks.
-# Default ignored: .git, .venv, venv, env, node_modules, .run_cache, build, target, __pycache__
+# Default ignored: .git, .venv, venv, env, node_modules, build, target, __pycache__
 # exclude_dirs = ["vendor", "dist", "tmp_*"]
 
 # exclude_extensions (List[str]): File extensions or glob patterns to skip during directory scans.
@@ -56,7 +56,7 @@
 # test = "pytest tests/ -v"
 # bench = "cargo bench"
 # build = "cmake -B build && cmake --build build"
-# clean = "rm -rf build target .run_cache"
+# clean = "rm -rf build target"
 
 # You can also run tasks inside the sandbox by using table syntax:
 # [tasks.sandboxed_test]

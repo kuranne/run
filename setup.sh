@@ -1,47 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "-- Checking for python3..."
-command -v python3 >/dev/null 2>&1 || { echo "[ ERROR ] Can't execute python3"; exit 1; }
+# Build and install the Rust `run` CLI binary into ~/.local/bin (or $PREFIX/bin).
+PREFIX="${PREFIX:-$HOME/.local}"
+BINDIR="${PREFIX}/bin"
+MANDIR="${PREFIX}/share/man/man1"
 
-# Check Python Version (>= 3.11)
-python3 -c "import sys; exit(0) if sys.version_info >= (3, 11) else exit(1)" || { echo "[ ERROR ] Python 3.11+ required"; exit 1; }
-
-echo "-- Setting up virtual environment..."
-if [[ ! -d ./.venv ]]; then
-    python3 -m venv .venv
-else
-    rm -rf .venv
-    python3 -m venv .venv
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "Error: cargo (Rust toolchain) is required. Install from https://rustup.rs" >&2
+    exit 1
 fi
-source ./.venv/bin/activate
 
-# --- Install Dependencies --- #
-echo "-- Installing dependencies..."
-pip install .
+echo "Building run (release)..."
+cargo build --release
 
-# --- Create Wrapper Script --- #
-echo "-- Creating runner script..."
-CURRENT_DIR=$(pwd)
-RUN_SCRIPT="${CURRENT_DIR}/run"
-
-cat <<EOF > "$RUN_SCRIPT"
-#!/usr/bin/env bash
-exec "${CURRENT_DIR}/.venv/bin/python" "${CURRENT_DIR}/src/main.py" "\$@"
-EOF
-
-chmod +x "$RUN_SCRIPT"
-
-#--- Symlink ---#
-echo "-- Installing script into bin"
-
-DEFAULT_BIN_PATH="$HOME/.local/bin"
-if [[ ! -z $XDG_BIN_HOME ]]; then
-    DEFAULT_BIN_PATH=$XDG_BIN_HOME
+mkdir -p "${BINDIR}" "${MANDIR}"
+install -m 755 "target/release/run" "${BINDIR}/run"
+if [ -f "docs/man/run.1" ]; then
+    install -m 644 "docs/man/run.1" "${MANDIR}/run.1"
 fi
-mkdir -p "$DEFAULT_BIN_PATH"
-ln -sf "$RUN_SCRIPT" "$DEFAULT_BIN_PATH/run"
 
-#--- Clear & Clean ---#
-echo "[ SUCCESS ] Setup complete!"
-echo "You can now use 'run' command."
+echo "Installed run to ${BINDIR}/run"
+case ":${PATH}:" in
+    *":${BINDIR}:"*) ;;
+    *) echo "Add '${BINDIR}' to your PATH to invoke 'run' globally." ;;
+esac

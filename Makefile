@@ -1,149 +1,67 @@
-# ==============================================================================
-# Run - Fast, Intelligent Multi-Language Code Runner
-# Standard POSIX Makefile
-# ==============================================================================
+# Makefile for Run (Rust CLI & Core Library)
 
-# Installation Paths (Default: ~/.local or /usr/local via PREFIX=/usr/local)
-PREFIX       ?= $(HOME)/.local
-BINDIR        = $(PREFIX)/bin
-MANDIR        = $(PREFIX)/share/man/man1
-ZSHDIR        = $(PREFIX)/share/zsh/site-functions
-BASHDIR       = $(PREFIX)/share/bash-completion/completions
-FISHDIR       = $(PREFIX)/share/fish/vendor_completions.d
+CARGO ?= cargo
+PYTEST ?= pytest
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
+MANDIR ?= $(PREFIX)/share/man/man1
+COMPLETIONS_DIR ?= target/completions
+TARGET_BIN ?= target/release/run
 
-# Python & Environment
-PYTHON       ?= python3
-VENV          = .venv
-VENV_BIN      = $(VENV)/bin
-VENV_PY       = $(VENV_BIN)/python
-VENV_PIP      = $(VENV_BIN)/pip
+.PHONY: all build release test test-rust test-e2e lint doc completions install uninstall clean help
 
-# Distribution & Build
-DIST_DIR      = dist
-DIST_BIN      = $(DIST_DIR)/run
-COMPLETIONS   = completions
+all: build
 
-# Colors for Terminal UI
-BOLD          = \033[1m
-CYAN          = \033[36m
-GREEN         = \033[32m
-YELLOW        = \033[33m
-RED           = \033[31m
-RESET         = \033[0m
-
-.PHONY: all help venv test dist completions install uninstall clean
-
-# Default Target: Print Help
-all: help
-
-## help: Display available make targets and descriptions
 help:
-	@printf "$(BOLD)Run Build & Installation System$(RESET)\n"
-	@printf "Usage: make [target] [PREFIX=/path/to/prefix]\n\n"
-	@printf "$(BOLD)Available Targets:$(RESET)\n"
-	@printf "  $(CYAN)install$(RESET)      Smart install (standalone binary if built, or venv runner) + man + completions\n"
-	@printf "  $(CYAN)uninstall$(RESET)    Remove binary, man page, and completions from PREFIX\n"
-	@printf "  $(CYAN)dist$(RESET)         Compile standalone native binary using Nuitka into dist/run\n"
-	@printf "  $(CYAN)test$(RESET)         Run automated test suite via pytest\n"
-	@printf "  $(CYAN)venv$(RESET)         Create local Python virtual environment (.venv) and install dependencies\n"
-	@printf "  $(CYAN)completions$(RESET)  Generate shell completion scripts (Zsh, Bash, Fish)\n"
-	@printf "  $(CYAN)clean$(RESET)        Remove build artifacts, cache files, and dist directories\n"
-	@printf "\n$(BOLD)Configuration Variables:$(RESET)\n"
-	@printf "  PREFIX       Installation prefix (default: $(PREFIX))\n"
-	@printf "  PYTHON       Python interpreter to use (default: $(PYTHON))\n"
+	@echo "Available targets:"
+	@echo "  make build       - Build debug binary (cargo build)"
+	@echo "  make release     - Build optimized release binary (cargo build --release)"
+	@echo "  make test        - Run Rust unit tests + black-box pytest CLI suite"
+	@echo "  make test-rust   - Run Rust unit tests (cargo test)"
+	@echo "  make test-e2e    - Run black-box pytest suite against compiled binary"
+	@echo "  make lint        - Run clippy with -D warnings"
+	@echo "  make doc         - Verify rustdoc with -D warnings"
+	@echo "  make completions - Generate zsh/bash/fish completion scripts"
+	@echo "  make install     - Build release binary and install to $(BINDIR)/run"
+	@echo "  make uninstall   - Remove installed binary and man page"
+	@echo "  make clean       - Remove build artifacts and caches"
 
-## venv: Initialize development virtualenv and install package
-venv:
-	@printf "$(GREEN)[ VENV ]$(RESET) Initializing virtual environment...\n"
-	@if [ ! -d "$(VENV)" ]; then \
-		$(PYTHON) -m venv $(VENV); \
-	fi
-	@$(VENV_PIP) install --quiet --upgrade pip
-	@$(VENV_PIP) install --quiet -e ".[dev]"
-	@printf "$(GREEN)[ VENV ]$(RESET) Virtual environment ready at $(VENV)\n"
+build:
+	$(CARGO) build
 
-## test: Run pytest test suite
-test:
-	@printf "$(GREEN)[ TEST ]$(RESET) Running test suite...\n"
-	@if [ -x "$(VENV_PY)" ]; then \
-		PYTHONPATH=src:. $(VENV_PY) -m pytest -p no:cacheprovider tests/; \
-	elif command -v pytest >/dev/null 2>&1; then \
-		PYTHONPATH=src:. pytest -p no:cacheprovider tests/; \
-	else \
-		PYTHONPATH=src:. $(PYTHON) -m pytest -p no:cacheprovider tests/; \
-	fi
+release:
+	$(CARGO) build --release
 
-## completions: Generate shell completion files for zsh, bash, fish
-completions:
-	@printf "$(GREEN)[ COMPLETIONS ]$(RESET) Generating shell completions...\n"
-	@mkdir -p $(COMPLETIONS)
-	@if [ -x "$(VENV_PY)" ]; then \
-		$(VENV_PY) src/main.py --completion zsh > $(COMPLETIONS)/_run; \
-		$(VENV_PY) src/main.py --completion bash > $(COMPLETIONS)/run; \
-		$(VENV_PY) src/main.py --completion fish > $(COMPLETIONS)/run.fish; \
-	else \
-		$(PYTHON) src/main.py --completion zsh > $(COMPLETIONS)/_run; \
-		$(PYTHON) src/main.py --completion bash > $(COMPLETIONS)/run; \
-		$(PYTHON) src/main.py --completion fish > $(COMPLETIONS)/run.fish; \
-	fi
-	@printf "$(GREEN)[ COMPLETIONS ]$(RESET) Generated in $(COMPLETIONS)/\n"
+test-rust:
+	$(CARGO) test
 
-## dist: Build standalone native binary using Nuitka
-dist:
-	@printf "$(GREEN)[ DIST ]$(RESET) Compiling standalone native executable via Nuitka...\n"
-	@mkdir -p $(DIST_DIR)
-	@if [ -x "$(VENV_PY)" ]; then \
-		$(VENV_PY) -m nuitka --onefile --lto=yes --remove-output --output-dir=$(DIST_DIR) --output-filename=run src/main.py; \
-	else \
-		$(PYTHON) -m nuitka --onefile --lto=yes --remove-output --output-dir=$(DIST_DIR) --output-filename=run src/main.py; \
-	fi
-	@printf "$(GREEN)[ DIST ]$(RESET) Built standalone binary: $(DIST_BIN)\n"
+test-e2e: build
+	PYTHONPATH=.:tests RUN_BIN=$(CURDIR)/target/debug/run $(PYTEST) -p no:cacheprovider tests/
 
-## install: Install binary, man pages, and shell completions
-install: completions
-	@printf "$(GREEN)[ INSTALL ]$(RESET) Installing to $(PREFIX)...\n"
-	@install -d $(BINDIR) $(MANDIR) $(ZSHDIR) $(BASHDIR) $(FISHDIR)
-	@if [ -f "$(DIST_BIN)" ]; then \
-		printf "$(GREEN)[ INSTALL ]$(RESET) Installing standalone binary $(DIST_BIN) -> $(BINDIR)/run\n"; \
-		install -m 755 $(DIST_BIN) $(BINDIR)/run; \
-	else \
-		printf "$(YELLOW)[ INSTALL ]$(RESET) No standalone binary in dist/ - creating virtualenv runner script...\n"; \
-		if [ ! -d "$(VENV)" ]; then $(MAKE) venv; fi; \
-		printf '#!/usr/bin/env bash\nexec "%s/%s" "%s/src/main.py" "$$@"\n' "$$(pwd)" "$(VENV_PY)" "$$(pwd)" > $(BINDIR)/run; \
-		chmod 755 $(BINDIR)/run; \
-	fi
-	@if [ -f "docs/man/run.1" ]; then \
-		printf "$(GREEN)[ INSTALL ]$(RESET) Installing manual page -> $(MANDIR)/run.1\n"; \
-		install -m 644 docs/man/run.1 $(MANDIR)/run.1; \
-	fi
-	@if [ -f "$(COMPLETIONS)/_run" ]; then \
-		printf "$(GREEN)[ INSTALL ]$(RESET) Installing Zsh completions -> $(ZSHDIR)/_run\n"; \
-		install -m 644 $(COMPLETIONS)/_run $(ZSHDIR)/_run; \
-	fi
-	@if [ -f "$(COMPLETIONS)/run" ]; then \
-		printf "$(GREEN)[ INSTALL ]$(RESET) Installing Bash completions -> $(BASHDIR)/run\n"; \
-		install -m 644 $(COMPLETIONS)/run $(BASHDIR)/run; \
-	fi
-	@if [ -f "$(COMPLETIONS)/run.fish" ]; then \
-		printf "$(GREEN)[ INSTALL ]$(RESET) Installing Fish completions -> $(FISHDIR)/run.fish\n"; \
-		install -m 644 $(COMPLETIONS)/run.fish $(FISHDIR)/run.fish; \
-	fi
-	@printf "$(GREEN)[ SUCCESS ]$(RESET) Run installed successfully to $(BINDIR)/run\n"
+test: test-rust test-e2e
 
-## uninstall: Remove all installed artifacts
+lint:
+	$(CARGO) clippy --all-targets -- -D warnings
+
+doc:
+	RUSTDOCFLAGS="-D warnings" $(CARGO) doc --no-deps
+
+completions: release
+	@mkdir -p $(COMPLETIONS_DIR)
+	$(TARGET_BIN) --completion zsh > $(COMPLETIONS_DIR)/_run
+	$(TARGET_BIN) --completion bash > $(COMPLETIONS_DIR)/run
+	$(TARGET_BIN) --completion fish > $(COMPLETIONS_DIR)/run.fish
+
+install: release
+	@mkdir -p $(BINDIR) $(MANDIR)
+	install -m 755 $(TARGET_BIN) $(BINDIR)/run
+	@if [ -f docs/man/run.1 ]; then install -m 644 docs/man/run.1 $(MANDIR)/run.1; fi
+	@echo "Installed run to $(BINDIR)/run"
+
 uninstall:
-	@printf "$(RED)[ UNINSTALL ]$(RESET) Removing from $(PREFIX)...\n"
-	@rm -f $(BINDIR)/run
-	@rm -f $(MANDIR)/run.1
-	@rm -f $(ZSHDIR)/_run
-	@rm -f $(BASHDIR)/run
-	@rm -f $(FISHDIR)/run.fish
-	@printf "$(GREEN)[ SUCCESS ]$(RESET) Run uninstalled cleanly from $(PREFIX)\n"
+	@rm -f $(BINDIR)/run $(MANDIR)/run.1
+	@echo "Uninstalled run from $(PREFIX)"
 
-## clean: Clean up temporary files, caches, and build artifacts
 clean:
-	@printf "$(YELLOW)[ CLEAN ]$(RESET) Cleaning build artifacts and cache files...\n"
-	@rm -rf $(DIST_DIR) $(COMPLETIONS) build/ *.egg-info .pytest_cache .run_cache
-	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
-	@printf "$(GREEN)[ CLEAN ]$(RESET) Workspace cleaned.\n"
+	$(CARGO) clean
+	@rm -rf $(COMPLETIONS_DIR) .pytest_cache

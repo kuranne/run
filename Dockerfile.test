@@ -2,18 +2,17 @@ FROM fedora:latest
 
 WORKDIR /app
 
-# Install Python, build essentials, test runners, and multi-language toolchains
+# Install Rust toolchain, compilers, runtimes, and pytest for black-box CLI verification
 RUN dnf install -y \
+    rust \
+    cargo \
+    clippy \
     python3 \
-    python3-pip \
     python3-pytest \
-    python3-flake8 \
     make \
     gcc \
     gcc-c++ \
     clang \
-    rust \
-    cargo \
     golang \
     java-latest-openjdk-devel \
     valgrind \
@@ -22,5 +21,4 @@ RUN dnf install -y \
 
 COPY . /app
 
-ENV PYTHONPATH=/app/src
-CMD ["make", "test"]
+CMD ["make", "lint", "doc", "test"]
