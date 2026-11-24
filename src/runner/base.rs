@@ -233,13 +233,14 @@ impl BaseRunner {
             extra_flags.push(format!("-fsanitize={san}"));
         }
 
-        let mut run_args = std::mem::take(&mut options.run_args);
+        let mut run_args = Vec::new();
         if let Some(raw) = run_args_str.map(str::trim).filter(|s| !s.is_empty()) {
             let split = shlex::split(raw).ok_or_else(|| {
                 RunError::config(format!("Invalid quoting in --argument: {raw}"))
             })?;
             run_args.extend(split);
         }
+        run_args.extend(std::mem::take(&mut options.run_args));
 
         Ok(Self {
             options,

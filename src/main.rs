@@ -15,16 +15,21 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
 use crossterm::tty::IsTty;
 
+use run::runner::c_family::CFamilyHandler;
+use run::runner::custom_handler::CustomLanguageHandler;
+use run::runner::handler::LanguageHandler;
+use run::runner::java_handler::JavaHandler;
+use run::runner::script_handler::ScriptHandler;
 use run::runner::{CompilerRunner, ProjectRunner, TaskRunner, TestcasesRunner};
 use run::util::args::CliArgs;
 use run::util::cache::CacheManager;
 use run::util::completion::CompletionGenerator;
 use run::util::config::{Config, SandboxConfig};
 use run::util::doctor::Doctor;
-use run::util::env::load_dotenv;
+use run::util::env::{load_dotenv, PackageMetadata};
 use run::util::errors::RunError;
 use run::util::init_config::ConfigInitializer;
-use run::util::output::{Printer, Verbosity};
+use run::util::output::{Printer, TagColor, Verbosity};
 use run::util::sandbox::{ComposeSandbox, ContainerSandbox, PersistentSandbox};
 use run::util::security::SecurityManager;
 use run::util::template_manager::TemplateManager;
@@ -80,6 +85,35 @@ struct RunOutcome {
     watch_files: Vec<PathBuf>,
     /// Cached piped stdin bytes for reuse across watch re-runs.
     captured_stdin: Option<Vec<u8>>,
+}
+
+/// Return `true` if `token` refers to an existing directory or runnable source/shebang file.
+fn is_existing_runnable_target(token: &str, runner: &CompilerRunner) -> bool {
+    let p = Path::new(token);
+    if p.is_dir() {
+        return true;
+    }
+    if !p.is_file() {
+        return false;
+    }
+    if p.extension().is_some() {
+        return runner.registry.get_handler(p, &runner.config).is_some();
+    }
+    !ScriptHandler::detect_language_from_shebang(p, None).is_empty()
+}
+
+/// Return `true` when auto-discovered files contain compiled/custom sources that should link together.
+fn has_multi_compilable(files: &[PathBuf], config: &Config) -> bool {
+    files.iter().any(|p| {
+        let ext = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| format!(".{}", e.to_ascii_lowercase()))
+            .unwrap_or_default();
+        (!ext.is_empty()
+            && (CFamilyHandler::is_c_family_source_ext(&ext) || JavaHandler::is_java_ext(&ext)))
+            || CustomLanguageHandler.can_handle(p, config)
+    })
 }
 
 /// Apply sandbox CLI overrides onto a [`SandboxConfig`] instance.
@@ -188,16 +222,56 @@ fn cleanup_sandbox(started_compose: bool, cli: &CliArgs) {
     }
 }
 
-/// Snapshot modification times for all candidate watch paths (including `Run.toml`).
+/// Snapshot modification times for all candidate watch paths, sibling C/C++ headers, and `Run.toml`.
 fn collect_mtimes(paths: &[PathBuf], cwd: &Path) -> HashMap<PathBuf, SystemTime> {
     let mut map = HashMap::new();
+    let header_exts = &PackageMetadata::get().extensions.c_headers;
+    let mut header_dirs = Vec::new();
+
     for p in paths {
         if let Ok(meta) = fs::metadata(p)
             && let Ok(mtime) = meta.modified()
         {
             map.insert(p.clone(), mtime);
         }
+        let ext = p
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| format!(".{}", e.to_ascii_lowercase()))
+            .unwrap_or_default();
+        if !ext.is_empty() && CFamilyHandler::is_c_family_source_ext(&ext) {
+            let dir = match p.parent() {
+                Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+                _ => cwd.to_path_buf(),
+            };
+            if !header_dirs.contains(&dir) {
+                header_dirs.push(dir);
+            }
+        }
     }
+
+    for dir in header_dirs {
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let ep = entry.path();
+                if !ep.is_file() {
+                    continue;
+                }
+                let ext = ep
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| format!(".{}", e.to_ascii_lowercase()))
+                    .unwrap_or_default();
+                if header_exts.iter().any(|h| h == &ext)
+                    && let Ok(meta) = entry.metadata()
+                    && let Ok(mtime) = meta.modified()
+                {
+                    map.insert(ep, mtime);
+                }
+            }
+        }
+    }
+
     let run_toml = cwd.join("Run.toml");
     if run_toml.is_file()
         && let Ok(meta) = fs::metadata(&run_toml)
@@ -231,7 +305,7 @@ fn run_once(
         match CacheManager::new(cwd) {
             Ok(cache) => {
                 cache.clear();
-                printer.info("Cleaned build cache.");
+                printer.action("CLEAN", "Build cache cleared successfully.", TagColor::Green);
             }
             Err(err) => {
                 printer.error(&format!("Failed to clean cache: {err}"));
@@ -339,8 +413,17 @@ fn run_once(
         };
     }
 
-    // 2. No files provided: handle -L/--all, ProjectRunner detection, or interactive prompt.
+    // 2. No files provided: handle --test-dir error, -L/--all, ProjectRunner, or interactive prompt.
     if cli.files.is_empty() && cli.all.is_none() {
+        if cli.test_dir.is_some() {
+            printer.error("A source file must be specified with --test-dir");
+            return RunOutcome {
+                exit_code: 1,
+                watch_files: Vec::new(),
+                captured_stdin,
+            };
+        }
+
         if let Some(proj_info) = ProjectRunner::detect_project(cwd, &config, Some(&printer)) {
             let watch_files = ProjectRunner::get_watch_files(&proj_info.2);
             let (started_compose, _) = match prepare_sandbox(&mut runner, cli, &[], cwd) {
@@ -379,15 +462,7 @@ fn run_once(
         }
 
         if let Some(prompted) = prompt_for_file() {
-            if !prompted.exists() && !cli.dry_run {
-                printer.error(&format!("Path not found: {}", prompted.display()));
-                return RunOutcome {
-                    exit_code: 1,
-                    watch_files: Vec::new(),
-                    captured_stdin,
-                };
-            }
-            let target_files = vec![prompted.clone()];
+            let target_files = vec![prompted];
             let (started_compose, _) = match prepare_sandbox(&mut runner, cli, &target_files, cwd)
             {
                 Ok(res) => res,
@@ -411,46 +486,56 @@ fn run_once(
         }
 
         return RunOutcome {
-            exit_code: 1,
+            exit_code: 0,
             watch_files: Vec::new(),
             captured_stdin,
         };
     }
 
-    // 3. Collect explicit target files/directories or -L/--all discovery under cwd.
-    let max_depth = cli.all.and_then(|d| usize::try_from(d).ok());
+    // 3. Collect explicit target files/directories, trailing positional args, or -L/--all discovery.
+    let max_depth = cli
+        .all
+        .and_then(|d| if d < 0 { None } else { Some(d as usize) });
     let mut target_files: Vec<PathBuf> = Vec::new();
+    let mut discovered_by_walk = cli.all.is_some();
 
     if cli.files.is_empty() && cli.all.is_some() {
         let discovered = runner.find_source_files(cwd, max_depth);
         if discovered.is_empty() {
-            printer.warning("No source files found.");
+            printer.warning("No supported source files found via -L auto-search");
             return RunOutcome {
-                exit_code: 0,
+                exit_code: 1,
                 watch_files: Vec::new(),
                 captured_stdin,
             };
         }
+        printer.info(&format!("Auto-found {} source file(s).", discovered.len()));
         target_files = discovered;
+    } else if !cli.multi
+        && cli.files.len() > 1
+        && Path::new(&cli.files[0]).is_file()
+        && !cli.files[1..]
+            .iter()
+            .all(|f| is_existing_runnable_target(f, &runner))
+    {
+        target_files.push(PathBuf::from(&cli.files[0]));
+        runner
+            .base
+            .run_args
+            .extend(cli.files[1..].iter().cloned());
     } else {
         for raw_target in &cli.files {
             let p = PathBuf::from(raw_target);
             if p.is_dir() {
+                discovered_by_walk = true;
                 let discovered = runner.find_source_files(&p, max_depth);
                 if discovered.is_empty() {
                     printer.warning(&format!("No source files found in {}", p.display()));
                 } else {
                     target_files.extend(discovered);
                 }
-            } else if p.exists() || cli.dry_run {
-                target_files.push(p);
             } else {
-                printer.error(&format!("File or directory not found: {}", p.display()));
-                return RunOutcome {
-                    exit_code: 1,
-                    watch_files: Vec::new(),
-                    captured_stdin,
-                };
+                target_files.push(p);
             }
         }
     }
@@ -476,16 +561,15 @@ fn run_once(
         }
     };
 
+    let effective_multi = cli.multi
+        || (discovered_by_walk
+            && target_files.len() > 1
+            && has_multi_compilable(&target_files, &config));
+
     let ok = if let Some(ref td_str) = cli.test_dir {
-        let td = Path::new(td_str);
-        if !td.is_dir() {
-            printer.error(&format!("Test directory not found: {}", td.display()));
-            false
-        } else {
-            TestcasesRunner::run_tests(&mut runner, td, &target_files, cli.multi)
-        }
+        TestcasesRunner::run_tests(&mut runner, Path::new(td_str), &target_files, effective_multi)
     } else {
-        runner.compile_and_run(&target_files, cli.multi)
+        runner.compile_and_run(&target_files, effective_multi)
     };
 
     cleanup_sandbox(started_compose, cli);
@@ -515,27 +599,36 @@ fn real_main() -> i32 {
 
     let cli = CliArgs::parse_env();
 
+    let verbosity = Verbosity::from_cli(cli.quiet, cli.verbose);
+    let printer = Printer::init_global(verbosity, cli.no_color);
+
     if let Some(ref shell) = cli.completion {
         if shell.eq_ignore_ascii_case("auto") {
             println!("{}", CompletionGenerator::get_install_instructions());
             return 0;
         }
         let Some(script) = CompletionGenerator::generate(shell) else {
-            eprintln!("Unsupported shell for completion: {shell}");
+            printer.error(&format!("Unsupported shell for completion: {shell}"));
             return 1;
         };
         println!("{script}");
         return 0;
     }
 
-    let verbosity = Verbosity::from_cli(cli.quiet, cli.verbose);
-    let printer = Printer::init_global(verbosity, cli.no_color);
+    if verbosity >= Verbosity::Verbose {
+        printer.debug("Debug logging enabled");
+    }
 
-    if let Some(ref dir) = cli.directory
-        && let Err(err) = std::env::set_current_dir(dir)
-    {
-        printer.error(&format!("Failed to change directory to '{dir}': {err}"));
-        return 1;
+    if let Some(ref dir) = cli.directory {
+        let target_dir = Path::new(dir);
+        if !target_dir.is_dir() {
+            printer.error(&format!("Specified directory does not exist: {dir}"));
+            return 1;
+        }
+        if let Err(err) = std::env::set_current_dir(target_dir) {
+            printer.error(&format!("Failed to change directory to '{dir}': {err}"));
+            return 1;
+        }
     }
 
     if let Err(err) = SecurityManager::check_root(cli.unsafe_mode) {
@@ -565,12 +658,13 @@ fn real_main() -> i32 {
     }
 
     install_sigint_handler();
-    let initial_stdin = read_piped_stdin_once(&cli);
-    let mut outcome = run_once(&cli, printer, &cwd, initial_stdin.as_ref());
-
     printer.info(
         "Watch mode enabled. Watching for changes... (Press Ctrl+C to exit, 'c' or Enter to re-run)",
     );
+    let _ = io::stdout().flush();
+
+    let initial_stdin = read_piped_stdin_once(&cli);
+    let mut outcome = run_once(&cli, printer, &cwd, initial_stdin.as_ref());
 
     let mut tracked_mtimes = collect_mtimes(&outcome.watch_files, &cwd);
 
@@ -621,7 +715,8 @@ fn real_main() -> i32 {
 
         if trigger_rerun {
             printer.separator();
-            printer.info("Change detected, re-running...");
+            printer.info("Change detected, Restarting...");
+            let _ = io::stdout().flush();
             let cached = outcome.captured_stdin.as_ref();
             outcome = run_once(&cli, printer, &cwd, cached);
             tracked_mtimes = collect_mtimes(&outcome.watch_files, &cwd);

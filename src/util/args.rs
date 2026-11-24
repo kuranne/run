@@ -11,7 +11,6 @@ use std::path::Path;
 use clap::{ArgAction, Parser};
 
 use crate::runner::handler::RunnerOptions;
-use crate::util::env::PackageMetadata;
 
 /// Long flags taking an explicit following value token.
 const VALUE_FLAGS_LONG: &[&str] = &[
@@ -38,28 +37,6 @@ const VALUE_FLAGS_LONG: &[&str] = &[
 
 /// Short flags taking an explicit following value token.
 const VALUE_FLAGS_SHORT: &[&str] = &["-F", "-a", "-p", "-C", "-j"];
-
-/// Non-data source/script extensions so `-i main.py` treats `-i` as pipe stdin (`"-"`).
-fn looks_like_source_file(token: &str) -> bool {
-    let p = Path::new(token);
-    if !p.is_file() {
-        return false;
-    }
-    let Some(ext) = p.extension().and_then(|e| e.to_str()) else {
-        return false;
-    };
-    let dotted = format!(".{}", ext.to_ascii_lowercase());
-    let meta = PackageMetadata::get();
-    if meta.extensions.compiled.iter().any(|e| e == &dotted)
-        || meta.extensions.c.iter().any(|e| e == &dotted)
-        || meta.extensions.cpp.iter().any(|e| e == &dotted)
-        || meta.extensions.java.iter().any(|e| e == &dotted)
-        || meta.builtin_languages.iter().any(|l| l.extensions.iter().any(|e| e == &dotted))
-    {
-        return true;
-    }
-    matches!(dotted.as_str(), ".py" | ".sh" | ".rb" | ".js" | ".pl" | ".lua")
-}
 
 /// Output produced by [`preprocess_argv`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,12 +103,14 @@ where
                     iter.next();
                     out.push(format!("--all={depth}"));
                 } else {
-                    out.push("--all=0".to_string());
+                    out.push("--all=-1".to_string());
                 }
             }
             "--completion" => {
                 if let Some((_, next)) = iter.peek()
                     && !next.starts_with('-')
+                    && !next.contains('.')
+                    && !Path::new(next.as_str()).exists()
                 {
                     let shell = (*next).clone();
                     iter.next();
@@ -149,7 +128,7 @@ where
                 if next_str == "-" {
                     iter.next();
                     out.push("--stdin=-".to_string());
-                } else if next_str.starts_with('-') || looks_like_source_file(next_str) {
+                } else if next_str.starts_with('-') {
                     out.push("--stdin=-".to_string());
                 } else {
                     let file = (*next).clone();
@@ -235,7 +214,7 @@ pub struct CliArgs {
     #[arg(short = 'd', long = "dry-run")]
     pub dry_run: bool,
 
-    /// Scan all sources in target directory (`-L` = current dir `0`, or `-L DEPTH`).
+    /// Scan all sources in target directory (`-L` = unlimited `-1`, or `-L DEPTH`).
     #[arg(short = 'L', long = "all", value_name = "DEPTH", allow_hyphen_values = true)]
     pub all: Option<isize>,
 
@@ -248,7 +227,7 @@ pub struct CliArgs {
     pub no_cache: bool,
 
     /// Clear cached build artifacts for the current project before running.
-    #[arg(long = "clean-cache")]
+    #[arg(long = "clean-cache", visible_alias = "clean")]
     pub clean_cache: bool,
 
     /// Suppress non-essential logs and external compiler stdout/stderr.
@@ -268,7 +247,7 @@ pub struct CliArgs {
     pub force: bool,
 
     /// Change working directory before loading configuration or resolving paths.
-    #[arg(short = 'C', long = "directory", value_name = "DIR")]
+    #[arg(short = 'C', long = "directory", visible_alias = "cwd", value_name = "DIR")]
     pub directory: Option<String>,
 
     /// Generate a default `Run.toml` configuration in the current directory.
@@ -541,14 +520,14 @@ mod tests {
     #[test]
     fn test_optional_all_depth_and_completion() {
         let c1 = parse(&["-L"]);
-        assert_eq!(c1.all, Some(0));
+        assert_eq!(c1.all, Some(-1));
 
         let c2 = parse(&["-L", "2", "src"]);
         assert_eq!(c2.all, Some(2));
         assert_eq!(c2.files, vec!["src"]);
 
         let c3 = parse(&["-L", "src"]);
-        assert_eq!(c3.all, Some(0));
+        assert_eq!(c3.all, Some(-1));
         assert_eq!(c3.files, vec!["src"]);
 
         let c4 = parse(&["--completion"]);
@@ -556,12 +535,19 @@ mod tests {
 
         let c5 = parse(&["--completion", "zsh"]);
         assert_eq!(c5.completion.as_deref(), Some("zsh"));
+
+        let c6 = parse(&["--completion", "invalid_shell"]);
+        assert_eq!(c6.completion.as_deref(), Some("invalid_shell"));
+
+        let c7 = parse(&["--completion", "main.c"]);
+        assert_eq!(c7.completion.as_deref(), Some("auto"));
+        assert_eq!(c7.files, vec!["main.c"]);
     }
 
     #[test]
     fn test_stdin_optional_vs_existing_source() {
-        let c1 = parse(&["-i", "input.txt", "main.py"]);
-        assert_eq!(c1.stdin.as_deref(), Some("input.txt"));
+        let c1 = parse(&["-i", "input.c", "main.py"]);
+        assert_eq!(c1.stdin.as_deref(), Some("input.c"));
         assert_eq!(c1.files, vec!["main.py"]);
 
         let c2 = parse(&["-i", "-q", "main.py"]);
@@ -569,21 +555,9 @@ mod tests {
         assert!(c2.quiet);
         assert_eq!(c2.files, vec!["main.py"]);
 
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("run_args_stdin_{nanos}"));
-        fs::create_dir_all(&dir).unwrap();
-        let src = dir.join("prog.py");
-        fs::write(&src, "print(input())\n").unwrap();
-        let src_str = src.to_string_lossy().into_owned();
-
-        let c3 = parse(&["-i", &src_str]);
-        assert_eq!(c3.stdin.as_deref(), Some("-"));
-        assert_eq!(c3.files, vec![src_str]);
-
-        let _ = fs::remove_dir_all(&dir);
+        let c3 = parse(&["-i", "input.cpp"]);
+        assert_eq!(c3.stdin.as_deref(), Some("input.cpp"));
+        assert!(c3.files.is_empty());
     }
 
     #[test]

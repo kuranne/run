@@ -186,6 +186,15 @@ impl LanguageHandler for JavaHandler {
             .config
             .get_preset_flags(ctx.runner.options.preset.as_deref(), "java");
 
+        let main_class = JPM::get_main_class(fp).ok_or_else(|| {
+            RunError::execution(format!("Could not extract main class from {}", fp.display()))
+        })?;
+        if main_class.starts_with('-') {
+            return Err(RunError::execution(format!(
+                "Invalid main class name: {main_class}"
+            )));
+        }
+
         let parent_dir = Self::parent_or_dot(fp);
         let dirs = vec![parent_dir.clone()];
         let before_state = JPM::record_class_files(&dirs);
@@ -197,15 +206,6 @@ impl LanguageHandler for JavaHandler {
 
         if !ctx.run_command(&cmd, false, true)? {
             return Ok(false);
-        }
-
-        let main_class = JPM::get_main_class(fp).ok_or_else(|| {
-            RunError::execution(format!("Could not extract main class from {}", fp.display()))
-        })?;
-        if main_class.starts_with('-') {
-            return Err(RunError::execution(format!(
-                "Invalid main class name: {main_class}"
-            )));
         }
 
         ctx.runner
@@ -252,6 +252,19 @@ impl LanguageHandler for JavaHandler {
             .config
             .get_preset_flags(ctx.runner.options.preset.as_deref(), "java");
 
+        let main_source = JPM::get_main_file(&java_sources).unwrap_or_else(|| java_sources[0].clone());
+        let main_class = JPM::get_main_class(&main_source).ok_or_else(|| {
+            RunError::execution(format!(
+                "Could not extract main class from {}",
+                main_source.display()
+            ))
+        })?;
+        if main_class.starts_with('-') {
+            return Err(RunError::execution(format!(
+                "Invalid main class name: {main_class}"
+            )));
+        }
+
         let mut seen = HashSet::new();
         let mut parent_dirs = Vec::new();
         for src in &java_sources {
@@ -271,19 +284,6 @@ impl LanguageHandler for JavaHandler {
 
         if !ctx.run_command(&cmd, false, true)? {
             return Ok(false);
-        }
-
-        let main_source = JPM::get_main_file(&java_sources).unwrap_or_else(|| java_sources[0].clone());
-        let main_class = JPM::get_main_class(&main_source).ok_or_else(|| {
-            RunError::execution(format!(
-                "Could not extract main class from {}",
-                main_source.display()
-            ))
-        })?;
-        if main_class.starts_with('-') {
-            return Err(RunError::execution(format!(
-                "Invalid main class name: {main_class}"
-            )));
         }
 
         ctx.runner
