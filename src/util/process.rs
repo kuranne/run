@@ -908,7 +908,7 @@ mod tests {
         if !has_python3() {
             return;
         }
-        let mut cmd = python_cmd("x = bytearray(20 * 1024 * 1024); import time; time.sleep(0.08)");
+        let mut cmd = python_cmd("x = bytearray(b'\\x01') * (20 * 1024 * 1024); import time; time.sleep(0.08)");
         let mut proc = MonitoredChild::spawn(&mut cmd).expect("spawn python");
         while proc.try_wait().expect("try_wait").is_none() {
             thread::sleep(Duration::from_millis(10));
@@ -925,7 +925,7 @@ mod tests {
         if !has_python3() {
             return;
         }
-        let mut high_cmd = python_cmd("x = bytearray(60 * 1024 * 1024)");
+        let mut high_cmd = python_cmd("x = bytearray(b'\\x01') * (60 * 1024 * 1024)");
         let high_out = MonitoredChild::spawn(&mut high_cmd)
             .expect("spawn high")
             .wait_with_output()
@@ -934,7 +934,7 @@ mod tests {
         let mem_high = high_out.peak_memory_bytes.expect("high mem");
         assert!(mem_high >= 60 * 1024 * 1024, "got {mem_high}");
 
-        let mut low_cmd = python_cmd("x = bytearray(1 * 1024 * 1024)");
+        let mut low_cmd = python_cmd("x = bytearray(b'\\x01') * (1 * 1024 * 1024)");
         let low_out = MonitoredChild::spawn(&mut low_cmd)
             .expect("spawn low")
             .wait_with_output()
@@ -955,7 +955,7 @@ mod tests {
             return;
         }
         // Non-zero exit (42)
-        let mut exit_cmd = python_cmd("import sys; x = bytearray(20 * 1024 * 1024); sys.exit(42)");
+        let mut exit_cmd = python_cmd("import sys; x = bytearray(b'\\x01') * (20 * 1024 * 1024); sys.exit(42)");
         let out = MonitoredChild::spawn(&mut exit_cmd)
             .expect("spawn exit 42")
             .wait_with_output()
@@ -965,7 +965,7 @@ mod tests {
 
         // SIGTERM and SIGKILL
         for sig in [libc::SIGTERM, libc::SIGKILL] {
-            let mut sig_cmd = python_cmd("x = bytearray(30 * 1024 * 1024); import time; time.sleep(10)");
+            let mut sig_cmd = python_cmd("x = bytearray(b'\\x01') * (30 * 1024 * 1024); import time; time.sleep(10)");
             let mut proc = MonitoredChild::spawn(&mut sig_cmd).expect("spawn signal test");
             thread::sleep(Duration::from_millis(150));
             // SAFETY: Sends test signal to our still-running child process.
@@ -995,7 +995,7 @@ mod tests {
 
         let code = format!(
             "import subprocess, time, pathlib; \
-             x = bytearray(25 * 1024 * 1024); \
+             x = bytearray(b'\\x01') * (25 * 1024 * 1024); \
              p = subprocess.Popen(['sleep', '30']); \
              pathlib.Path({:?}).write_text(str(p.pid)); \
              time.sleep(30)",
@@ -1044,7 +1044,7 @@ mod tests {
             return;
         }
         let mut cmd = python_cmd(
-            "import sys; buf = bytearray(15 * 1024 * 1024); sys.stdout.write('M' * (2 * 1024 * 1024)); sys.stderr.write('E' * (256 * 1024))",
+            "import sys; buf = bytearray(b'\\x01') * (15 * 1024 * 1024); sys.stdout.write('M' * (2 * 1024 * 1024)); sys.stderr.write('E' * (256 * 1024))",
         );
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         let out = MonitoredChild::spawn(&mut cmd)
@@ -1068,7 +1068,7 @@ mod tests {
         for mb in sizes {
             handles.push(thread::spawn(move || {
                 let mut cmd = python_cmd(&format!(
-                    "x = bytearray({mb} * 1024 * 1024); import time; time.sleep(0.08)"
+                    "x = bytearray(b'\\x01') * ({mb} * 1024 * 1024); import time; time.sleep(0.08)"
                 ));
                 let out = MonitoredChild::spawn(&mut cmd)
                     .expect("spawn worker")
