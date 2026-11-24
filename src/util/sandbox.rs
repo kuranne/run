@@ -71,6 +71,7 @@ pub struct ExecOutput {
 }
 
 /// Platform and subprocess abstraction enabling deterministic unit tests without spawning Docker.
+#[cfg_attr(test, mockall::automock)]
 pub trait SandboxEnv {
     /// Return the active host operating system.
     fn os(&self) -> HostOs;

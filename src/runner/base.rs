@@ -12,6 +12,7 @@ use std::fs::{self, File};
 use std::io::{ErrorKind, IsTerminal, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,214 @@ use crate::util::sandbox::{
     ComposeSandbox, ContainerSandbox, NativeRestrictor, PersistentSandbox,
 };
 use crate::util::security::SecurityManager;
+
+/// Parameters describing a single subprocess invocation handed to [`CommandExecutor`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecSpec {
+    /// Final command argv (program + arguments) after optional sandbox/debugger wrapping.
+    pub cmd: Vec<String>,
+    /// Whether to invoke via the system shell (`sh -c` / `cmd /C`).
+    pub use_shell: bool,
+    /// True when this step is a compilation/build command rather than runtime execution.
+    pub compiling: bool,
+    /// True when standard output must be captured (e.g. for `--expect` verification).
+    pub capture_stdout: bool,
+    /// True when interactive debugger TTY passthrough is active (`--debug`/`--gdb`/`--lldb`).
+    pub is_debug: bool,
+    /// Sanitized child environment map.
+    pub env: BTreeMap<String, String>,
+    /// Optional stdin file path or `"-"` for buffered stdin.
+    pub stdin_path: Option<String>,
+    /// Optional buffered stdin bytes when `stdin_path == Some("-")`.
+    pub buffered_stdin: Option<Vec<u8>>,
+    /// Optional wall-clock timeout in seconds.
+    pub timeout_secs: Option<f64>,
+    /// Optional active ephemeral container `(engine, container_name)` for timeout cleanup.
+    pub active_container: Option<(String, String)>,
+    /// Suppress compiler stdout/stderr when `--quiet` is active.
+    pub quiet: bool,
+    /// Whether peak memory tracking is requested (`-M` / `--memory`).
+    pub track_memory: bool,
+}
+
+/// Raw execution outcome returned by a [`CommandExecutor`] implementation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExecOutcome {
+    /// Captured standard output when `capture_stdout` was requested.
+    pub captured_stdout: String,
+    /// Wall-clock execution duration in seconds.
+    pub elapsed_secs: f64,
+    /// Harvested peak memory consumption in bytes, if available.
+    pub memory_bytes: Option<u64>,
+}
+
+/// Subprocess execution backend for [`BaseRunner`], enabling `mockall` white-box testing.
+#[cfg_attr(test, mockall::automock)]
+pub trait CommandExecutor: Send + Sync + std::fmt::Debug {
+    /// Execute the command described by `spec` and return its [`ExecOutcome`].
+    fn execute(&self, spec: &ExecSpec) -> Result<ExecOutcome, RunError>;
+}
+
+/// Default production [`CommandExecutor`] backed by OS processes and [`MonitoredChild`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SystemCommandExecutor;
+
+impl CommandExecutor for SystemCommandExecutor {
+    /// Spawn and monitor the command described by `spec`.
+    fn execute(&self, spec: &ExecSpec) -> Result<ExecOutcome, RunError> {
+        let mut command = if spec.use_shell {
+            let joined = join_shell_tokens(&spec.cmd);
+            if cfg!(windows) {
+                let mut c = Command::new("cmd");
+                c.args(["/C", &joined]);
+                c
+            } else {
+                let mut c = Command::new("sh");
+                c.args(["-c", &joined]);
+                c
+            }
+        } else {
+            let mut c = Command::new(&spec.cmd[0]);
+            c.args(&spec.cmd[1..]);
+            c
+        };
+
+        command.env_clear().envs(&spec.env);
+
+        let mut stdin_bytes_to_pipe: Option<Vec<u8>> = None;
+        if !spec.compiling
+            && let Some(ref stdin_path) = spec.stdin_path
+        {
+            if stdin_path == "-" {
+                if let Some(ref buf) = spec.buffered_stdin {
+                    command.stdin(Stdio::piped());
+                    stdin_bytes_to_pipe = Some(buf.clone());
+                }
+            } else {
+                let p = Path::new(stdin_path);
+                if p.is_dir() {
+                    let msg = format!("Failed to open stdin file '{stdin_path}': Is a directory");
+                    return Err(RunError::execution(msg));
+                }
+                match File::open(p) {
+                    Ok(file) => {
+                        command.stdin(Stdio::from(file));
+                    }
+                    Err(err) => {
+                        let msg = format!("Failed to open stdin file '{stdin_path}': {err}");
+                        return Err(RunError::execution(msg));
+                    }
+                }
+            }
+        }
+
+        if spec.capture_stdout {
+            command.stdout(Stdio::piped());
+        } else if spec.quiet && spec.compiling {
+            command.stdout(Stdio::null());
+        } else {
+            command.stdout(Stdio::inherit());
+        }
+
+        if spec.quiet && spec.compiling {
+            command.stderr(Stdio::null());
+        } else {
+            command.stderr(Stdio::inherit());
+        }
+
+        let start = Instant::now();
+
+        // Interactive debuggers need direct foreground TTY control (no isolated process_group).
+        if spec.is_debug && !spec.capture_stdout && !spec.track_memory && spec.timeout_secs.is_none()
+        {
+            let status = command.status().map_err(|err| {
+                if err.kind() == ErrorKind::NotFound {
+                    RunError::execution(format!("Command '{}' not found.", spec.cmd[0]))
+                } else {
+                    RunError::Io(err)
+                }
+            })?;
+            let elapsed_secs = start.elapsed().as_secs_f64();
+            if !status.success() {
+                let code = exit_code_or_signal(status);
+                return Err(if spec.compiling {
+                    RunError::compilation(format!("Compilation failed with exit code {code}"))
+                } else {
+                    RunError::execution(format!("Execution failed with exit code {code}"))
+                });
+            }
+            return Ok(ExecOutcome {
+                captured_stdout: String::new(),
+                elapsed_secs,
+                memory_bytes: None,
+            });
+        }
+
+        let mut child = MonitoredChild::spawn(&mut command).map_err(|err| match err {
+            RunError::Io(io_err) if io_err.kind() == ErrorKind::NotFound => {
+                RunError::execution(format!("Command '{}' not found.", spec.cmd[0]))
+            }
+            other => other,
+        })?;
+
+        let stdin_writer = if let Some(bytes) = stdin_bytes_to_pipe {
+            child.take_stdin().map(|mut pipe| {
+                thread::spawn(move || {
+                    let _ = pipe.write_all(&bytes);
+                    drop(pipe);
+                })
+            })
+        } else {
+            None
+        };
+
+        let timeout_dur = spec
+            .timeout_secs
+            .map(|secs| Duration::from_secs_f64(secs.max(0.0)));
+        let kill_info = spec.active_container.as_ref();
+        let on_timeout_cb = || {
+            if let Some((eng, cname)) = kill_info {
+                ContainerSandbox::kill_container(eng, cname);
+            }
+        };
+
+        let output = child.wait_with_timeout(
+            timeout_dur,
+            kill_info.map(|_| &on_timeout_cb as &dyn Fn()),
+        )?;
+
+        if let Some(writer_handle) = stdin_writer {
+            let _ = writer_handle.join();
+        }
+
+        let elapsed_secs = start.elapsed().as_secs_f64();
+
+        if output.timed_out {
+            let t_disp = spec.timeout_secs.unwrap_or(0.0);
+            return Err(if spec.compiling {
+                RunError::compilation(format!("Compilation timed out after {t_disp} seconds."))
+            } else {
+                RunError::execution(format!("Execution timed out after {t_disp} seconds."))
+            });
+        }
+
+        let captured_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        if !output.status.success() {
+            let code = exit_code_or_signal(output.status);
+            return Err(if spec.compiling {
+                RunError::compilation(format!("Compilation failed with exit code {code}"))
+            } else {
+                RunError::execution(format!("Execution failed with exit code {code}"))
+            });
+        }
+
+        Ok(ExecOutcome {
+            captured_stdout,
+            elapsed_secs,
+            memory_bytes: output.peak_memory_bytes,
+        })
+    }
+}
 
 /// Internal execution result produced by [`BaseRunner::execute_inner`].
 struct RawExecResult {
@@ -75,6 +284,8 @@ pub struct BaseRunner {
     pub printer: Printer,
     /// Stdin bytes buffered when `-i` / `-i -` reads from a non-TTY pipe.
     buffered_stdin: Option<Vec<u8>>,
+    /// Subprocess execution backend (defaults to [`SystemCommandExecutor`]).
+    executor: Arc<dyn CommandExecutor>,
 }
 
 /// Canonicalize `path` by resolving its longest existing ancestor and appending remaining
@@ -256,7 +467,13 @@ impl BaseRunner {
             sandbox_config: config.get_sandbox_config().clone(),
             printer,
             buffered_stdin,
+            executor: Arc::new(SystemCommandExecutor),
         })
+    }
+
+    /// Replace the subprocess [`CommandExecutor`] backend (primarily for white-box mocking).
+    pub fn set_executor(&mut self, executor: Arc<dyn CommandExecutor>) {
+        self.executor = executor;
     }
 
     /// Replace the buffered stdin bytes (used by the batch testcase runner).
@@ -480,157 +697,33 @@ impl BaseRunner {
         let is_debug = self.options.debug || self.options.gdb || self.options.lldb;
         let timeout_secs = if is_debug { None } else { self.options.timeout };
 
-        let mut command = if use_shell {
-            let joined = join_shell_tokens(&target_cmd);
-            if cfg!(windows) {
-                let mut c = Command::new("cmd");
-                c.args(["/C", &joined]);
-                c
-            } else {
-                let mut c = Command::new("sh");
-                c.args(["-c", &joined]);
-                c
-            }
-        } else {
-            let mut c = Command::new(&target_cmd[0]);
-            c.args(&target_cmd[1..]);
-            c
+        let spec = ExecSpec {
+            cmd: target_cmd,
+            use_shell,
+            compiling,
+            capture_stdout,
+            is_debug,
+            env: sanitized_env,
+            stdin_path: self.options.stdin.clone(),
+            buffered_stdin: self.buffered_stdin.clone(),
+            timeout_secs,
+            active_container,
+            quiet: self.options.quiet,
+            track_memory: self.options.memory,
         };
 
-        command.env_clear().envs(&sanitized_env);
-
-        let mut stdin_bytes_to_pipe: Option<Vec<u8>> = None;
-        if !compiling && let Some(ref stdin_path) = self.options.stdin {
-            if stdin_path == "-" {
-                if let Some(ref buf) = self.buffered_stdin {
-                    command.stdin(Stdio::piped());
-                    stdin_bytes_to_pipe = Some(buf.clone());
-                }
-            } else {
-                let p = Path::new(stdin_path);
-                if p.is_dir() {
-                    let msg = format!("Failed to open stdin file '{stdin_path}': Is a directory");
-                    self.printer.error(&msg);
-                    return Err(RunError::execution(msg));
-                }
-                match File::open(p) {
-                    Ok(file) => {
-                        command.stdin(Stdio::from(file));
-                    }
-                    Err(err) => {
-                        let msg = format!("Failed to open stdin file '{stdin_path}': {err}");
-                        self.printer.error(&msg);
-                        return Err(RunError::execution(msg));
-                    }
-                }
+        let outcome = self.executor.execute(&spec).inspect_err(|err| {
+            if let RunError::Execution(msg) = err
+                && msg.starts_with("Failed to open stdin file ")
+            {
+                self.printer.error(msg);
             }
-        }
-
-        if capture_stdout {
-            command.stdout(Stdio::piped());
-        } else if self.options.quiet && compiling {
-            command.stdout(Stdio::null());
-        } else {
-            command.stdout(Stdio::inherit());
-        }
-
-        if self.options.quiet && compiling {
-            command.stderr(Stdio::null());
-        } else {
-            command.stderr(Stdio::inherit());
-        }
-
-        let start = Instant::now();
-
-        // Interactive debuggers need direct foreground TTY control (no isolated process_group).
-        if is_debug && !capture_stdout && !self.options.memory && timeout_secs.is_none() {
-            let status = command.status().map_err(|err| {
-                if err.kind() == ErrorKind::NotFound {
-                    RunError::execution(format!("Command '{}' not found.", target_cmd[0]))
-                } else {
-                    RunError::Io(err)
-                }
-            })?;
-            let elapsed_secs = start.elapsed().as_secs_f64();
-            if !status.success() {
-                let code = exit_code_or_signal(status);
-                return Err(if compiling {
-                    RunError::compilation(format!("Compilation failed with exit code {code}"))
-                } else {
-                    RunError::execution(format!("Execution failed with exit code {code}"))
-                });
-            }
-            return Ok(RawExecResult {
-                captured_stdout: String::new(),
-                elapsed_secs,
-                memory_bytes: None,
-                dry_run: false,
-            });
-        }
-
-        let mut child = MonitoredChild::spawn(&mut command).map_err(|err| match err {
-            RunError::Io(io_err) if io_err.kind() == ErrorKind::NotFound => {
-                RunError::execution(format!("Command '{}' not found.", target_cmd[0]))
-            }
-            other => other,
         })?;
 
-        let stdin_writer = if let Some(bytes) = stdin_bytes_to_pipe {
-            child.take_stdin().map(|mut pipe| {
-                thread::spawn(move || {
-                    let _ = pipe.write_all(&bytes);
-                    drop(pipe);
-                })
-            })
-        } else {
-            None
-        };
-
-        let timeout_dur = timeout_secs.map(|secs| Duration::from_secs_f64(secs.max(0.0)));
-        let kill_info = active_container.as_ref();
-        let on_timeout_cb = || {
-            if let Some((eng, cname)) = kill_info {
-                ContainerSandbox::kill_container(eng, cname);
-            }
-        };
-
-        let output = child.wait_with_timeout(
-            timeout_dur,
-            kill_info.map(|_| &on_timeout_cb as &dyn Fn()),
-        )?;
-
-        if let Some(writer_handle) = stdin_writer {
-            let _ = writer_handle.join();
-        }
-
-        let elapsed_secs = start.elapsed().as_secs_f64();
-
-        if output.timed_out {
-            let t_disp = timeout_secs.unwrap_or(0.0);
-            return Err(if compiling {
-                RunError::compilation(format!("Compilation timed out after {t_disp} seconds."))
-            } else {
-                RunError::execution(format!("Execution timed out after {t_disp} seconds."))
-            });
-        }
-
-        let captured_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        if !output.status.success() {
-            // Preserve stdout/stderr visibility even if exit fails during --expect capture?
-            // Note: --expect checks captured stdout only when exit code is 0 or after printing.
-            // Wait: if command failed, raise CompilationError/ExecutionError matching Python.
-            let code = exit_code_or_signal(output.status);
-            return Err(if compiling {
-                RunError::compilation(format!("Compilation failed with exit code {code}"))
-            } else {
-                RunError::execution(format!("Execution failed with exit code {code}"))
-            });
-        }
-
         Ok(RawExecResult {
-            captured_stdout,
-            elapsed_secs,
-            memory_bytes: output.peak_memory_bytes,
+            captured_stdout: outcome.captured_stdout,
+            elapsed_secs: outcome.elapsed_secs,
+            memory_bytes: outcome.memory_bytes,
             dry_run: false,
         })
     }

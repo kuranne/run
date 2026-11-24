@@ -16,7 +16,7 @@ pub mod rust_handler;
 pub mod script_handler;
 pub mod test_runner;
 
-pub use base::BaseRunner;
+pub use base::{BaseRunner, CommandExecutor, ExecOutcome, ExecSpec, SystemCommandExecutor};
 pub use core::CompilerRunner;
 pub use handler::{ExecutionContext, HandlerRegistry, LanguageHandler, RunnerOptions};
 pub use project::{split_compound_command, ProjectRunner, TaskRunner};

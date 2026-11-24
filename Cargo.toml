@@ -36,6 +36,9 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_Shell",
 ] }
 
+[dev-dependencies]
+mockall = "0.13"
+
 [package.metadata.run]
 config_dir_name = "run"
 cache_dir_name = "run"
