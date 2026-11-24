@@ -731,3 +731,108 @@ fn real_main() -> i32 {
 fn main() {
     std::process::exit(real_main());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use run::runner::RunnerOptions;
+    use run::util::output::Colors;
+    use std::time::UNIX_EPOCH;
+
+    fn make_temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir = std::env::temp_dir().join(format!(
+            "run_main_wb_{label}_{}_{}",
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn test_apply_sandbox_overrides() {
+        let mut sb = SandboxConfig::default();
+        let cli = CliArgs {
+            sandbox_image: Some("alpine:3.20".to_string()),
+            sandbox_dockerfile: Some("Dockerfile.dev".to_string()),
+            sandbox_compose: Some("compose.yml".to_string()),
+            sandbox_service: Some("worker".to_string()),
+            ..CliArgs::default()
+        };
+        apply_sandbox_overrides(&mut sb, &cli);
+        assert_eq!(sb.image.as_deref(), Some("alpine:3.20"));
+        assert_eq!(sb.dockerfile.as_deref(), Some("Dockerfile.dev"));
+        assert_eq!(sb.compose.as_deref(), Some("compose.yml"));
+        assert_eq!(sb.compose_service.as_deref(), Some("worker"));
+    }
+
+    #[test]
+    fn test_collect_mtimes_tracks_c_headers_and_run_toml_only() {
+        let dir = make_temp_dir("mtimes");
+        let main_c = dir.join("main.c");
+        let hdr_h = dir.join("util.h");
+        let notes_txt = dir.join("notes.txt");
+        let run_toml = dir.join("Run.toml");
+        fs::write(&main_c, "int main(void) { return 0; }\n").unwrap();
+        fs::write(&hdr_h, "#define X 1\n").unwrap();
+        fs::write(&notes_txt, "ignore\n").unwrap();
+        fs::write(&run_toml, "[core]\n").unwrap();
+
+        let tracked = collect_mtimes(std::slice::from_ref(&main_c), &dir);
+        assert!(tracked.contains_key(&main_c));
+        assert!(tracked.contains_key(&hdr_h));
+        assert!(tracked.contains_key(&run_toml));
+        assert!(!tracked.contains_key(&notes_txt));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_is_existing_runnable_target_and_has_multi_compilable() {
+        let dir = make_temp_dir("targets");
+        let sub = dir.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let src_c = dir.join("a.c");
+        let src_py = dir.join("b.py");
+        let shebang_tool = dir.join("mytool");
+        let plain_txt = dir.join("data.txt");
+        fs::write(&src_c, "int main(void){return 0;}\n").unwrap();
+        fs::write(&src_py, "print(1)\n").unwrap();
+        fs::write(&shebang_tool, "#!/usr/bin/env run\nint main(void){return 0;}\n").unwrap();
+        fs::write(&plain_txt, "not runnable\n").unwrap();
+
+        let printer = Printer::with_colors(Verbosity::Quiet, Colors::new(false));
+        let runner = CompilerRunner::with_cache_base(
+            RunnerOptions::default(),
+            None,
+            None,
+            Config::default(),
+            printer,
+            &dir,
+            &dir.join("cache"),
+        )
+        .expect("runner");
+
+        assert!(is_existing_runnable_target(&sub.to_string_lossy(), &runner));
+        assert!(is_existing_runnable_target(&src_c.to_string_lossy(), &runner));
+        assert!(is_existing_runnable_target(&src_py.to_string_lossy(), &runner));
+        assert!(is_existing_runnable_target(
+            &shebang_tool.to_string_lossy(),
+            &runner
+        ));
+        assert!(!is_existing_runnable_target(
+            &plain_txt.to_string_lossy(),
+            &runner
+        ));
+        assert!(!is_existing_runnable_target("nonexistent_arg", &runner));
+
+        let cfg = Config::default();
+        assert!(has_multi_compilable(&[src_c.clone(), src_py.clone()], &cfg));
+        assert!(!has_multi_compilable(std::slice::from_ref(&src_py), &cfg));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
