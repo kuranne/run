@@ -1,18 +1,15 @@
-import pytest
-from util.doctor import Doctor
+"""Black-box CLI --doctor diagnostics tests."""
 
-def test_doctor_check_binary():
-    python_info = Doctor.check_binary("python3", "--version")
-    assert python_info is not None
-    assert "Python" in python_info
+from __future__ import annotations
 
-    missing = Doctor.check_binary("definitely_nonexistent_binary_xyz123")
-    assert missing is None
+from typing import Callable
 
-def test_doctor_diagnose(capsys):
-    ret = Doctor.diagnose()
-    assert ret == 0
-    out = capsys.readouterr().out
-    assert "System Toolchain Diagnostics" in out
-    assert "Python:" in out
-    assert "C / C++:" in out
+from conftest import combined_output, strip_ansi
+
+
+def test_doctor_reports_host_toolchains(run_cli: Callable[..., object]) -> None:
+    res = run_cli(["--doctor", "--no-color"])
+    assert res.returncode == 0, combined_output(res)
+    out = strip_ansi(res.stdout)
+    assert "[ OK ]" in out
+    assert "python" in out.lower() or "gcc" in out.lower()

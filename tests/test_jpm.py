@@ -1,63 +1,44 @@
-import pytest
+"""Black-box CLI Java single/multi-file dry-run, hyphenated class rejection, and execution tests."""
+
+from __future__ import annotations
+
 from pathlib import Path
-from runner.jpm import JPM
+from typing import Callable
 
-def test_get_main_class(tmp_path):
-    java_file = tmp_path / "Main.java"
-    java_file.write_text("public class Main {}")
-    
-    assert JPM.get_main_class(java_file) == "Main"
+from conftest import combined_output, require_optional_tool, strip_ansi
 
-def test_record_and_get_new_class_files(tmp_path):
-    # Setup some dummy class files
-    class1 = tmp_path / "First.class"
-    class1.write_text("dummy")
-    
-    directories = {tmp_path}
-    
-    # Record state
-    state = JPM.record_class_files(directories)
-    assert class1 in state
-    
-    # Create new class file
-    class2 = tmp_path / "Second.class"
-    class2.write_text("dummy2")
-    
-    # Get new class files
-    new_files = JPM.get_new_class_files(directories, state)
-    
-    assert class1 not in new_files
-    assert class2 in new_files
 
-def test_get_main_file_java(tmp_path):
-    helper = tmp_path / "Helper.java"
-    helper.write_text("public class Helper { public void run() {} }")
+def test_java_dry_run_and_hyphenated_main_rejected(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "Hello.java").write_text(
+        'public class Hello { public static void main(String[] args) { System.out.println("HI"); } }\n',
+        encoding="utf-8",
+    )
+    res = run_cli(["--dry-run", "Hello.java"])
+    assert res.returncode == 0, combined_output(res)
+    out = strip_ansi(res.stdout)
+    assert "javac" in out
+    assert "java -cp" in out
 
-    app = tmp_path / "App.java"
-    app.write_text("""
-    public class App {
-        public static void main(String[] args) {
-            System.out.println("Hello");
-        }
-    }
-    """)
+    (work_dir / "-Bad.java").write_text(
+        'class Bad { public static void main(String[] args) {} }\n',
+        encoding="utf-8",
+    )
+    bad_res = run_cli(["--dry-run", "./-Bad.java"])
+    assert bad_res.returncode == 1
+    assert "Invalid main class name: -Bad" in strip_ansi(combined_output(bad_res))
 
-    assert JPM.get_main_file([helper, app]) == app
-    assert JPM.get_main_file([app, helper]) == app
 
-def test_get_main_file_varargs_and_comments(tmp_path):
-    app = tmp_path / "App.java"
-    app.write_text("""
-    /* public static void main(String[] args) {} */
-    // public static void main(String[] args) {}
-    public class App {
-        public static void main(String... args) {
-        }
-    }
-    """)
-    assert JPM.get_main_file([app]) == app
-
-def test_get_main_file_none(tmp_path):
-    helper = tmp_path / "Helper.java"
-    helper.write_text("public class Helper {}")
-    assert JPM.get_main_file([helper]) is None
+def test_java_execution_when_jdk_installed(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    require_optional_tool("javac")
+    require_optional_tool("java")
+    (work_dir / "Hello.java").write_text(
+        'public class Hello { public static void main(String[] args) { System.out.println("JAVA_OK"); } }\n',
+        encoding="utf-8",
+    )
+    res = run_cli(["Hello.java"])
+    assert res.returncode == 0, combined_output(res)
+    assert "JAVA_OK" in res.stdout

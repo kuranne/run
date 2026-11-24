@@ -1,80 +1,51 @@
-import pytest
-from util.completion import CompletionGenerator
+"""Black-box CLI shell completion and --_complete dynamic query tests."""
 
-class MockConfig:
-    def __init__(self, data=None):
-        self.data = data or {}
+from __future__ import annotations
 
-def test_generate_completion_scripts():
-    # Zsh
-    zsh_script = CompletionGenerator.generate("zsh")
-    assert zsh_script is not None
-    assert "#compdef run" in zsh_script
-    assert "compdef _run run" in zsh_script
-    assert "_run_presets" in zsh_script
-    assert "_run_tasks" in zsh_script
-    assert "--build-only" in zsh_script
+from pathlib import Path
+from typing import Callable
 
-    # Bash
-    bash_script = CompletionGenerator.generate("bash")
-    assert bash_script is not None
-    assert "complete -F _run_complete run" in bash_script
-    assert "--preset" in bash_script
+from conftest import combined_output, strip_ansi
 
-    # Fish
-    fish_script = CompletionGenerator.generate("fish")
-    assert fish_script is not None
-    assert "complete -c run" in fish_script
-    assert "__fish_run_presets" in fish_script
 
-    # PowerShell
-    ps_script = CompletionGenerator.generate("powershell")
-    assert ps_script is not None
-    assert "Register-ArgumentCompleter" in ps_script
+def test_completion_scripts_and_install_instructions(
+    run_cli: Callable[..., object]
+) -> None:
+    for shell in ("bash", "zsh", "fish", "powershell", "pwsh"):
+        res = run_cli(["--completion", shell])
+        assert res.returncode == 0, combined_output(res)
+        assert len(res.stdout.strip()) > 20
 
-    pwsh_script = CompletionGenerator.generate("pwsh")
-    assert pwsh_script == ps_script
+    auto_res = run_cli(["--completion"])
+    assert auto_res.returncode == 0, combined_output(auto_res)
+    assert "bash" in auto_res.stdout.lower()
 
-    # Invalid shell
-    assert CompletionGenerator.generate("unknown_shell") is None
+    bad = run_cli(["--completion", "invalid_shell"])
+    assert bad.returncode == 1
+    assert "[ ERROR ] Unsupported shell" in strip_ansi(combined_output(bad))
 
-def test_handle_internal_complete():
-    cfg = MockConfig({
-        "presets": {
-            "debug": {"flags": "-g"},
-            "release": {"flags": "-O3"}
-        },
-        "tasks": {
-            "test": "pytest tests/",
-            "build": "cargo build"
-        },
-        "templates": {
-            "leetcode_rs": {"description": "Leetcode template"}
-        }
-    })
 
-    # Presets
-    presets = CompletionGenerator.handle_internal_complete("presets", cfg)
-    assert "debug" in presets
-    assert "release" in presets
+def test_internal_complete_queries(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "Run.toml").write_text(
+        "[tasks]\n"
+        'lint = "echo lint"\n'
+        "[presets.fast]\n"
+        'c = ["-O3"]\n'
+        "[templates.my_tpl]\n"
+        'content = "print(1)\\n"\n',
+        encoding="utf-8",
+    )
 
-    # Tasks
-    tasks = CompletionGenerator.handle_internal_complete("tasks", cfg)
-    assert "test" in tasks
-    assert "build" in tasks
+    r_tasks = run_cli(["--_complete", "tasks"])
+    assert r_tasks.returncode == 0
+    assert "lint" in r_tasks.stdout
 
-    # Templates
-    templates = CompletionGenerator.handle_internal_complete("templates", cfg)
-    assert "leetcode_rs" in templates
-    assert "cpp" in templates
-    assert "py" in templates
-    assert "rs" in templates
+    r_presets = run_cli(["--_complete", "presets"])
+    assert r_presets.returncode == 0
+    assert "fast" in r_presets.stdout
 
-def test_get_install_instructions():
-    guide = CompletionGenerator.get_install_instructions()
-    assert "Shell Autocompletion Setup" in guide
-    assert "Zsh:" in guide
-    assert "_evalcache" in guide
-    assert "Bash:" in guide
-    assert "Fish:" in guide
-    assert "PowerShell:" in guide
+    r_tpls = run_cli(["--_complete", "templates"])
+    assert r_tpls.returncode == 0
+    assert "my_tpl" in r_tpls.stdout

@@ -1,106 +1,52 @@
-import pytest
+"""Black-box CLI Run.toml config loading, XDG fallback, presets, and dropped alias checks."""
+
+from __future__ import annotations
+
 from pathlib import Path
-from util.config import Config
+from typing import Any, Callable
 
-@pytest.fixture
-def mock_toml(tmp_path, monkeypatch):
-    config_content = """
-    [core]
-    exclude_files = ["test.py"]
-    
-    [runners]
-    c = "my_clang"
-    
-    [presets.debug]
-    c = ["-g"]
-    
-    [[languages]]
-    name = "custom"
-    extensions = [".custom"]
-    runner = "custom_run"
-    type = "interpreter"
-    """
-    config_file = tmp_path / "Run.toml"
-    config_file.write_text(config_content)
-    
-    # Mock Path.cwd() to return tmp_path so Config picks it up
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    return config_file
+import pytest
 
-def test_config_load(mock_toml):
-    config = Config()
-    assert config.get_runner("c", "clang") == "my_clang"
-    assert config.get_runner("cpp", "clang++") == "clang++"
-    
-def test_preset_flags(mock_toml):
-    config = Config()
-    assert config.get_preset_flags("debug", "c") == ["-g"]
-    assert config.get_preset_flags("release", "c") == []
-    
-def test_get_custom_languages(mock_toml):
-    config = Config()
-    langs = config.get_custom_languages()
-    assert "custom" in langs
-    assert langs["custom"]["extensions"] == [".custom"]
-    assert config.is_custom_language_configured(".custom")
-    assert not config.is_custom_language_configured(".unknown")
-
-def test_sandbox_config_validation_valid(tmp_path, monkeypatch):
-    df = tmp_path / "Dockerfile"
-    df.write_text("FROM alpine\n")
-    compose = tmp_path / "docker-compose.yml"
-    compose.write_text("version: '3'\n")
-
-    toml = tmp_path / "Run.toml"
-    toml.write_text(f"""
-    [sandbox]
-    image = "gcc:latest"
-    dockerfile = "{df}"
-    compose = "{compose}"
-    compose_service = "app"
-    sandbox_net = true
-    restrict = false
-    """)
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    assert config.get_sandbox_config()["image"] == "gcc:latest"
-
-def test_sandbox_config_validation_invalid_image(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [sandbox]
-    image = "--privileged"
-    """)
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    with pytest.raises(ValueError, match="Invalid sandbox image name"):
-        Config()
-
-def test_sandbox_config_validation_missing_dockerfile(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [sandbox]
-    dockerfile = "nonexistent_dockerfile"
-    """)
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    with pytest.raises(ValueError, match="sandbox Dockerfile '.*' not found"):
-        Config()
-
-def test_config_upward_traversal_stops_at_git_root(tmp_path):
-    outside_toml = tmp_path / "Run.toml"
-    outside_toml.write_text("""
-    [core]
-    exclude_files = ["malicious_exclude"]
-    """)
-
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    (repo_dir / ".git").mkdir()
-
-    sub_dir = repo_dir / "sub"
-    sub_dir.mkdir()
-
-    config = Config(start_dir=sub_dir)
-    assert config.get_exclude()["files"] != ["malicious_exclude"]
-    assert config.data == {}
+from conftest import combined_output, strip_ansi
 
 
+def test_config_global_xdg_fallback_and_presets(
+    work_dir: Path, isolated_env: dict[str, Any], run_cli: Callable[..., object]
+) -> None:
+    global_dir = isolated_env["xdg_config"] / "run"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "Run.toml").write_text(
+        "[presets.release_fast]\n"
+        'c = ["-DGLOBAL_VAL=77"]\n',
+        encoding="utf-8",
+    )
+    (work_dir / "main.c").write_text(
+        '#include <stdio.h>\nint main(void) { printf("GV=%d\\n", GLOBAL_VAL); return 0; }\n',
+        encoding="utf-8",
+    )
+
+    res = run_cli(["-p", "release_fast", "main.c"])
+    assert res.returncode == 0, combined_output(res)
+    assert "GV=77" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "deprecated_section",
+    [
+        "[runner]\nc = \"gcc\"\n",
+        "[preset.fast]\nc = [\"-O2\"]\n",
+        "[[language]]\nname = \"x\"\nextensions = [\".x\"]\ncommand = \"echo {file}\"\n",
+        "[exclude]\nfiles = [\"skip.c\"]\n",
+    ],
+)
+def test_config_rejects_deprecated_aliases(
+    work_dir: Path,
+    run_cli: Callable[..., object],
+    deprecated_section: str,
+) -> None:
+    (work_dir / "Run.toml").write_text(deprecated_section, encoding="utf-8")
+    (work_dir / "a.py").write_text("print(1)\n", encoding="utf-8")
+
+    res = run_cli(["a.py"])
+    assert res.returncode == 1
+    assert "[ ERROR ]" in strip_ansi(combined_output(res))

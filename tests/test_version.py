@@ -1,19 +1,22 @@
-import pytest
+"""Black-box CLI version tests verifying Cargo.toml metadata version reporting."""
+
+from __future__ import annotations
+
+import tomllib
 from pathlib import Path
-from util.version import version
+from typing import Callable
 
-def test_version_from_file(tmp_path):
-    pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_bytes(b"""
-    [project]
-    name = "run"
-    version = "1.2.3"
-    """)
+from conftest import REPO_ROOT, combined_output
 
-    ver = version(file_path=pyproject)
-    assert ver == "1.2.3"
 
-def test_version_missing_file(tmp_path):
-    missing_file = tmp_path / "non_existent.toml"
-    ver = version(file_path=missing_file)
-    assert ver is None or isinstance(ver, str)
+def _cargo_version() -> str:
+    data = tomllib.loads((REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+    return str(data["package"]["version"])
+
+
+def test_version_long_and_short_flags(run_cli: Callable[..., object]) -> None:
+    expected = _cargo_version()
+    for flag in ("--version", "-V"):
+        res = run_cli([flag])
+        assert res.returncode == 0, combined_output(res)
+        assert expected in combined_output(res)

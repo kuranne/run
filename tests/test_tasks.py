@@ -1,101 +1,43 @@
-import pytest
+"""Black-box CLI [tasks] execution, compound operators, and argument forwarding tests."""
+
+from __future__ import annotations
+
 from pathlib import Path
-from runner.project_runner import TaskRunner
-from util.config import Config
-from util.errors import ConfigError
+from typing import Callable
 
-class DummyRunner:
-    def __init__(self):
-        self.executed = []
+from conftest import combined_output, strip_ansi
 
-    def run_command(self, cmd, use_shell=False, compiling=False):
-        self.executed.append((cmd, use_shell, compiling))
-        return True
 
-def test_is_task(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [tasks]
-    test = "pytest tests/"
-    build = "cargo build"
-    """)
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
+def test_tasks_simple_compound_and_quoted_operators(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "Run.toml").write_text(
+        "[tasks]\n"
+        'echo_args = "python3 -c \\"import sys; print(\'ARGS:\' + \'|\'.join(sys.argv[1:]))\\""\n'
+        'chain_ok = "python3 -c \\"print(\'STEP1\')\\" && python3 -c \\"print(\'STEP2\')\\""\n'
+        'chain_fail = "python3 -c \\"import sys; sys.exit(1)\\" && python3 -c \\"print(\'SKIPPED_STEP\')\\""\n'
+        'semi_ok = "python3 -c \\"print(\'SEMI1\')\\" ; python3 -c \\"print(\'SEMI2\')\\""\n'
+        "quoted = \"python3 -c \\\"import sys; print('Q:' + sys.argv[1])\\\" 'a && b ; c'\"\n",
+        encoding="utf-8",
+    )
 
-    assert TaskRunner.is_task("test", config) is True
-    assert TaskRunner.is_task("build", config) is True
-    assert TaskRunner.is_task("nonexistent", config) is False
+    r_args = run_cli(["echo_args", "one", "two"])
+    assert r_args.returncode == 0, combined_output(r_args)
+    assert "ARGS:one|two" in r_args.stdout
 
-def test_run_task_simple(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [tasks]
-    test = "pytest tests/"
-    """)
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    runner = DummyRunner()
+    r_ok = run_cli(["chain_ok"])
+    assert r_ok.returncode == 0, combined_output(r_ok)
+    assert r_ok.stdout.index("STEP1") < r_ok.stdout.index("STEP2")
 
-    TaskRunner.run_task("test", config, ["-k", "test_cache"], runner)
-    assert len(runner.executed) == 1
-    cmd, use_shell, compiling = runner.executed[0]
-    assert cmd == ["pytest", "tests/", "-k", "test_cache"]
-    assert use_shell is False
+    r_fail = run_cli(["chain_fail"])
+    assert r_fail.returncode == 1
+    non_task = [l for l in strip_ansi(combined_output(r_fail)).splitlines() if "[ TASK ]" not in l]
+    assert all("SKIPPED_STEP" not in l for l in non_task)
 
-def test_run_task_with_shell_operator(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [tasks]
-    build = "mkdir -p build && cmake -B build"
-    """)
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    runner = DummyRunner()
+    r_semi = run_cli(["semi_ok"])
+    assert r_semi.returncode == 0, combined_output(r_semi)
+    assert r_semi.stdout.index("SEMI1") < r_semi.stdout.index("SEMI2")
 
-    TaskRunner.run_task("build", config, ["--extra"], runner)
-    assert len(runner.executed) == 2
-    cmd1, use_shell1, compiling1 = runner.executed[0]
-    assert use_shell1 is False
-    assert cmd1 == ["mkdir", "-p", "build"]
-    cmd2, use_shell2, compiling2 = runner.executed[1]
-    assert use_shell2 is False
-    assert cmd2 == ["cmake", "-B", "build", "--extra"]
-
-def test_run_task_compound_command_with_quotes(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [tasks]
-    greet = "echo 'hello && world' && echo done"
-    """)
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    runner = DummyRunner()
-
-    TaskRunner.run_task("greet", config, [], runner)
-    assert len(runner.executed) == 2
-    assert runner.executed[0][0] == ["echo", "hello && world"]
-    assert runner.executed[1][0] == ["echo", "done"]
-
-def test_run_task_compound_command_semicolon(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [tasks]
-    seq = "echo step1 ; echo step2 && echo step3"
-    """)
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    runner = DummyRunner()
-
-    TaskRunner.run_task("seq", config, ["arg"], runner)
-    assert len(runner.executed) == 3
-    assert runner.executed[0][0] == ["echo", "step1"]
-    assert runner.executed[1][0] == ["echo", "step2"]
-    assert runner.executed[2][0] == ["echo", "step3", "arg"]
-
-def test_run_task_missing(tmp_path, monkeypatch):
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    runner = DummyRunner()
-
-    with pytest.raises(ConfigError, match="Task 'missing' not found"):
-        TaskRunner.run_task("missing", config, [], runner)
+    r_q = run_cli(["quoted"])
+    assert r_q.returncode == 0, combined_output(r_q)
+    assert "Q:a && b ; c" in r_q.stdout

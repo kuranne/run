@@ -1,290 +1,78 @@
-import pytest
-import sys
-from util.args import args
+"""Black-box CLI argument parsing and preprocessing tests."""
 
-def test_args_basic(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-m', '-p', 'debug', '-t'])
-    parsed = args("1.0.0")
-    assert parsed.files == ['main.c']
-    assert parsed.multi == True
-    assert parsed.preset == 'debug'
-    assert parsed.time == True
+from __future__ import annotations
 
-def test_args_flags_parsing(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--flags=-Wall'])
-    parsed = args("1.0.0")
-    assert parsed.flags == '-Wall'
-    
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--flags', '-O3'])
-    parsed = args("1.0.0")
-    assert parsed.flags == '-O3'
+from pathlib import Path
+from typing import Callable
 
-def test_args_argument_parsing(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '--argument', '--debug'])
-    parsed = args("1.0.0")
-    assert parsed.argument == '--debug'
-
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '--argument=--port=8080'])
-    parsed = args("1.0.0")
-    assert parsed.argument == '--port=8080'
-
-def test_args_force_flag(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-f'])
-    parsed = args("1.0.0")
-    assert parsed.force is True
-
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--force'])
-    parsed = args("1.0.0")
-    assert parsed.force is True
-
-def test_args_link_auto(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', '--link-auto'])
-    parsed = args("1.0.0")
-    assert parsed.link_auto == -1
-    
-    monkeypatch.setattr(sys, 'argv', ['run', '--link-auto', '2'])
-    parsed = args("1.0.0")
-    assert parsed.link_auto == 2
-
-    monkeypatch.setattr(sys, 'argv', ['run', '-L'])
-    parsed = args("1.0.0")
-    assert parsed.link_auto == -1
-
-    monkeypatch.setattr(sys, 'argv', ['run', '-L', '3'])
-    parsed = args("1.0.0")
-    assert parsed.link_auto == 3
-
-def test_args_verbose(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', '-v'])
-    parsed = args("1.0.0")
-    assert parsed.verbose == 1
-    
-    monkeypatch.setattr(sys, 'argv', ['run', '-vv'])
-    parsed = args("1.0.0")
-    assert parsed.verbose == 2
-
-def test_args_posix_double_dash_forwarding(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '--', '-v', '--port', '8080'])
-    parsed = args("1.0.0")
-    assert parsed.files == ['main.py']
-    assert parsed.argument == '-v --port 8080'
-
-def test_args_posix_double_dash_merge_with_flag(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '--argument', 'initial', '--', 'extra1', 'extra2'])
-    parsed = args("1.0.0")
-    assert parsed.files == ['main.py']
-    assert parsed.argument == 'initial extra1 extra2'
-
-def test_args_jobs_flag(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-j', '8'])
-    parsed = args("1.0.0")
-    assert parsed.jobs == 8
-
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--jobs', '4'])
-    parsed = args("1.0.0")
-    assert parsed.jobs == 4
-
-def test_args_directory_flag(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--directory', 'src/'])
-    parsed = args("1.0.0")
-    assert parsed.directory == 'src/'
-
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--cwd', 'src/'])
-    parsed = args("1.0.0")
-    assert parsed.directory == 'src/'
-
-def test_args_clean_flag(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', '--clean'])
-    parsed = args("1.0.0")
-    assert parsed.clean is True
-
-def test_args_out_dir(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--out-dir', 'bin/'])
-    parsed = args("1.0.0")
-    assert parsed.out_dir == 'bin/'
-
-def test_args_memory_flags(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-M'])
-    parsed = args("1.0.0")
-    assert parsed.mem is True
-
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--mem'])
-    parsed = args("1.0.0")
-    assert parsed.mem is True
-
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--memory'])
-    parsed = args("1.0.0")
-    assert parsed.mem is True
-
-def test_args_time_and_memory_combined(monkeypatch):
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-t', '-M'])
-    parsed = args("1.0.0")
-    assert parsed.time is True
-    assert parsed.mem is True
-
-def test_args_stdin_flag_variants(monkeypatch):
-    # Standalone -i
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-i'])
-    parsed = args("1.0.0")
-    assert parsed.stdin == '-'
-
-    # Explicit -i -
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-i', '-'])
-    parsed = args("1.0.0")
-    assert parsed.stdin == '-'
-
-    # -i with file path
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-i', 'input.txt'])
-    parsed = args("1.0.0")
-    assert parsed.stdin == 'input.txt'
-
-    # -i combined with -- forwarding
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-i', '--', 'arg1', 'arg2'])
-    parsed = args("1.0.0")
-    assert parsed.stdin == '-'
-    assert parsed.argument == 'arg1 arg2'
-
-def test_args_new_feature_flags(monkeypatch):
-    # --build-only
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '-B'])
-    parsed = args("1.0.0")
-    assert parsed.build_only is True
-
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--build-only'])
-    parsed = args("1.0.0")
-    assert parsed.build_only is True
-
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--no-run'])
-    parsed = args("1.0.0")
-    assert parsed.build_only is True
-
-    # --expect
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--expect', 'expected.txt'])
-    parsed = args("1.0.0")
-    assert parsed.expect == 'expected.txt'
-
-    # --test-dir
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--test-dir', 'tests/'])
-    parsed = args("1.0.0")
-    assert parsed.test_dir == 'tests/'
-
-    # --doctor
-    monkeypatch.setattr(sys, 'argv', ['run', '--doctor'])
-    parsed = args("1.0.0")
-    assert parsed.doctor is True
-
-    # --no-color
-    monkeypatch.setattr(sys, 'argv', ['run', '--no-color'])
-    parsed = args("1.0.0")
-    assert parsed.no_color is True
-
-    # --debug
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--debug'])
-    parsed = args("1.0.0")
-    assert parsed.debug is True
-
-    # --gdb
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--gdb'])
-    parsed = args("1.0.0")
-    assert parsed.gdb is True
-
-    # --lldb
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--lldb'])
-    parsed = args("1.0.0")
-    assert parsed.lldb is True
-
-    # --valgrind
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--valgrind'])
-    parsed = args("1.0.0")
-    assert parsed.valgrind is True
-
-    # --asan
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--asan'])
-    parsed = args("1.0.0")
-    assert parsed.asan is True
-
-    # --tsan
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--tsan'])
-    parsed = args("1.0.0")
-    assert parsed.tsan is True
-
-    # --sanitize
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.c', '--sanitize', 'memory,leak'])
-    parsed = args("1.0.0")
-    assert parsed.sanitize == 'memory,leak'
-
-    # --new & --template
-    monkeypatch.setattr(sys, 'argv', ['run', '--new', 'solution.cpp', '--template', 'cp'])
-    parsed = args("1.0.0")
-    assert parsed.new == 'solution.cpp'
-    assert parsed.template == 'cp'
-
-    # --completion
-    monkeypatch.setattr(sys, 'argv', ['run', '--completion', 'zsh'])
-    parsed = args("1.0.0")
-    assert parsed.completion == 'zsh'
-
-    monkeypatch.setattr(sys, 'argv', ['run', '--completion'])
-    parsed = args("1.0.0")
-    assert parsed.completion == ''
-
-    monkeypatch.setattr(sys, 'argv', ['run', '--completion', 'main.c'])
-    parsed = args("1.0.0")
-    assert parsed.completion == ''
-    assert parsed.files == ['main.c']
+from conftest import combined_output, strip_ansi
 
 
-def test_args_optional_flags_with_source_files(monkeypatch):
-    """Test optional flags like -i and --link-auto positioned before source file arguments."""
-    # -i - before source file
-    monkeypatch.setattr(sys, 'argv', ['run', '-i', '-', 'main.c'])
-    parsed = args("1.0.0")
-    assert parsed.stdin == '-'
-    assert parsed.files == ['main.c']
+def test_args_flags_and_argument_dash_values(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "macro.c").write_text(
+        '#include <stdio.h>\nint main(void) { printf("M=%d\\n", M); return 0; }\n',
+        encoding="utf-8",
+    )
+    res = run_cli(["-F", "-DM=9", "macro.c"])
+    assert res.returncode == 0, combined_output(res)
+    assert "M=9" in res.stdout
 
-    # -i with explicit input file before source file
-    monkeypatch.setattr(sys, 'argv', ['run', '-i', 'input.txt', 'main.c'])
-    parsed = args("1.0.0")
-    assert parsed.stdin == 'input.txt'
-    assert parsed.files == ['main.c']
+    (work_dir / "echo.py").write_text(
+        'import sys\nprint("|".join(sys.argv[1:]))\n',
+        encoding="utf-8",
+    )
+    res_a = run_cli(["-a", "--help", "echo.py"])
+    assert res_a.returncode == 0, combined_output(res_a)
+    assert "--help" in res_a.stdout
 
-    # --link-auto without explicit depth before source file
-    monkeypatch.setattr(sys, 'argv', ['run', '--link-auto', 'main.c'])
-    parsed = args("1.0.0")
-    assert parsed.link_auto == -1
-    assert parsed.files == ['main.c']
 
-    # --link-auto with explicit depth before source file
-    monkeypatch.setattr(sys, 'argv', ['run', '--link-auto', '3', 'main.c'])
-    parsed = args("1.0.0")
-    assert parsed.link_auto == 3
-    assert parsed.files == ['main.c']
+def test_args_double_dash_merge_order(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "show.py").write_text(
+        'import sys\nprint("A:" + "|".join(sys.argv[1:]))\n',
+        encoding="utf-8",
+    )
+    res = run_cli(["--argument", "first second", "show.py", "--", "--third", "4"])
+    assert res.returncode == 0, combined_output(res)
+    assert "A:first|second|--third|4" in res.stdout
 
-def test_args_stdin_source_file_not_hijacked(monkeypatch):
-    """Verify source files passed as stdin target are not hijacked into files (SEC-R2-002)."""
-    # Source file passed to -i after source file
-    monkeypatch.setattr(sys, 'argv', ['run', 'solution.py', '-i', 'input.c'])
-    parsed = args("1.0.0")
-    assert parsed.stdin == 'input.c'
-    assert parsed.files == ['solution.py']
 
-    # Source file passed to -i before source file
-    monkeypatch.setattr(sys, 'argv', ['run', '-i', 'input.py', 'solution.py'])
-    parsed = args("1.0.0")
-    assert parsed.stdin == 'input.py'
-    assert parsed.files == ['solution.py']
+def test_args_aliases_and_verbose(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    sub = work_dir / "sub"
+    sub.mkdir()
+    (sub / "ok.py").write_text('print("OK_ALIAS")\n', encoding="utf-8")
 
-    # Source file passed as stdin target when no other files given
-    monkeypatch.setattr(sys, 'argv', ['run', '-i', 'input.cpp'])
-    parsed = args("1.0.0")
-    assert parsed.stdin == 'input.cpp'
-    assert parsed.files == []
+    res = run_cli(["--cwd", str(sub), "-v", "--mem", "-t", "ok.py"])
+    assert res.returncode == 0, combined_output(res)
+    out = strip_ansi(res.stdout)
+    assert "[ DEBUG ] Debug logging enabled" in out
+    assert "OK_ALIAS" in out
+    assert "Took" in out
+    assert "Peak Memory:" in out
 
-def test_args_structured_argument_list_preservation(monkeypatch):
-    """Verify structured argument_list preserves tokens across --argument and trailing -- (SEC-R2-003)."""
-    monkeypatch.setattr(sys, 'argv', ['run', 'main.py', '--argument', 'foo "bar baz"', '--', 'arg1', 'arg with spaces'])
-    parsed = args("1.0.0")
-    assert parsed.files == ['main.py']
-    assert parsed.argument_list == ['foo', 'bar baz', 'arg1', 'arg with spaces']
-    assert parsed.argument == "foo 'bar baz' arg1 'arg with spaces'"
+    res_clean = run_cli(["--clean"])
+    assert res_clean.returncode == 0, combined_output(res_clean)
+    assert "[ CLEAN ] Build cache cleared successfully." in strip_ansi(res_clean.stdout)
 
+
+def test_args_stdin_and_optional_flags(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "read_in.py").write_text(
+        'import sys\nprint("IN:" + sys.stdin.read().strip())\n',
+        encoding="utf-8",
+    )
+    (work_dir / "data.txt").write_text("from_file\n", encoding="utf-8")
+
+    res_file = run_cli(["-i", "data.txt", "read_in.py"])
+    assert res_file.returncode == 0, combined_output(res_file)
+    assert "IN:from_file" in res_file.stdout
+
+    res_pipe = run_cli(["-i", "-q", "read_in.py"], stdin_text="from_pipe\n")
+    assert res_pipe.returncode == 0, combined_output(res_pipe)
+    assert "IN:from_pipe" in res_pipe.stdout

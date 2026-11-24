@@ -1,44 +1,31 @@
-import pytest
-import tomllib
+"""Black-box CLI --init configuration scaffolding tests."""
+
+from __future__ import annotations
+
 from pathlib import Path
-from util.init_config import ConfigInitializer
-from util.config import Config
+from typing import Callable
 
-def test_detect_technologies(tmp_path):
-    (tmp_path / "main.cpp").write_text("int main() {}")
-    (tmp_path / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.20)")
-    (tmp_path / "script.py").write_text("print('hi')")
+from conftest import combined_output, strip_ansi
 
-    techs = ConfigInitializer.detect_technologies(tmp_path)
-    assert "cpp" in techs
-    assert "cmake" in techs
-    assert "python" in techs
 
-def test_init_config_generates_valid_toml(tmp_path, monkeypatch):
-    (tmp_path / "main.cpp").write_text("int main() {}")
-    (tmp_path / "helper.hpp").write_text("#pragma once")
+def test_init_creates_run_toml_and_respects_force(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "main.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
 
-    success = ConfigInitializer.init_config(tmp_path, force=True)
-    assert success is True
+    res = run_cli(["--init"])
+    assert res.returncode == 0, combined_output(res)
+    cfg_path = work_dir / "Run.toml"
+    assert cfg_path.is_file()
+    content = cfg_path.read_text(encoding="utf-8")
+    assert "[core]" in content
 
-    toml_path = tmp_path / "Run.toml"
-    assert toml_path.exists()
+    cfg_path.write_text("# custom marker\n", encoding="utf-8")
+    res_no_force = run_cli(["--init"], stdin_text="n\n")
+    assert res_no_force.returncode == 1
+    assert "# custom marker" in cfg_path.read_text(encoding="utf-8")
+    assert "[ WARN ]" in strip_ansi(combined_output(res_no_force))
 
-    with open(toml_path, "rb") as f:
-        data = tomllib.load(f)
-
-    assert "core" in data
-    assert "presets" in data
-    assert "debug" in data["presets"]
-
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    assert config.get_preset_flags("debug", "cpp") == ["-g", "-Wall", "-Wextra", "-std=c++20", "-O0"]
-
-def test_init_config_existing_abort(tmp_path, monkeypatch):
-    toml_path = tmp_path / "Run.toml"
-    toml_path.write_text("[core]\n")
-
-    monkeypatch.setattr("builtins.input", lambda prompt="": "n")
-    success = ConfigInitializer.init_config(tmp_path, force=False)
-    assert success is False
+    res_force = run_cli(["--init", "-f"])
+    assert res_force.returncode == 0, combined_output(res_force)
+    assert "[core]" in cfg_path.read_text(encoding="utf-8")

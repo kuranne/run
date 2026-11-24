@@ -1,208 +1,42 @@
-import pytest
+"""Black-box CLI [projects] manifest detection, two-step build+run, and .git boundary tests."""
+
+from __future__ import annotations
+
 from pathlib import Path
-from runner.project_runner import ProjectRunner
-from util.config import Config
+from typing import Callable
 
-class DummyRunner:
-    def __init__(self):
-        self.executed = []
-
-    def run_command(self, cmd, use_shell=False, compiling=False):
-        self.executed.append((cmd, use_shell, compiling))
-        return True
-
-def test_detect_default_cargo_project(tmp_path, monkeypatch):
-    cargo_toml = tmp_path / "Cargo.toml"
-    cargo_toml.write_text('[package]\nname = "test"\n')
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-
-    detected = ProjectRunner.detect_project(tmp_path, config)
-    assert detected is not None
-    proj_name, proj_cfg, manifest_path = detected
-    assert proj_name == "cargo"
-    assert manifest_path == cargo_toml
-
-def test_detect_default_go_project(tmp_path, monkeypatch):
-    go_mod = tmp_path / "go.mod"
-    go_mod.write_text("module example.com/app\n")
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-
-    detected = ProjectRunner.detect_project(tmp_path, config)
-    assert detected is not None
-    proj_name, proj_cfg, manifest_path = detected
-    assert proj_name == "go"
-    assert manifest_path == go_mod
-
-def test_run_project_single_command(tmp_path, monkeypatch):
-    go_mod = tmp_path / "go.mod"
-    go_mod.write_text("module example.com/app\n")
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    runner = DummyRunner()
-
-    detected = ProjectRunner.detect_project(tmp_path, config)
-    assert detected is not None
-    success = ProjectRunner.run_project(detected, runner, run_args=["arg1"])
-    assert success is True
-    assert len(runner.executed) == 1
-    cmd, use_shell, compiling = runner.executed[0]
-    assert cmd == ["go", "run", ".", "arg1"]
-    assert compiling is False
-
-def test_run_project_build_and_run(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [projects.custom_cmake]
-    file = "CMakeLists.txt"
-    build = "cmake --build build"
-    run = "./build/app"
-    """)
-    cmake_file = tmp_path / "CMakeLists.txt"
-    cmake_file.write_text("cmake_minimum_required(VERSION 3.20)\n")
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    runner = DummyRunner()
-
-    detected = ProjectRunner.detect_project(tmp_path, config)
-    assert detected is not None
-    proj_name, proj_cfg, manifest_path = detected
-    assert proj_name == "custom_cmake"
-
-    success = ProjectRunner.run_project(detected, runner, run_args=["--server"])
-    assert success is True
-    assert len(runner.executed) == 2
-
-    build_cmd, use_shell, compiling = runner.executed[0]
-    assert build_cmd == ["cmake", "--build", "build"]
-    assert compiling is True
-
-    run_cmd, use_shell, compiling = runner.executed[1]
-    assert run_cmd == ["./build/app", "--server"]
-    assert compiling is False
-
-def test_get_watch_files_includes_src(tmp_path):
-    manifest = tmp_path / "Cargo.toml"
-    manifest.write_text("")
-    src = tmp_path / "src"
-    src.mkdir()
-    main_rs = src / "main.rs"
-    main_rs.write_text("")
-
-    watch_files = ProjectRunner.get_watch_files(manifest)
-    assert str(manifest) in watch_files
-    assert str(main_rs) in watch_files
-
-def test_run_project_compound_command(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [projects.compound_cmake]
-    file = "CMakeLists.txt"
-    build = "cmake -B build && cmake --build build"
-    run = "./build/app"
-    """)
-    cmake_file = tmp_path / "CMakeLists.txt"
-    cmake_file.write_text("cmake_minimum_required(VERSION 3.20)\n")
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    runner = DummyRunner()
-
-    detected = ProjectRunner.detect_project(tmp_path, config)
-    assert detected is not None
-
-    success = ProjectRunner.run_project(detected, runner, extra_flags=["--config", "Release"], run_args=["--port", "8080"])
-    assert success is True
-    assert len(runner.executed) == 3
-
-    # Step 1a: cmake -B build
-    cmd1, use_shell, compiling = runner.executed[0]
-    assert cmd1 == ["cmake", "-B", "build"]
-    assert compiling is True
-
-    # Step 1b: cmake --build build --config Release
-    cmd2, use_shell, compiling = runner.executed[1]
-    assert cmd2 == ["cmake", "--build", "build", "--config", "Release"]
-    assert compiling is True
-
-    # Step 2: ./build/app --port 8080
-    cmd3, use_shell, compiling = runner.executed[2]
-    assert cmd3 == ["./build/app", "--port", "8080"]
-    assert compiling is False
-
-def test_run_project_compound_command_with_quotes(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [projects.quoted_project]
-    file = "test.txt"
-    build = "echo 'hello && world' && echo done"
-    run = "echo \\"step1;step2\\""
-    """)
-    test_file = tmp_path / "test.txt"
-    test_file.write_text("dummy")
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    runner = DummyRunner()
-
-    detected = ProjectRunner.detect_project(tmp_path, config)
-    assert detected is not None
-
-    success = ProjectRunner.run_project(detected, runner)
-    assert success is True
-    assert len(runner.executed) == 3
-
-    cmd1, _, compiling1 = runner.executed[0]
-    assert cmd1 == ["echo", "hello && world"]
-    assert compiling1 is True
-
-    cmd2, _, compiling2 = runner.executed[1]
-    assert cmd2 == ["echo", "done"]
-    assert compiling2 is True
-
-    cmd3, _, compiling3 = runner.executed[2]
-    assert cmd3 == ["echo", "step1;step2"]
-    assert compiling3 is False
-
-def test_run_project_mixed_compound_operators(tmp_path, monkeypatch):
-    toml = tmp_path / "Run.toml"
-    toml.write_text("""
-    [projects.mixed_project]
-    file = "test.txt"
-    build = "cargo check ; cargo test && cargo build"
-    run = "echo ok"
-    """)
-    test_file = tmp_path / "test.txt"
-    test_file.write_text("dummy")
-    monkeypatch.setattr(Path, "cwd", lambda: tmp_path)
-    config = Config()
-    runner = DummyRunner()
-
-    detected = ProjectRunner.detect_project(tmp_path, config)
-    assert detected is not None
-
-    success = ProjectRunner.run_project(detected, runner)
-    assert success is True
-    assert len(runner.executed) == 4
-
-    assert runner.executed[0][0] == ["cargo", "check"]
-    assert runner.executed[1][0] == ["cargo", "test"]
-    assert runner.executed[2][0] == ["cargo", "build"]
-    assert runner.executed[3][0] == ["echo", "ok"]
-
-def test_detect_project_stops_at_git_root(tmp_path):
-    # Manifest outside repository
-    (tmp_path / "Cargo.toml").write_text('[package]\nname = "outside"\n')
-
-    repo_dir = tmp_path / "repo"
-    repo_dir.mkdir()
-    (repo_dir / ".git").mkdir()
-
-    sub_dir = repo_dir / "sub"
-    sub_dir.mkdir()
-
-    config = Config()
-    detected = ProjectRunner.detect_project(sub_dir, config)
-    assert detected is None
+from conftest import combined_output, strip_ansi
 
 
+def test_project_two_step_and_single_step(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "Run.toml").write_text(
+        "[projects.twostep]\n"
+        'file = "demo.proj"\n'
+        'build = "python3 -c \\"print(\'BUILD_OK\')\\""\n'
+        'run = "python3 -c \\"import sys; print(\'RUN_OK:\' + \'|\'.join(sys.argv[1:]))\\""\n',
+        encoding="utf-8",
+    )
+    (work_dir / "demo.proj").write_text("ok\n", encoding="utf-8")
 
+    res = run_cli(["--", "p1", "p2"])
+    assert res.returncode == 0, combined_output(res)
+    out = strip_ansi(res.stdout)
+    assert "Detected project 'twostep' via demo.proj" in out
+    assert "BUILD_OK" in out
+    assert "RUN_OK:p1|p2" in out
+
+
+def test_project_detection_stops_at_git_boundary(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "Makefile").write_text("all:\n\t@echo ROOT_MAKE\n", encoding="utf-8")
+    nested = work_dir / "child_repo"
+    nested.mkdir()
+    (nested / ".git").mkdir()
+
+    res = run_cli([], cwd=nested, stdin_text="")
+    assert res.returncode == 0, combined_output(res)
+    assert "ROOT_MAKE" not in res.stdout
+    assert "[ INPUT ] No file given" in strip_ansi(res.stdout)

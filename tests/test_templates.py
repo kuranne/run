@@ -1,148 +1,64 @@
-import pytest
+"""Black-box CLI --new / --template scaffolding and traversal protection tests."""
+
+from __future__ import annotations
+
 from pathlib import Path
-from util.template_manager import TemplateManager
+from typing import Callable
 
-class MockConfig:
-    def __init__(self, data=None):
-        self.data = data or {}
-
-@pytest.fixture(autouse=True)
-def isolate_cwd(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-
-def test_builtin_templates_single_file(tmp_path):
-    # Test Python
-    py_target = tmp_path / "app.py"
-    res = TemplateManager.generate(str(py_target))
-    assert res is True
-    assert py_target.exists()
-    content = py_target.read_text()
-    assert "def main():" in content
-    assert 'if __name__ == "__main__":' in content
-
-    # Test Java with class name substitution
-    java_target = tmp_path / "Solution.java"
-    res = TemplateManager.generate(str(java_target))
-    assert res is True
-    assert java_target.exists()
-    j_content = java_target.read_text()
-    assert "public class Solution {" in j_content
-
-    # Test C++
-    cpp_target = tmp_path / "main.cpp"
-    res = TemplateManager.generate(str(cpp_target))
-    assert res is True
-    assert cpp_target.exists()
-    assert "#include <iostream>" in cpp_target.read_text()
-
-def test_custom_template_inline(tmp_path):
-    cfg = MockConfig({
-        "templates": {
-            "cp": {
-                "content": """// CP Template for {{name}}
-#include <bits/stdc++.h>
-using namespace std;
-int main() { return 0; }
-"""
-            }
-        }
-    })
-
-    target = tmp_path / "task_a.cpp"
-    res = TemplateManager.generate(str(target), template_name="cp", config=cfg)
-    assert res is True
-    assert target.exists()
-    text = target.read_text()
-    assert "// CP Template for task_a" in text
-    assert "#include <bits/stdc++.h>" in text
-
-def test_multi_file_template(tmp_path):
-    cfg = MockConfig({
-        "templates": {
-            "leetcode_rs": {
-                "description": "LeetCode Rust starter",
-                "files": [
-                    {
-                        "name": "main.rs",
-                        "content": "mod solve;\nuse solve::Solution;\nfn main() { let s = Solution; }\n"
-                    },
-                    {
-                        "name": "solve.rs",
-                        "content": "pub struct Solution;\n"
-                    }
-                ]
-            }
-        }
-    })
-
-    target_dir = tmp_path / "problem_01"
-    res = TemplateManager.generate(str(target_dir), template_name="leetcode_rs", config=cfg)
-    assert res is True
-    assert (target_dir / "main.rs").exists()
-    assert (target_dir / "solve.rs").exists()
-    assert "mod solve;" in (target_dir / "main.rs").read_text()
-    assert "pub struct Solution;" in (target_dir / "solve.rs").read_text()
-
-def test_overwrite_safety(tmp_path):
-    target = tmp_path / "existing.py"
-    target.write_text("ORIGINAL CONTENT")
-
-    # Without force -> fail
-    res = TemplateManager.generate(str(target), force=False)
-    assert res is False
-    assert target.read_text() == "ORIGINAL CONTENT"
-
-    # With force -> succeed
-    res = TemplateManager.generate(str(target), force=True)
-    assert res is True
-    assert "def main():" in target.read_text()
-
-def test_multi_file_template_path_traversal_prevention(tmp_path):
-    from util.errors import ConfigError
-
-    cfg = MockConfig({
-        "templates": {
-            "malicious": {
-                "files": [
-                    {
-                        "name": "../escape.txt",
-                        "content": "pwned"
-                    }
-                ]
-            }
-        }
-    })
-
-    dest = tmp_path / "sandbox_dir"
-    dest.mkdir()
-    with pytest.raises(ConfigError, match="Path traversal detected"):
-        TemplateManager.generate(str(dest), template_name="malicious", config=cfg, force=True)
-
-    assert not (tmp_path / "escape.txt").exists()
-
-def test_file_loader_path_traversal_prevention(tmp_path):
-    from util.errors import ConfigError
-
-    outside_file = tmp_path / "secret.txt"
-    outside_file.write_text("super_secret")
-
-    sub_dir = tmp_path / "project"
-    sub_dir.mkdir()
-
-    with pytest.raises(ConfigError, match="outside base directory"):
-        TemplateManager._load_template_content({"file": "../secret.txt"}, base_dir=sub_dir)
-
-def test_single_file_template_path_traversal_prevention(tmp_path, monkeypatch):
-    from util.errors import ConfigError
-
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    monkeypatch.chdir(workspace)
-
-    malicious_target = "../../../escape.py"
-    with pytest.raises(ConfigError, match="Path traversal detected"):
-        TemplateManager.generate(malicious_target, force=True)
-
-    assert not (tmp_path / "escape.py").exists()
+from conftest import combined_output, strip_ansi
 
 
+def test_new_builtin_and_overwrite_guard(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    res = run_cli(["--new", "hello.py"])
+    assert res.returncode == 0, combined_output(res)
+    target = work_dir / "hello.py"
+    assert target.is_file()
+
+    target.write_text("# keep me\n", encoding="utf-8")
+    res_dup = run_cli(["--new", "hello.py"])
+    assert res_dup.returncode == 1
+    assert "# keep me" in target.read_text(encoding="utf-8")
+
+    res_force = run_cli(["--new", "hello.py", "-f"])
+    assert res_force.returncode == 0, combined_output(res_force)
+    assert "# keep me" not in target.read_text(encoding="utf-8")
+
+
+def test_new_custom_inline_and_multifile_templates(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "Run.toml").write_text(
+        "[templates.greet]\n"
+        'content = "print(\'HI:{{name}}\')\\n"\n'
+        "[templates.bundle]\n"
+        "files = [\n"
+        '  { name = "a.py", content = "print(\'A\')\\n" },\n'
+        '  { name = "b.py", content = "print(\'B\')\\n" },\n'
+        "]\n",
+        encoding="utf-8",
+    )
+
+    r1 = run_cli(["--new", "demo.py", "--template", "greet"])
+    assert r1.returncode == 0, combined_output(r1)
+    assert "HI:demo" in (work_dir / "demo.py").read_text(encoding="utf-8")
+
+    r2 = run_cli(["--new", "pkg_dir", "--template", "bundle"])
+    assert r2.returncode == 0, combined_output(r2)
+    assert (work_dir / "pkg_dir" / "a.py").is_file()
+    assert (work_dir / "pkg_dir" / "b.py").is_file()
+
+
+def test_new_template_path_traversal_rejected(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "Run.toml").write_text(
+        "[templates.evil]\n"
+        'files = [{ name = "../../escape.txt", content = "bad" }]\n',
+        encoding="utf-8",
+    )
+    res = run_cli(["--new", "safe_dir", "--template", "evil"])
+    assert res.returncode == 1
+    assert "[ ERROR ]" in strip_ansi(combined_output(res))
+    assert not (work_dir.parent / "escape.txt").exists()

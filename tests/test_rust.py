@@ -1,74 +1,45 @@
-import pytest
+"""Black-box CLI Rust standalone and Cargo project execution tests."""
+
+from __future__ import annotations
+
 from pathlib import Path
-from runner.rust_handler import RustHandler
+from typing import Callable
 
-class DummyRustRunner(RustHandler):
-    def __init__(self):
-        self.is_posix = True
-        self.extra_flags = []
-        self.run_args = []
+from conftest import combined_output, require_optional_tool, strip_ansi
 
-def test_get_cargo_package_name(tmp_path):
-    cargo_toml = tmp_path / "Cargo.toml"
-    cargo_toml.write_bytes(b"""
-    [package]
-    name = "my_rust_app"
-    version = "0.1.0"
-    edition = "2021"
-    """)
 
-    handler = DummyRustRunner()
-    pkg_name = handler._get_cargo_package_name(cargo_toml)
-    assert pkg_name == "my_rust_app"
+def test_rust_dry_run_standalone_and_cargo_project(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "solo.rs").write_text('fn main() { println!("RS_OK"); }\n', encoding="utf-8")
+    res_solo = run_cli(["--dry-run", "solo.rs"])
+    assert res_solo.returncode == 0, combined_output(res_solo)
+    assert "rustc" in strip_ansi(res_solo.stdout)
 
-def test_get_cargo_package_name_missing(tmp_path):
-    cargo_toml = tmp_path / "Cargo.toml"
-    cargo_toml.write_bytes(b"""
-    [workspace]
-    members = ["member_a"]
-    """)
+    cargo_dir = work_dir / "demo_crate"
+    (cargo_dir / "src").mkdir(parents=True)
+    (cargo_dir / "Cargo.toml").write_text(
+        '[package]\nname = "demo_crate"\nversion = "0.1.0"\nedition = "2021"\n',
+        encoding="utf-8",
+    )
+    (cargo_dir / "src" / "main.rs").write_text('fn main() { println!("CRATE_OK"); }\n', encoding="utf-8")
 
-    handler = DummyRustRunner()
-    pkg_name = handler._get_cargo_package_name(cargo_toml)
-    assert pkg_name is None
+    res_cargo = run_cli(["--dry-run", "src/main.rs"], cwd=cargo_dir)
+    assert res_cargo.returncode == 0, combined_output(res_cargo)
+    assert "cargo run" in strip_ansi(res_cargo.stdout)
 
-def test_find_cargo_toml(tmp_path):
-    src_dir = tmp_path / "src"
-    src_dir.mkdir()
-    main_rs = src_dir / "main.rs"
-    main_rs.write_text("fn main() {}")
 
-    cargo_toml = tmp_path / "Cargo.toml"
-    cargo_toml.write_bytes(b'[package]\nname = "test"\n')
+def test_rust_standalone_execution_and_cache(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    require_optional_tool("rustc")
+    (work_dir / "hello.rs").write_text('fn main() { println!("RUSTC_LIVE"); }\n', encoding="utf-8")
 
-    handler = DummyRustRunner()
-    found = handler._find_cargo_toml(main_rs)
-    assert found == cargo_toml
+    r1 = run_cli(["hello.rs"])
+    assert r1.returncode == 0, combined_output(r1)
+    assert "RUSTC_LIVE" in r1.stdout
 
-def test_get_cargo_package_name_path_traversal_rejected(tmp_path, caplog):
-    cargo_toml = tmp_path / "Cargo.toml"
-    cargo_toml.write_bytes(b"""
-    [package]
-    name = "../../../../bin/sh"
-    version = "0.1.0"
-    """)
-
-    handler = DummyRustRunner()
-    pkg_name = handler._get_cargo_package_name(cargo_toml)
-    assert pkg_name is None
-    assert "Invalid cargo package name containing path traversal characters" in caplog.text
-
-    cargo_toml.write_bytes(b"""
-    [package]
-    name = "foo/bar"
-    version = "0.1.0"
-    """)
-    assert handler._get_cargo_package_name(cargo_toml) is None
-
-    cargo_toml.write_bytes(b"""
-    [package]
-    name = "foo\\\\bar"
-    version = "0.1.0"
-    """)
-    assert handler._get_cargo_package_name(cargo_toml) is None
-
+    r2 = run_cli(["hello.rs"])
+    assert r2.returncode == 0, combined_output(r2)
+    assert "[ INFO ] Using cached binary:" in strip_ansi(r2.stdout)
+    assert "RUSTC_LIVE" in r2.stdout
