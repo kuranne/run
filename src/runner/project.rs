@@ -478,4 +478,91 @@ mod tests {
         .expect("run project");
         assert!(ok);
     }
+
+    /// White-box test: `split_compound_command` handles escaped operators, empty clauses,
+    /// and unclosed single quotes.
+    #[test]
+    fn test_split_compound_command_edge_cases() {
+        let escaped = split_compound_command(r"echo a\&\&b \; c && echo ok").expect("escaped");
+        assert_eq!(
+            escaped,
+            vec![
+                vec!["echo", "a&&b", ";", "c"],
+                vec!["echo", "ok"],
+            ]
+        );
+        let empty_clauses = split_compound_command("echo 1 && ; echo 2 ; ").expect("empty");
+        assert_eq!(empty_clauses, vec![vec!["echo", "1"], vec!["echo", "2"]]);
+        assert!(split_compound_command("echo 'unclosed").is_err());
+    }
+
+    /// White-box test: `TaskRunner::run_task` short-circuits `&&` via `MockCommandExecutor`
+    /// so the second command is never executed when the first fails.
+    #[test]
+    fn test_task_runner_short_circuits_and_via_mock() {
+        use std::sync::Arc;
+        use crate::runner::base::{ExecOutcome, MockCommandExecutor};
+
+        let cfg = Config::from_toml_str(
+            r#"
+            [tasks]
+            fail_chain = "cmd_one && cmd_two"
+            "#,
+            None,
+            None,
+        )
+        .expect("cfg");
+        let mut base = make_base(RunnerOptions::default());
+
+        let mut mock = MockCommandExecutor::new();
+        mock.expect_execute()
+            .times(1)
+            .withf(|spec| spec.cmd == vec!["cmd_one"])
+            .returning(|_| Err(RunError::execution("exit 1")));
+        base.set_executor(Arc::new(mock));
+
+        let err = TaskRunner::run_task("fail_chain", &cfg, &[], &mut base).unwrap_err();
+        assert!(err.to_string().contains("exit 1"));
+
+        // Verify extra_args are appended ONLY to the final subcommand.
+        let cfg2 = Config::from_toml_str(
+            r#"
+            [tasks]
+            two = "step1 && step2"
+            "#,
+            None,
+            None,
+        )
+        .expect("cfg2");
+        let mut seq = mockall::Sequence::new();
+        let mut mock2 = MockCommandExecutor::new();
+        mock2
+            .expect_execute()
+            .times(1)
+            .in_sequence(&mut seq)
+            .withf(|spec| spec.cmd == vec!["step1"])
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.01,
+                    memory_bytes: None,
+                })
+            });
+        mock2
+            .expect_execute()
+            .times(1)
+            .in_sequence(&mut seq)
+            .withf(|spec| spec.cmd == vec!["step2", "--tail"])
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.01,
+                    memory_bytes: None,
+                })
+            });
+        base.set_executor(Arc::new(mock2));
+        assert!(
+            TaskRunner::run_task("two", &cfg2, &["--tail".to_string()], &mut base).unwrap()
+        );
+    }
 }

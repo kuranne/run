@@ -813,4 +813,36 @@ mod tests {
 
         let _ = fs::remove_dir_all(&tmp);
     }
+
+    /// White-box test: corrupted `cache.json` recovers gracefully without panicking and
+    /// rewrites valid metadata on the next `update_cache`.
+    #[test]
+    fn test_corrupted_cache_json_recovery_and_missing_binary_invalidation() {
+        let tmp = make_temp_dir("corrupt_json");
+        let manager = make_manager(&tmp);
+        let src = tmp.join("app.c");
+        fs::write(&src, "int main(void) { return 0; }\n").unwrap();
+
+        fs::create_dir_all(&manager.cache_dir).unwrap();
+        fs::write(&manager.cache_file, "{not valid json!!!").unwrap();
+
+        // Corrupted JSON must be treated as changed rather than panicking.
+        assert!(manager.is_changed(&src, None));
+
+        let bin = manager.get_cached_binary_path(&src);
+        fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        fs::write(&bin, b"BIN").unwrap();
+        manager.update_cache(&src, Some(&bin));
+        assert!(!manager.is_changed(&src, Some(&bin)));
+
+        // Deleting the cached binary invalidates the hit even though source hash matches.
+        fs::remove_file(&bin).unwrap();
+        assert!(manager.is_changed(&src, Some(&bin)));
+
+        // Calling clear() twice (second time on missing dir) is idempotent.
+        manager.clear();
+        manager.clear();
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }

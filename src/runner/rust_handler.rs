@@ -340,4 +340,127 @@ mod tests {
             );
         }
     }
+
+    /// White-box test: `RustHandler::run_single` skips `rustc` when a cached binary exists
+    /// and invokes only the cached binary via `MockCommandExecutor`.
+    #[test]
+    fn test_rust_standalone_cache_hit_skips_rustc() {
+        use std::sync::Arc;
+        use crate::runner::base::{BaseRunner, ExecOutcome, MockCommandExecutor};
+        use crate::runner::handler::RunnerOptions;
+        use crate::util::cache::CacheManager;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let src = tmp.path().join("solo.rs");
+        fs::write(&src, "fn main() {}\n").unwrap();
+
+        let cache = CacheManager::with_cache_base(tmp.path(), &tmp.path().join("cache"))
+            .expect("cache");
+        let cached_bin = cache.get_cached_binary_path(&src);
+        fs::create_dir_all(cached_bin.parent().unwrap()).unwrap();
+        fs::write(&cached_bin, b"FAKE_ELF").unwrap();
+        cache.update_cache(&src, Some(&cached_bin));
+
+        let cfg = Config::default();
+        let printer = test_printer();
+        let mut base = BaseRunner::new_with_stdin(
+            RunnerOptions::default(),
+            None,
+            Some("--flag"),
+            &cfg,
+            printer,
+            None,
+        )
+        .expect("runner");
+
+        let expected_bin = cached_bin.to_string_lossy().into_owned();
+        let mut mock = MockCommandExecutor::new();
+        mock.expect_execute()
+            .times(1)
+            .withf(move |spec| !spec.compiling && spec.cmd[0] == expected_bin && spec.cmd[1] == "--flag")
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.01,
+                    memory_bytes: None,
+                })
+            });
+        base.set_executor(Arc::new(mock));
+
+        let mut ctx = ExecutionContext {
+            config: &cfg,
+            printer: &printer,
+            cache: Some(&cache),
+            runner: &mut base,
+            detected_ext: None,
+        };
+        assert!(RustHandler.run_single(&src, &mut ctx).unwrap());
+    }
+
+    /// White-box test: `run_cargo_mode` with `--release` builds via `cargo build --release`
+    /// and executes `target/release/<pkg>` directly.
+    #[test]
+    fn test_rust_cargo_release_mode_argv_via_mock() {
+        use std::sync::Arc;
+        use crate::runner::base::{BaseRunner, ExecOutcome, MockCommandExecutor};
+        use crate::runner::handler::RunnerOptions;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let toml_path = tmp.path().join("Cargo.toml");
+        fs::write(&toml_path, "[package]\nname = \"mybin\"\nversion = \"0.1.0\"\n").unwrap();
+        let rel_dir = tmp.path().join("target").join("release");
+        fs::create_dir_all(&rel_dir).unwrap();
+        let bin_name = if cfg!(windows) { "mybin.exe" } else { "mybin" };
+        fs::write(rel_dir.join(bin_name), b"BIN").unwrap();
+
+        let cfg = Config::default();
+        let printer = test_printer();
+        let mut base = BaseRunner::new_with_stdin(
+            RunnerOptions {
+                release: true,
+                ..Default::default()
+            },
+            None,
+            None,
+            &cfg,
+            printer,
+            None,
+        )
+        .expect("runner");
+
+        let mut seq = mockall::Sequence::new();
+        let mut mock = MockCommandExecutor::new();
+        mock.expect_execute()
+            .times(1)
+            .in_sequence(&mut seq)
+            .withf(|spec| spec.compiling && spec.cmd == vec!["cargo", "build", "--release"])
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.02,
+                    memory_bytes: None,
+                })
+            });
+        mock.expect_execute()
+            .times(1)
+            .in_sequence(&mut seq)
+            .withf(move |spec| !spec.compiling && spec.cmd[0].ends_with(bin_name))
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.01,
+                    memory_bytes: None,
+                })
+            });
+        base.set_executor(Arc::new(mock));
+
+        let mut ctx = ExecutionContext {
+            config: &cfg,
+            printer: &printer,
+            cache: None,
+            runner: &mut base,
+            detected_ext: None,
+        };
+        assert!(RustHandler::run_cargo_mode(Some(&toml_path), &mut ctx).unwrap());
+    }
 }

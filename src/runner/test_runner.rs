@@ -476,4 +476,61 @@ mod tests {
 
         assert!(!TestcasesRunner::run_tests(&mut runner, &td, &[src], false));
     }
+
+    /// White-box test: `natural_sort_key` handles > `u128::MAX` digit sequences without panic.
+    #[test]
+    fn test_natural_sort_huge_number_overflow_fallback() {
+        let huge = "case_9999999999999999999999999999999999999999999999.in";
+        let small = "case_2.in";
+        let k_huge = natural_sort_key(Path::new(huge));
+        let k_small = natural_sort_key(Path::new(small));
+        assert!(k_small < k_huge);
+    }
+
+    /// White-box test: `TestcasesRunner::run_tests` with `MockCommandExecutor` restores
+    /// `build_only`, `stdin`, `expect`, and `test_dir` even when Phase 1 compilation fails.
+    #[test]
+    fn test_run_tests_restores_state_on_compile_failure() {
+        use std::sync::Arc;
+        use crate::runner::base::MockCommandExecutor;
+        use crate::util::errors::RunError;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let td = tmp.path().join("cases");
+        fs::create_dir_all(&td).unwrap();
+        fs::write(td.join("1.in"), "5\n").unwrap();
+        fs::write(td.join("1.out"), "10\n").unwrap();
+        let src = tmp.path().join("prog.c");
+        fs::write(&src, "int main(){return 0;}\n").unwrap();
+
+        let opts = RunnerOptions {
+            stdin: Some("prev.in".to_string()),
+            expect: Some("prev.out".to_string()),
+            ..RunnerOptions::default()
+        };
+        let printer = Printer::with_colors(Verbosity::Quiet, Colors::new(false));
+        let mut runner = CompilerRunner::with_cache_base(
+            opts,
+            None,
+            None,
+            Config::default(),
+            printer,
+            tmp.path(),
+            &tmp.path().join("cache"),
+        )
+        .expect("create runner");
+
+        let mut mock = MockCommandExecutor::new();
+        mock.expect_execute()
+            .times(1)
+            .withf(|spec| spec.compiling)
+            .returning(|_| Err(RunError::compilation("syntax error")));
+        runner.base.set_executor(Arc::new(mock));
+
+        assert!(!TestcasesRunner::run_tests(&mut runner, &td, &[src], false));
+        assert!(!runner.base.options.build_only);
+        assert_eq!(runner.base.options.stdin.as_deref(), Some("prev.in"));
+        assert_eq!(runner.base.options.expect.as_deref(), Some("prev.out"));
+        assert_eq!(runner.base.options.test_dir, None);
+    }
 }

@@ -400,4 +400,131 @@ mod tests {
             .expect_err("leading dash class name must be rejected");
         assert!(err.to_string().contains("Invalid main class name"));
     }
+
+    /// White-box test: `JavaHandler::run_multi` verifies exact `javac` argv, deduplicated `-cp`
+    /// classpath, and `java` runtime argv via `MockCommandExecutor` without needing a host JDK.
+    #[test]
+    fn test_java_handler_multi_mock_argv_and_classpath_dedup() {
+        use std::sync::Arc;
+        use crate::runner::base::{ExecOutcome, MockCommandExecutor};
+
+        let tmp = TempDir::new().expect("tempdir");
+        let sub = tmp.path().join("pkg");
+        fs::create_dir_all(&sub).unwrap();
+        let helper = sub.join("Helper.java");
+        let entry = tmp.path().join("Entry.java");
+        fs::write(&helper, "public class Helper { static int v() { return 7; } }\n").unwrap();
+        fs::write(
+            &entry,
+            "public class Entry { public static void main(String... args) {} }\n",
+        )
+        .unwrap();
+
+        let cfg = Config::default();
+        let printer = Printer::with_colors(Verbosity::Info, Colors::new(false));
+        let mut base = BaseRunner::new_with_stdin(
+            RunnerOptions::default(),
+            None,
+            Some("arg1 arg2"),
+            &cfg,
+            printer,
+            None,
+        )
+        .expect("runner");
+
+        let mut seq = mockall::Sequence::new();
+        let mut mock = MockCommandExecutor::new();
+        mock.expect_execute()
+            .times(1)
+            .in_sequence(&mut seq)
+            .withf(|spec| {
+                spec.compiling
+                    && spec.cmd[0] == "javac"
+                    && spec.cmd.iter().any(|a| a.ends_with("Helper.java"))
+                    && spec.cmd.iter().any(|a| a.ends_with("Entry.java"))
+            })
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.01,
+                    memory_bytes: None,
+                })
+            });
+        mock.expect_execute()
+            .times(1)
+            .in_sequence(&mut seq)
+            .withf(|spec| {
+                !spec.compiling
+                    && spec.cmd[0] == "java"
+                    && spec.cmd[1] == "-cp"
+                    && spec.cmd[3] == "Entry"
+                    && spec.cmd[4..] == ["arg1", "arg2"]
+            })
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.01,
+                    memory_bytes: None,
+                })
+            });
+        base.set_executor(Arc::new(mock));
+
+        let mut ctx = ExecutionContext {
+            config: &cfg,
+            printer: &printer,
+            cache: None,
+            runner: &mut base,
+            detected_ext: None,
+        };
+        assert!(JavaHandler.run_multi(&[helper, entry], &mut ctx).unwrap());
+    }
+
+    /// White-box test: `--build-only` compiles Java classes and skips `java` runtime invocation.
+    #[test]
+    fn test_java_handler_single_build_only_skips_runtime() {
+        use std::sync::Arc;
+        use crate::runner::base::{ExecOutcome, MockCommandExecutor};
+
+        let tmp = TempDir::new().expect("tempdir");
+        let app = tmp.path().join("App.java");
+        fs::write(&app, "public class App { public static void main(String[] args) {} }\n")
+            .unwrap();
+
+        let cfg = Config::default();
+        let printer = Printer::with_colors(Verbosity::Info, Colors::new(false));
+        let mut base = BaseRunner::new_with_stdin(
+            RunnerOptions {
+                build_only: true,
+                ..Default::default()
+            },
+            None,
+            None,
+            &cfg,
+            printer,
+            None,
+        )
+        .expect("runner");
+
+        let mut mock = MockCommandExecutor::new();
+        mock.expect_execute()
+            .times(1)
+            .withf(|spec| spec.compiling && spec.cmd[0] == "javac")
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.01,
+                    memory_bytes: None,
+                })
+            });
+        base.set_executor(Arc::new(mock));
+
+        let mut ctx = ExecutionContext {
+            config: &cfg,
+            printer: &printer,
+            cache: None,
+            runner: &mut base,
+            detected_ext: None,
+        };
+        assert!(JavaHandler.run_single(&app, &mut ctx).unwrap());
+    }
 }

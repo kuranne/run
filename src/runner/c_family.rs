@@ -520,4 +520,104 @@ mod tests {
         };
         assert_eq!(CFamilyHandler::resolve_compiler("c", &ctx), "my-custom-cc");
     }
+
+    /// White-box test: `CPM::get_main_file` recognizes `wmain`, `auto main()`, and ignores non-UTF8.
+    #[test]
+    fn test_cpm_wmain_and_auto_main() {
+        let tmp = TempDir::new().expect("tempdir");
+        let helper = tmp.path().join("helper.cpp");
+        let entry = tmp.path().join("entry.cpp");
+        fs::write(&helper, b"\xff\xfe // binary noise\nint helper() { return 1; }\n").unwrap();
+        fs::write(&entry, "auto main() -> int { return 0; }\n").unwrap();
+        assert_eq!(CPM::get_main_file(&[helper, entry.clone()]), Some(entry));
+
+        let win = tmp.path().join("win.c");
+        fs::write(&win, "int wmain(int argc, wchar_t *argv[]) { return 0; }\n").unwrap();
+        assert_eq!(CPM::get_main_file(std::slice::from_ref(&win)), Some(win));
+    }
+
+    /// White-box test: parallel multi-file build uses `CacheManager` to skip unchanged `.o`
+    /// compilation and invokes `MockCommandExecutor` only for dirty objects + final link + run.
+    #[test]
+    fn test_c_family_multi_file_cache_hit_skips_object_compile() {
+        use std::sync::Arc;
+        use crate::runner::base::{ExecOutcome, MockCommandExecutor};
+        use crate::util::cache::CacheManager;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let a_c = tmp.path().join("a.c");
+        let main_c = tmp.path().join("main.c");
+        fs::write(&a_c, "int f(void) { return 1; }\n").unwrap();
+        fs::write(&main_c, "int f(void); int main(void) { return f(); }\n").unwrap();
+
+        let cache = CacheManager::with_cache_base(tmp.path(), &tmp.path().join("cache"))
+            .expect("cache");
+        // Pre-populate a.c object cache so only main.c needs `-c` compilation.
+        let a_obj = cache.get_object_path(&a_c);
+        fs::create_dir_all(a_obj.parent().unwrap()).unwrap();
+        fs::write(&a_obj, b"ELF_FAKE_OBJ").unwrap();
+        cache.update_cache(&a_c, Some(&a_obj));
+
+        let cfg = Config::default();
+        let printer = Printer::with_colors(Verbosity::Info, Colors::new(false));
+        let mut base = BaseRunner::new_with_stdin(
+            RunnerOptions {
+                out_dir: Some(tmp.path().join("out").to_string_lossy().into_owned()),
+                jobs: Some(2),
+                ..Default::default()
+            },
+            None,
+            None,
+            &cfg,
+            printer,
+            None,
+        )
+        .expect("base runner");
+
+        let mut mock = MockCommandExecutor::new();
+        // Expect 1 compile (`main.c` only, NOT `a.c`), 1 link (both `.o`s), and 1 run.
+        mock.expect_execute()
+            .times(1)
+            .withf(|spec| spec.compiling && spec.cmd.iter().any(|a| a == "-c") && spec.cmd.iter().any(|a| a.ends_with("main.c")))
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.01,
+                    memory_bytes: None,
+                })
+            });
+        mock.expect_execute()
+            .times(1)
+            .withf(|spec| spec.compiling && !spec.cmd.iter().any(|a| a == "-c") && spec.cmd.iter().any(|a| a == "-o"))
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.01,
+                    memory_bytes: None,
+                })
+            });
+        mock.expect_execute()
+            .times(1)
+            .withf(|spec| !spec.compiling)
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.01,
+                    memory_bytes: None,
+                })
+            });
+        base.set_executor(Arc::new(mock));
+
+        let mut ctx = ExecutionContext {
+            config: &cfg,
+            printer: &printer,
+            cache: Some(&cache),
+            runner: &mut base,
+            detected_ext: None,
+        };
+        let ok = CFamilyHandler
+            .run_multi(&[a_c, main_c], &mut ctx)
+            .expect("run_multi");
+        assert!(ok);
+    }
 }

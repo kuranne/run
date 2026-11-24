@@ -580,4 +580,27 @@ mod tests {
         assert_eq!(cli.verbose, 2);
         assert_eq!(cli.env, vec!["A=1", "B=2"]);
     }
+
+    #[test]
+    fn test_preprocessor_equals_forms_and_value_flag_passthrough() {
+        let pre = preprocess_argv(["run", "--expect", "-L", "src"]);
+        assert_eq!(pre.clap_argv, vec!["run", "--expect", "-L", "src"]);
+
+        let cli = parse(&[
+            "-F=-O2",
+            "-F=-Wall",
+            "-a=--mode=fast",
+            "-L=1",
+            "-i=in.txt",
+            "--expect",
+            "expected.txt",
+            "src",
+        ]);
+        assert_eq!(cli.flags_str().as_deref(), Some("-O2 -Wall"));
+        assert_eq!(cli.args_str().as_deref(), Some("--mode=fast"));
+        assert_eq!(cli.all, Some(1));
+        assert_eq!(cli.stdin.as_deref(), Some("in.txt"));
+        assert_eq!(cli.expect.as_deref(), Some("expected.txt"));
+        assert_eq!(cli.files, vec!["src"]);
+    }
 }

@@ -1094,4 +1094,152 @@ mod tests {
         clean_runner.cleanup();
         assert!(!f2.exists());
     }
+
+    /// White-box test: `resolve_with_existing_ancestor` collapses `..` and preserves nonexistent tails.
+    #[test]
+    fn test_resolve_with_existing_ancestor_nonexistent_and_dotdot() {
+        let tmp = TempDir::new().expect("tempdir");
+        let nested = tmp.path().join("a").join("..").join("b").join("missing.txt");
+        let resolved = resolve_with_existing_ancestor(&nested);
+        let canon_tmp = fs::canonicalize(tmp.path()).unwrap_or_else(|_| tmp.path().to_path_buf());
+        assert_eq!(resolved, canon_tmp.join("b").join("missing.txt"));
+    }
+
+    /// White-box test: `parse_custom_env` preserves `=` in values and ignores malformed entries.
+    #[test]
+    fn test_parse_custom_env_edge_cases() {
+        let cfg = Config::default();
+        let runner = BaseRunner::new_with_stdin(
+            RunnerOptions {
+                env: vec![
+                    "TOKEN=a=b=c".to_string(),
+                    "EMPTY=".to_string(),
+                    "MALFORMED_NO_EQ".to_string(),
+                ],
+                ..Default::default()
+            },
+            None,
+            None,
+            &cfg,
+            plain_printer(),
+            None,
+        )
+        .expect("runner");
+        let parsed = runner.parse_custom_env();
+        assert_eq!(parsed.get("TOKEN").map(String::as_str), Some("a=b=c"));
+        assert_eq!(parsed.get("EMPTY").map(String::as_str), Some(""));
+        assert!(!parsed.contains_key("MALFORMED_NO_EQ"));
+    }
+
+    /// White-box test: `MockCommandExecutor` verifies `run_command` memory recording,
+    /// `--expect` match/mismatch, and unreadable expect file handling without spawning host binaries.
+    #[test]
+    fn test_mock_executor_memory_and_expect_paths() {
+        let tmp = TempDir::new().expect("tempdir");
+        let exp_file = tmp.path().join("expected.txt");
+        fs::write(&exp_file, "hello world\n").unwrap();
+
+        let cfg = Config::default();
+        let mut runner = BaseRunner::new_with_stdin(
+            RunnerOptions {
+                memory: true,
+                expect: Some(exp_file.to_string_lossy().into_owned()),
+                target_files: vec![tmp.path().join("app.c")],
+                ..Default::default()
+            },
+            None,
+            None,
+            &cfg,
+            plain_printer(),
+            None,
+        )
+        .expect("runner");
+
+        let mut mock = MockCommandExecutor::new();
+        mock.expect_execute()
+            .times(1)
+            .withf(|spec| spec.cmd == vec!["./app.out"] && spec.capture_stdout && !spec.compiling)
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: "hello world\n".to_string(),
+                    elapsed_secs: 0.05,
+                    memory_bytes: Some(4 * 1024 * 1024),
+                })
+            });
+        runner.set_executor(Arc::new(mock));
+
+        let ok = runner
+            .run_command(&["./app.out".to_string()], false, false)
+            .expect("run_command");
+        assert!(ok);
+        assert!(runner.last_expect_passed);
+        assert_eq!(runner.last_memory_bytes, Some(4 * 1024 * 1024));
+
+        // Mismatch sets `last_expect_passed = false` and returns Ok(false).
+        let mut mismatch_mock = MockCommandExecutor::new();
+        mismatch_mock.expect_execute().times(1).returning(|_| {
+            Ok(ExecOutcome {
+                captured_stdout: "different\n".to_string(),
+                elapsed_secs: 0.01,
+                memory_bytes: Some(2 * 1024 * 1024),
+            })
+        });
+        runner.set_executor(Arc::new(mismatch_mock));
+        let ok2 = runner
+            .run_command(&["./app.out".to_string()], false, false)
+            .expect("mismatch returns Ok(false)");
+        assert!(!ok2);
+        assert!(!runner.last_expect_passed);
+
+        // Compile step records `last_compile_memory_bytes` separately from `last_memory_bytes`.
+        let mut compile_mock = MockCommandExecutor::new();
+        compile_mock
+            .expect_execute()
+            .times(1)
+            .withf(|spec| spec.compiling && !spec.capture_stdout)
+            .returning(|_| {
+                Ok(ExecOutcome {
+                    captured_stdout: String::new(),
+                    elapsed_secs: 0.02,
+                    memory_bytes: Some(12 * 1024 * 1024),
+                })
+            });
+        runner.set_executor(Arc::new(compile_mock));
+        assert!(
+            runner
+                .run_command(&["gcc".to_string(), "app.c".to_string()], false, true)
+                .unwrap()
+        );
+        assert_eq!(runner.last_compile_memory_bytes, Some(12 * 1024 * 1024));
+    }
+
+    /// White-box test: `MockCommandExecutor` propagates compile/execution errors and timeouts.
+    #[test]
+    fn test_mock_executor_error_propagation_and_empty_cmd() {
+        let cfg = Config::default();
+        let mut runner = BaseRunner::new_with_stdin(
+            RunnerOptions::default(),
+            None,
+            None,
+            &cfg,
+            plain_printer(),
+            None,
+        )
+        .expect("runner");
+
+        let empty_err = runner.run_command(&[], false, false).unwrap_err();
+        assert!(empty_err.to_string().contains("empty command"));
+
+        let mut mock = MockCommandExecutor::new();
+        mock.expect_execute()
+            .times(1)
+            .returning(|_| Err(RunError::compilation("Compilation timed out after 1 seconds.")));
+        runner.set_executor(Arc::new(mock));
+
+        let err = runner
+            .run_command(&["gcc".to_string(), "a.c".to_string()], false, true)
+            .unwrap_err();
+        assert!(matches!(err, RunError::Compilation(_)));
+        assert!(err.to_string().contains("timed out"));
+    }
 }
