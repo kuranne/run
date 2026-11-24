@@ -221,6 +221,15 @@ def _build_sanitized_env(
     env["XDG_CONFIG_HOME"] = str(config_home)
     env["XDG_CACHE_HOME"] = str(cache_home)
     env["PATH"] = clean_path(env.get("PATH"))
+
+    # Preserve rustup/cargo toolchain locations when HOME is isolated for tests.
+    real_home = Path.home()
+    rustup_home = os.environ.get("RUSTUP_HOME") or str(real_home / ".rustup")
+    cargo_home = os.environ.get("CARGO_HOME") or str(real_home / ".cargo")
+    if Path(rustup_home).is_dir():
+        env["RUSTUP_HOME"] = rustup_home
+    if Path(cargo_home).is_dir():
+        env["CARGO_HOME"] = cargo_home
     return env
 
 

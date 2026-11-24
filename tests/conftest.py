@@ -135,6 +135,15 @@ def isolated_env(tmp_path: Path) -> dict[str, Any]:
             if key in os.environ:
                 env[key] = os.environ[key]
 
+    # Preserve rustup/cargo toolchain locations when HOME is isolated for tests.
+    real_home = Path.home()
+    rustup_home = os.environ.get("RUSTUP_HOME") or str(real_home / ".rustup")
+    cargo_home = os.environ.get("CARGO_HOME") or str(real_home / ".cargo")
+    if Path(rustup_home).is_dir():
+        env["RUSTUP_HOME"] = rustup_home
+    if Path(cargo_home).is_dir():
+        env["CARGO_HOME"] = cargo_home
+
     return {
         "env": env,
         "home": home,
