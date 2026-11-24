@@ -84,91 +84,26 @@ jobs:
           fi
 
   workflow-check:
-    name: Workflow Checker (actionlint)
+    name: Workflow Check
     needs: changes
     if: needs.changes.outputs.workflows == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install actionlint
-        run: |
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          sudo mv ./actionlint /usr/local/bin/actionlint
-      - name: Lint GitHub Actions workflows
-        run: actionlint -color
+    uses: ./.github/workflows/workflow-check.yml
 
   chore-check:
-    name: Chore & Config Checks
+    name: Chore Check
     needs: changes
     if: needs.changes.outputs.chore == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Shellcheck setup.sh
-        run: shellcheck setup.sh
-      - name: Validate Makefile targets
-        run: make -n build release test lint doc install uninstall clean >/dev/null
-      - name: Validate TOML files
-        run: |
-          python3 - <<'EOF'
-          import pathlib, tomllib
-          for name in ("Cargo.toml", "Run.toml"):
-              p = pathlib.Path(name)
-              if p.is_file():
-                  tomllib.loads(p.read_text(encoding="utf-8"))
-                  print(f"OK: {name}")
-          EOF
+    uses: ./.github/workflows/chore-check.yml
 
-  lint-and-docs:
-    name: Rust Clippy & Docs
+  rust-test:
+    name: Rust & CLI Tests
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-      - name: Rustdoc
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps
-
-  test:
-    name: Test (${{ matrix.os }})
-    needs: changes
-    if: needs.changes.outputs.code == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install pytest
-        run: python -m pip install pytest
-      - name: Rust Unit Tests
-        run: cargo test
-      - name: Build Release Binary
-        run: cargo build --release
-      - name: Black-Box CLI Pytest Suite
-        shell: bash
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            PYTHONPATH=".;tests" RUN_BIN="$PWD/target/release/run.exe" pytest -p no:cacheprovider tests/
-          else
-            PYTHONPATH=".:tests" RUN_BIN="$PWD/target/release/run" pytest -p no:cacheprovider tests/
-          fi
+    uses: ./.github/workflows/rust-test.yml
 
   ci-status:
     name: CI Status Gate
-    needs: [changes, workflow-check, chore-check, lint-and-docs, test]
+    needs: [changes, workflow-check, chore-check, rust-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -177,15 +112,13 @@ jobs:
           RES_CHANGES: ${{ needs.changes.result }}
           RES_WORKFLOWS: ${{ needs.workflow-check.result }}
           RES_CHORE: ${{ needs.chore-check.result }}
-          RES_LINT: ${{ needs.lint-and-docs.result }}
-          RES_TEST: ${{ needs.test.result }}
+          RES_RUST: ${{ needs.rust-test.result }}
         run: |
           for pair in \
             "changes:$RES_CHANGES" \
             "workflow-check:$RES_WORKFLOWS" \
             "chore-check:$RES_CHORE" \
-            "lint-and-docs:$RES_LINT" \
-            "test:$RES_TEST"; do
+            "rust-test:$RES_RUST"; do
             job="${pair%%:*}"
             res="${pair#*:}"
             echo "$job -> $res"
