@@ -2,12 +2,127 @@ name: CI
 
 on:
   push:
-    branches: [main, dev, "refactor/**"]
-  pull_request:
     branches: [main, dev]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
 
 jobs:
+  changes:
+    name: Detect Changes & Branch Policy
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.resolve.outputs.code }}
+      chore: ${{ steps.resolve.outputs.chore }}
+      workflows: ${{ steps.resolve.outputs.workflows }}
+    steps:
+      - name: Enforce PR branch policy for main
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          case "$HEAD_REF" in
+            release/*|hotfix/*)
+              echo "Allowed PR source branch '$HEAD_REF' targeting 'main'."
+              ;;
+            *)
+              echo "::error::PRs to 'main' must come from 'release/*' or 'hotfix/*' (got '$HEAD_REF'). Target 'dev' instead."
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            chore:
+              - 'Makefile'
+              - 'setup.sh'
+              - 'setup.ps1'
+              - 'Dockerfile.test'
+              - 'Run.toml'
+              - '.gitignore'
+            workflows:
+              - '.github/workflows/**'
+
+      - name: Resolve effective suites
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF_NAME: ${{ github.ref_name }}
+          F_CODE: ${{ steps.filter.outputs.code }}
+          F_CHORE: ${{ steps.filter.outputs.chore }}
+          F_WORKFLOWS: ${{ steps.filter.outputs.workflows }}
+        run: |
+          # Always run the full suite on release/hotfix PRs to main, pushes to main, or manual dispatch.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] \
+            || [ "$BASE_REF" = "main" ] \
+            || { [ "$EVENT_NAME" = "push" ] && [ "$REF_NAME" = "main" ]; }; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "chore=true" >> "$GITHUB_OUTPUT"
+            echo "workflows=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=$F_CODE" >> "$GITHUB_OUTPUT"
+            echo "chore=$F_CHORE" >> "$GITHUB_OUTPUT"
+            echo "workflows=$F_WORKFLOWS" >> "$GITHUB_OUTPUT"
+          fi
+
+  workflow-check:
+    name: Workflow Checker (actionlint)
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          sudo mv ./actionlint /usr/local/bin/actionlint
+      - name: Lint GitHub Actions workflows
+        run: actionlint -color
+
+  chore-check:
+    name: Chore & Config Checks
+    needs: changes
+    if: needs.changes.outputs.chore == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shellcheck setup.sh
+        run: shellcheck setup.sh
+      - name: Validate Makefile targets
+        run: make -n build release test lint doc install uninstall clean >/dev/null
+      - name: Validate TOML files
+        run: |
+          python3 - <<'EOF'
+          import pathlib, tomllib
+          for name in ("Cargo.toml", "Run.toml"):
+              p = pathlib.Path(name)
+              if p.is_file():
+                  tomllib.loads(p.read_text(encoding="utf-8"))
+                  print(f"OK: {name}")
+          EOF
+
   lint-and-docs:
+    name: Rust Clippy & Docs
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +137,11 @@ jobs:
         run: cargo doc --no-deps
 
   test:
+    name: Test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -39,12 +158,39 @@ jobs:
       - name: Build Release Binary
         run: cargo build --release
       - name: Black-Box CLI Pytest Suite
-        env:
-          PYTHONPATH: .
+        shell: bash
         run: |
           if [ "${{ runner.os }}" = "Windows" ]; then
-            RUN_BIN="$PWD/target/release/run.exe" pytest -p no:cacheprovider tests/
+            PYTHONPATH=".;tests" RUN_BIN="$PWD/target/release/run.exe" pytest -p no:cacheprovider tests/
           else
-            RUN_BIN="$PWD/target/release/run" pytest -p no:cacheprovider tests/
+            PYTHONPATH=".:tests" RUN_BIN="$PWD/target/release/run" pytest -p no:cacheprovider tests/
           fi
-        shell: bash
+
+  ci-status:
+    name: CI Status Gate
+    needs: [changes, workflow-check, chore-check, lint-and-docs, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify required job outcomes
+        env:
+          RES_CHANGES: ${{ needs.changes.result }}
+          RES_WORKFLOWS: ${{ needs.workflow-check.result }}
+          RES_CHORE: ${{ needs.chore-check.result }}
+          RES_LINT: ${{ needs.lint-and-docs.result }}
+          RES_TEST: ${{ needs.test.result }}
+        run: |
+          for pair in \
+            "changes:$RES_CHANGES" \
+            "workflow-check:$RES_WORKFLOWS" \
+            "chore-check:$RES_CHORE" \
+            "lint-and-docs:$RES_LINT" \
+            "test:$RES_TEST"; do
+            job="${pair%%:*}"
+            res="${pair#*:}"
+            echo "$job -> $res"
+            if [ "$res" != "success" ] && [ "$res" != "skipped" ]; then
+              echo "::error::Job '$job' ended with status '$res'."
+              exit 1
+            fi
+          done
