@@ -253,6 +253,10 @@ impl CompilerRunner {
             self.registry.get_handler_for_ext(&ext, &self.config)
         };
         let Some(handler) = handler_opt else {
+            if Self::is_executable_binary(fp) {
+                self.base.options.target_files = vec![fp.to_path_buf()];
+                return self.base.execute_binary(fp, &[]);
+            }
             return Err(RunError::config(format!("Unsupported extension: {ext}")));
         };
 
@@ -348,6 +352,61 @@ impl CompilerRunner {
         compiling: bool,
     ) -> Result<bool, RunError> {
         self.base.run_command(cmd, use_shell, compiling)
+    }
+
+    /// Return `true` if `path` is a directly executable native binary (ELF, Mach-O, PE,
+    /// or Unix executable file without a source extension / with `.out` or `.exe`).
+    pub fn is_executable_binary(path: &Path) -> bool {
+        use std::io::Read;
+
+        if !path.is_file() {
+            return false;
+        }
+
+        if let Ok(mut f) = fs::File::open(path) {
+            let mut magic = [0u8; 4];
+            if let Ok(n) = f.read(&mut magic) {
+                if n >= 4 {
+                    let is_elf = magic == [0x7f, b'E', b'L', b'F'];
+                    let is_macho = matches!(
+                        magic,
+                        [0xfe, 0xed, 0xfa, 0xce]
+                            | [0xfe, 0xed, 0xfa, 0xcf]
+                            | [0xce, 0xfa, 0xed, 0xfe]
+                            | [0xcf, 0xfa, 0xed, 0xfe]
+                            | [0xca, 0xfe, 0xba, 0xbe]
+                            | [0xbe, 0xba, 0xfe, 0xca]
+                    );
+                    if is_elf || is_macho {
+                        return true;
+                    }
+                }
+                if n >= 2 && magic[0] == b'M' && magic[1] == b'Z' {
+                    return true;
+                }
+            }
+        }
+
+        let ext = dotted_ext_lower(path);
+        if matches!(ext.as_str(), "" | ".out" | ".exe") {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = fs::metadata(path)
+                    && meta.permissions().mode() & 0o111 != 0
+                {
+                    return true;
+                }
+            }
+            #[cfg(windows)]
+            {
+                if ext == ".exe" {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     /// Delegate binary execution to [`BaseRunner::execute_binary`].

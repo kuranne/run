@@ -106,9 +106,11 @@ fn is_existing_runnable_target(token: &str, runner: &CompilerRunner) -> bool {
         return false;
     }
     if p.extension().is_some() {
-        return runner.registry.get_handler(p, &runner.config).is_some();
+        return runner.registry.get_handler(p, &runner.config).is_some()
+            || CompilerRunner::is_executable_binary(p);
     }
     !ScriptHandler::detect_language_from_shebang(p, None).is_empty()
+        || CompilerRunner::is_executable_binary(p)
 }
 
 /// Return `true` when auto-discovered files contain compiled/custom sources that should link together.
@@ -510,6 +512,86 @@ fn run_once(
         };
 
         let ok = match TaskRunner::run_task(&cli.files[0], &config, &task_args, &mut runner.base) {
+            Ok(res) => res,
+            Err(err) => {
+                printer.error(&err.to_string());
+                false
+            }
+        };
+        cleanup_sandbox(started_compose, cli);
+        runner.cleanup();
+        return RunOutcome {
+            exit_code: i32::from(!ok),
+            watch_files: Vec::new(),
+            captured_stdin,
+        };
+    }
+
+    // 1b. Direct PATH command via explicit `-- <cmd> [args...]` (e.g. `run -t -M -- ls -la`).
+    if cli.files.is_empty() && cli.all.is_none() && !cli.extra_run_args.is_empty() {
+        let mut raw_cmd = std::mem::take(&mut runner.base.run_args);
+        let prog = raw_cmd.remove(0);
+        let resolved = if Path::new(&prog).exists() {
+            PathBuf::from(&prog)
+        } else if let Some(found) = SystemSandboxEnv.which(&prog) {
+            found
+        } else {
+            printer.error(&format!("Command not found: {prog}"));
+            return RunOutcome {
+                exit_code: 1,
+                watch_files: Vec::new(),
+                captured_stdin,
+            };
+        };
+
+        let (started_compose, _) = match prepare_sandbox(&mut runner, cli, &[], cwd) {
+            Ok(res) => res,
+            Err(err) => {
+                printer.error(&err.to_string());
+                return RunOutcome {
+                    exit_code: 1,
+                    watch_files: Vec::new(),
+                    captured_stdin,
+                };
+            }
+        };
+        let ok = match runner.execute_binary(&resolved, &raw_cmd) {
+            Ok(res) => res,
+            Err(err) => {
+                printer.error(&err.to_string());
+                false
+            }
+        };
+        cleanup_sandbox(started_compose, cli);
+        runner.cleanup();
+        return RunOutcome {
+            exit_code: i32::from(!ok),
+            watch_files: Vec::new(),
+            captured_stdin,
+        };
+    }
+
+    // 1c. Implicit PATH command when first positional is not a file/task and has no extension (e.g. `run -t echo hi`).
+    if !cli.files.is_empty()
+        && !Path::new(&cli.files[0]).exists()
+        && !cli.files[0].contains('/')
+        && !cli.files[0].contains('\\')
+        && Path::new(&cli.files[0]).extension().is_none()
+        && let Some(resolved) = SystemSandboxEnv.which(&cli.files[0])
+    {
+        let cmd_args: Vec<String> = cli.files[1..].to_vec();
+        let (started_compose, _) = match prepare_sandbox(&mut runner, cli, &[], cwd) {
+            Ok(res) => res,
+            Err(err) => {
+                printer.error(&err.to_string());
+                return RunOutcome {
+                    exit_code: 1,
+                    watch_files: Vec::new(),
+                    captured_stdin,
+                };
+            }
+        };
+        let ok = match runner.execute_binary(&resolved, &cmd_args) {
             Ok(res) => res,
             Err(err) => {
                 printer.error(&err.to_string());

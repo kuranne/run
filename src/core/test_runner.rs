@@ -347,6 +347,13 @@ impl TestcasesRunner {
         let mut is_compiled = false;
         let mut bin_path: Option<PathBuf> = None;
 
+        if !is_multi
+            && target_files.len() == 1
+            && CompilerRunner::is_executable_binary(&target_files[0])
+        {
+            return Ok((true, Some(target_files[0].clone())));
+        }
+
         if is_multi {
             let c_sources: Vec<PathBuf> = target_files
                 .iter()

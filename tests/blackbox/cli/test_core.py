@@ -103,3 +103,41 @@ def test_core_sigint_cleans_up_compiled_binary(
 
     assert proc.returncode != 0
     assert not (work_dir / "hang.out").exists()
+
+
+def test_core_direct_binary_and_path_command_execution(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    # 1. Build a precompiled binary with -B --out-dir, then execute it directly via `run`.
+    src = work_dir / "hello_bin.c"
+    src.write_text(
+        '#include <stdio.h>\n'
+        'int main(int argc, char **argv) {\n'
+        '    printf("BIN_OK:%s\\n", argc > 1 ? argv[1] : "none");\n'
+        '    return 0;\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    build = run_cli(["-B", "--no-cache", "--out-dir", str(work_dir), str(src)])
+    assert build.returncode == 0, combined_output(build)
+    bin_path = work_dir / "hello_bin.out"
+    assert bin_path.exists()
+
+    res_bin = run_cli(["-t", str(bin_path), "world"])
+    assert res_bin.returncode == 0, combined_output(res_bin)
+    assert "BIN_OK:world" in res_bin.stdout
+    assert "Took" in strip_ansi(res_bin.stdout)
+    # Prebuilt user binary must NOT be deleted on cleanup.
+    assert bin_path.exists()
+
+    # 2. Implicit PATH command (`run -t echo hello`).
+    res_path = run_cli(["-t", "echo", "hello_cmd"])
+    assert res_path.returncode == 0, combined_output(res_path)
+    assert "hello_cmd" in res_path.stdout
+    assert "Took" in strip_ansi(res_path.stdout)
+
+    # 3. Explicit `-- <cmd> <flags>` (`run -t -- echo -n flagged`).
+    res_dash = run_cli(["-t", "--", "echo", "dash_cmd"])
+    assert res_dash.returncode == 0, combined_output(res_dash)
+    assert "dash_cmd" in res_dash.stdout
+    assert "Took" in strip_ansi(res_dash.stdout)
