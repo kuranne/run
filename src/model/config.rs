@@ -54,8 +54,34 @@ pub struct SandboxConfig {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
 pub struct TaskTable {
+    /// Human-readable description shown by `-l` / `--list`.
+    pub desc: Option<String>,
     /// Shell command executed by the task.
     pub command: Option<String>,
+    /// Alias for `command` (`go-task` style `cmd = "..."`).
+    pub cmd: Option<String>,
+    /// Ordered list of commands executed sequentially (`cmds = [...]`).
+    pub cmds: Vec<String>,
+    /// Prerequisite task names executed before this task (`deps = [...]`).
+    pub deps: Vec<String>,
+    /// Glob patterns of source inputs for SHA-256 up-to-date checking.
+    pub sources: Vec<String>,
+    /// Paths or globs of generated outputs for SHA-256 up-to-date checking.
+    pub generates: Vec<String>,
+    /// Named parameters mapped positionally from `-- <argv>`.
+    pub params: Vec<String>,
+    /// Task-local variables overriding `[vars]`.
+    pub vars: BTreeMap<String, String>,
+    /// Task-local environment variables merged into child execution.
+    pub env: BTreeMap<String, String>,
+    /// Working directory for task execution (`dir` or `cwd`).
+    pub dir: Option<String>,
+    /// Alias for `dir`.
+    pub cwd: Option<String>,
+    /// Suppress `[ TASK ]` banner output.
+    pub silent: bool,
+    /// Continue execution if a task command returns a non-zero exit code.
+    pub ignore_error: bool,
     /// Run this task inside a container sandbox.
     pub sandbox: bool,
     /// Allow networking when sandboxed.
@@ -64,14 +90,27 @@ pub struct TaskTable {
     pub restrict: bool,
 }
 
+impl TaskTable {
+    /// Return ordered commands configured via `cmds`, `cmd`, or `command`.
+    pub fn commands(&self) -> Vec<&str> {
+        if !self.cmds.is_empty() {
+            return self.cmds.iter().map(String::as_str).collect();
+        }
+        if let Some(c) = self.cmd.as_deref().or(self.command.as_deref()) {
+            return vec![c];
+        }
+        Vec::new()
+    }
+}
+
 /// Task entry under `[tasks]` supporting either a command string or a table.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 pub enum TaskConfig {
     /// Simple `name = "command"` shortcut.
     Simple(String),
-    /// Structured `[tasks.<name>]` table with sandbox/restrict flags.
-    Detailed(TaskTable),
+    /// Structured `[tasks.<name>]` table with dependencies, vars, params, and sandbox flags.
+    Detailed(Box<TaskTable>),
 }
 
 /// Project detector entry under `[projects.<name>]`.
@@ -185,6 +224,8 @@ pub struct Config {
     pub core: CoreConfig,
     /// `[sandbox]` settings.
     pub sandbox: SandboxConfig,
+    /// `[vars]` global task variables.
+    pub vars: BTreeMap<String, String>,
     /// `[tasks]` mappings.
     pub tasks: BTreeMap<String, TaskConfig>,
     /// User `[projects]` mappings preserving TOML insertion order.

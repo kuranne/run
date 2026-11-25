@@ -5,15 +5,19 @@
 //! [`crate::util::substitutions::VariableSubstitutor`], and glob manifest
 //! matching via [`crate::util::glob::find_matching_manifests`].
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
 use crate::core::base::BaseRunner;
-use crate::util::config::{Config, ProjectConfig, TaskConfig};
 use crate::model::error::RunError;
-use crate::util::glob::{find_matching_manifests, has_glob_wildcard};
-use crate::util::output::{Printer, TagColor};
-use crate::util::substitutions::VariableSubstitutor;
+use crate::util::cache::CacheManager;
+use crate::util::config::{Config, ProjectConfig, TaskConfig, TaskTable};
+use crate::util::glob::{compile_glob, find_matching_manifests, has_glob_wildcard};
+use crate::util::output::{Printer, TagColor, UiEvent, emit_tui_event};
+use crate::util::substitutions::{VariableSubstitutor, shell_quote};
 
 /// Split a compound shell command string on unquoted `&&` or `;` into individual
 /// argument vectors, preserving single quotes, double quotes, and backslash escapes.
@@ -141,36 +145,176 @@ impl TaskRunner {
         config.get_tasks().contains_key(name)
     }
 
-    /// Substitute template variables, propagate task-level sandbox flags, and run
-    /// the named `[tasks.<name>]` command chain.
+    /// Print all `[tasks]` defined in `config` with optional parameters and descriptions (`-l` / `--list`).
+    pub fn list_tasks(config: &Config, printer: &Printer) -> i32 {
+        let tasks = config.get_tasks();
+        if tasks.is_empty() {
+            printer.info("No tasks defined in Run.toml.");
+            return 0;
+        }
+        for (name, task_cfg) in tasks {
+            let line = match task_cfg {
+                TaskConfig::Simple(cmd) => format!("{name} -> {cmd}"),
+                TaskConfig::Detailed(table) => {
+                    let params = if table.params.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            " {}",
+                            table
+                                .params
+                                .iter()
+                                .map(|p| format!("<{p}>"))
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        )
+                    };
+                    match table.desc.as_deref() {
+                        Some(d) if !d.is_empty() => format!("{name}{params} — {d}"),
+                        _ => format!("{name}{params}"),
+                    }
+                }
+            };
+            if printer.has_tui_sink() {
+                emit_tui_event(UiEvent::OutputLine(line));
+            } else {
+                println!("{line}");
+            }
+        }
+        0
+    }
+
+    /// Substitute template variables, resolve DAG `deps`, check SHA-256 `sources`/`generates`,
+    /// map `params` / `-- <argv>`, and run the named `[tasks.<name>]` command chain.
     pub fn run_task(
         name: &str,
         config: &Config,
         extra_args: &[String],
         runner: &mut BaseRunner,
     ) -> Result<bool, RunError> {
+        let mut visiting = HashSet::new();
+        let mut completed = HashSet::new();
+        Self::run_task_dag(name, config, extra_args, runner, &mut visiting, &mut completed)
+    }
+
+    fn run_task_dag(
+        name: &str,
+        config: &Config,
+        extra_args: &[String],
+        runner: &mut BaseRunner,
+        visiting: &mut HashSet<String>,
+        completed: &mut HashSet<String>,
+    ) -> Result<bool, RunError> {
+        if completed.contains(name) {
+            return Ok(true);
+        }
+        if !visiting.insert(name.to_string()) {
+            return Err(RunError::config(format!(
+                "Cyclic task dependency detected involving '{name}'."
+            )));
+        }
+
+        let res = Self::run_task_inner(name, config, extra_args, runner, visiting, completed);
+        visiting.remove(name);
+        if matches!(res, Ok(true)) {
+            completed.insert(name.to_string());
+        }
+        res
+    }
+
+    fn run_task_inner(
+        name: &str,
+        config: &Config,
+        extra_args: &[String],
+        runner: &mut BaseRunner,
+        visiting: &mut HashSet<String>,
+        completed: &mut HashSet<String>,
+    ) -> Result<bool, RunError> {
         let task_info = config
             .get_tasks()
             .get(name)
             .ok_or_else(|| RunError::config(format!("Task '{name}' not found in Run.toml.")))?;
 
-        let raw_cmd = match task_info {
+        let out_dir = runner.options.out_dir.as_deref();
+        let mut var_ctx = VariableSubstitutor::build_file_context(None, None, out_dir);
+        for (k, v) in config.get_vars() {
+            var_ctx.insert(format!("vars.{k}"), v.clone());
+        }
+
+        match task_info {
             TaskConfig::Simple(cmd) => {
                 if cmd.trim().is_empty() {
                     return Err(RunError::config(format!(
                         "Task '{name}' must define a non-empty command string."
                     )));
                 }
-                cmd.clone()
+                let append_extra = populate_arg_vars(&mut var_ctx, &[], extra_args, &[cmd.as_str()], name)?;
+                let task_cmd = VariableSubstitutor::substitute_string(cmd, &var_ctx, true);
+                runner
+                    .printer
+                    .action("TASK", &format!("{name}: {task_cmd}"), TagColor::Cyan);
+                let step_args: &[String] = if append_extra { extra_args } else { &[] };
+                run_step(&task_cmd, step_args, runner, false)
             }
             TaskConfig::Detailed(table) => {
-                let cmd = table
-                    .command
-                    .as_deref()
-                    .filter(|s| !s.trim().is_empty())
-                    .ok_or_else(|| {
-                        RunError::config(format!("Task '{name}' must define a 'command' string."))
-                    })?;
+                for dep in &table.deps {
+                    if !Self::run_task_dag(dep, config, &[], runner, visiting, completed)? {
+                        return Ok(false);
+                    }
+                }
+
+                for (k, v) in &table.vars {
+                    var_ctx.insert(format!("vars.{k}"), v.clone());
+                }
+
+                let raw_cmds = table.commands();
+                if raw_cmds.is_empty() && table.deps.is_empty() {
+                    return Err(RunError::config(format!(
+                        "Task '{name}' must define 'cmd', 'cmds', 'command', or 'deps'."
+                    )));
+                }
+                if raw_cmds.is_empty() {
+                    return Ok(true);
+                }
+
+                let append_extra = populate_arg_vars(&mut var_ctx, &table.params, extra_args, &raw_cmds, name)?;
+
+                let resolved_cmds: Vec<String> = raw_cmds
+                    .iter()
+                    .map(|c| VariableSubstitutor::substitute_string(c, &var_ctx, true))
+                    .collect();
+
+                let orig_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                let task_cwd = if let Some(dir_tmpl) = table.dir.as_deref().or(table.cwd.as_deref()) {
+                    let expanded = VariableSubstitutor::substitute_string(dir_tmpl, &var_ctx, false);
+                    let p = PathBuf::from(&expanded);
+                    let abs = if p.is_absolute() { p } else { orig_cwd.join(p) };
+                    if !abs.is_dir() {
+                        return Err(RunError::config(format!(
+                            "Task '{name}' directory does not exist: {}",
+                            abs.display()
+                        )));
+                    }
+                    abs
+                } else {
+                    orig_cwd.clone()
+                };
+
+                let fingerprint_info = if !table.sources.is_empty() && !runner.options.force {
+                    let fp = compute_task_fingerprint(name, table, &var_ctx, &resolved_cmds, &task_cwd)?;
+                    if fp.up_to_date {
+                        if !table.silent {
+                            runner.printer.info(&format!("Task '{name}' is up to date."));
+                        }
+                        return Ok(true);
+                    }
+                    Some(fp)
+                } else {
+                    None
+                };
+
+                let prev_env = runner.options.env.clone();
+
                 if table.sandbox {
                     runner.options.sandbox = true;
                 }
@@ -180,19 +324,238 @@ impl TaskRunner {
                 if table.restrict {
                     runner.options.restrict = true;
                 }
-                cmd.to_string()
+                for (ek, ev) in &table.env {
+                    let expanded_ev = VariableSubstitutor::substitute_string(ev, &var_ctx, false);
+                    runner.options.env.push(format!("{ek}={expanded_ev}"));
+                }
+
+                let switched_cwd = task_cwd != orig_cwd;
+                if switched_cwd {
+                    std::env::set_current_dir(&task_cwd)?;
+                }
+
+                let mut all_ok = true;
+                let total_cmds = resolved_cmds.len();
+                for (idx, cmd_str) in resolved_cmds.iter().enumerate() {
+                    if !table.silent {
+                        runner
+                            .printer
+                            .action("TASK", &format!("{name}: {cmd_str}"), TagColor::Cyan);
+                    }
+                    let step_args: &[String] =
+                        if append_extra && idx + 1 == total_cmds {
+                            extra_args
+                        } else {
+                            &[]
+                        };
+                    match run_step(cmd_str, step_args, runner, false) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            if table.ignore_error {
+                                runner.printer.warning(&format!(
+                                    "Task '{name}' command failed (ignored via ignore_error)."
+                                ));
+                            } else {
+                                all_ok = false;
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            if table.ignore_error {
+                                runner.printer.warning(&format!(
+                                    "Task '{name}' command failed ({err}) (ignored via ignore_error)."
+                                ));
+                            } else {
+                                if switched_cwd {
+                                    let _ = std::env::set_current_dir(&orig_cwd);
+                                }
+                                runner.options.env = prev_env;
+                                return Err(err);
+                            }
+                        }
+                    }
+                }
+
+                if switched_cwd {
+                    let _ = std::env::set_current_dir(&orig_cwd);
+                }
+                runner.options.env = prev_env;
+
+                if all_ok && let Some(fp) = fingerprint_info {
+                    let _ = fp.write_digest();
+                }
+
+                Ok(all_ok)
             }
-        };
-
-        let out_dir = runner.options.out_dir.as_deref();
-        let var_ctx = VariableSubstitutor::build_file_context(None, None, out_dir);
-        let task_cmd = VariableSubstitutor::substitute_string(&raw_cmd, &var_ctx, true);
-
-        runner
-            .printer
-            .action("TASK", &format!("{name}: {task_cmd}"), TagColor::Cyan);
-        run_step(&task_cmd, extra_args, runner, false)
+        }
     }
+}
+
+/// Populate `${args}`, `${1}`..`${N}`, `${args.<i>}`, and declared `params` into `var_ctx`.
+///
+/// Returns `true` when `extra_args` were not explicitly referenced by any command template
+/// and should therefore be appended to the final command for backward compatibility.
+fn populate_arg_vars(
+    var_ctx: &mut HashMap<String, String>,
+    params: &[String],
+    extra_args: &[String],
+    raw_cmds: &[&str],
+    task_name: &str,
+) -> Result<bool, RunError> {
+    let joined_args = extra_args
+        .iter()
+        .map(|a| shell_quote(a))
+        .collect::<Vec<_>>()
+        .join(" ");
+    var_ctx.insert("args".to_string(), joined_args);
+
+    for (idx, val) in extra_args.iter().enumerate() {
+        var_ctx.insert((idx + 1).to_string(), val.clone());
+        var_ctx.insert(format!("args.{idx}"), val.clone());
+    }
+
+    for (idx, param_name) in params.iter().enumerate() {
+        let Some(val) = extra_args.get(idx) else {
+            return Err(RunError::config(format!(
+                "Task '{task_name}' missing required parameter '{param_name}' (position {}).",
+                idx + 1
+            )));
+        };
+        var_ctx.insert(param_name.clone(), val.clone());
+        var_ctx.insert(format!("args.{param_name}"), val.clone());
+        var_ctx.insert(format!("vars.{param_name}"), val.clone());
+    }
+
+    if extra_args.is_empty() {
+        return Ok(false);
+    }
+
+    let references_args = raw_cmds.iter().any(|cmd| {
+        if cmd.contains("{args}") || cmd.contains("{args.") {
+            return true;
+        }
+        if (1..=extra_args.len()).any(|i| cmd.contains(&format!("{{{i}}}"))) {
+            return true;
+        }
+        params
+            .iter()
+            .any(|p| cmd.contains(&format!("{{{p}}}")) || cmd.contains(&format!("{{vars.{p}}}")))
+    });
+
+    Ok(!references_args)
+}
+
+/// SHA-256 task fingerprint state for `sources` / `generates` incremental skipping.
+struct TaskFingerprint {
+    stamp_file: PathBuf,
+    digest: String,
+    up_to_date: bool,
+}
+
+impl TaskFingerprint {
+    fn write_digest(&self) -> std::io::Result<()> {
+        if let Some(parent) = self.stamp_file.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&self.stamp_file, &self.digest)
+    }
+}
+
+fn compute_task_fingerprint(
+    name: &str,
+    table: &TaskTable,
+    var_ctx: &HashMap<String, String>,
+    resolved_cmds: &[String],
+    cwd: &Path,
+) -> Result<TaskFingerprint, RunError> {
+    let mut generates_exist = true;
+    for gen_pat in &table.generates {
+        let expanded = VariableSubstitutor::substitute_string(gen_pat, var_ctx, false);
+        let matched = collect_glob_matches(cwd, &expanded);
+        if matched.is_empty() {
+            generates_exist = false;
+            break;
+        }
+    }
+
+    let mut source_files = Vec::new();
+    for src_pat in &table.sources {
+        let expanded = VariableSubstitutor::substitute_string(src_pat, var_ctx, false);
+        source_files.extend(collect_glob_matches(cwd, &expanded));
+    }
+    source_files.sort();
+    source_files.dedup();
+
+    let mut hasher = Sha256::new();
+    for cmd in resolved_cmds {
+        hasher.update(cmd.as_bytes());
+        hasher.update(b"\0");
+    }
+    for path in &source_files {
+        let rel = path.strip_prefix(cwd).unwrap_or(path);
+        hasher.update(rel.to_string_lossy().as_bytes());
+        hasher.update(b"\0");
+        if let Ok(bytes) = fs::read(path) {
+            hasher.update((bytes.len() as u64).to_le_bytes());
+            hasher.update(&bytes);
+        }
+    }
+    let digest = format!("{:x}", hasher.finalize());
+
+    let stamp_dir = CacheManager::new(cwd)
+        .map(|c| c.cache_dir.join("tasks"))
+        .unwrap_or_else(|_| cwd.join(".run_cache").join("tasks"));
+    let safe_name: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let stamp_file = stamp_dir.join(format!("{safe_name}.sha256"));
+
+    let up_to_date = generates_exist
+        && !source_files.is_empty()
+        && fs::read_to_string(&stamp_file)
+            .is_ok_and(|prev| prev.trim() == digest);
+
+    Ok(TaskFingerprint {
+        stamp_file,
+        digest,
+        up_to_date,
+    })
+}
+
+fn collect_glob_matches(root: &Path, pattern: &str) -> Vec<PathBuf> {
+    if !has_glob_wildcard(pattern) {
+        let p = Path::new(pattern);
+        let candidate = if p.is_absolute() { p.to_path_buf() } else { root.join(p) };
+        return if candidate.exists() { vec![candidate] } else { Vec::new() };
+    }
+
+    let Ok(re) = compile_glob(pattern, !cfg!(windows)) else {
+        return Vec::new();
+    };
+    let mut matches = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if path.is_dir() {
+                if entry.file_name() != ".git" && entry.file_name() != "target" {
+                    stack.push(path);
+                }
+            } else if re.is_match(&rel) {
+                matches.push(path);
+            }
+        }
+    }
+    matches
 }
 
 /// Generic manifest-based project detector and runner driven by `[projects]` in `Run.toml`.

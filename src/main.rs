@@ -864,6 +864,14 @@ fn real_main() -> i32 {
         return 0;
     }
 
+    if cli.mcp {
+        if let Err(err) = run::mcp::run_mcp_server(cli.mcp_root.as_deref()) {
+            eprintln!("MCP server error: {err}");
+            return 1;
+        }
+        return 0;
+    }
+
     let verbosity = Verbosity::from_cli(cli.quiet, cli.verbose);
     let ui_mode = cli.resolve_ui_mode(Colors::is_stdout_tty());
     let printer = Printer::init_global_with_ui(verbosity, cli.no_color || cli.json, ui_mode);
@@ -954,6 +962,17 @@ fn execute_cli(cli: &CliArgs, printer: Printer, ui_mode: UiMode) -> i32 {
 
     if cli.init {
         return i32::from(!ConfigInitializer::init_config(&cwd, cli.force));
+    }
+
+    if cli.list {
+        let config = match Config::load(Some(&cwd), None) {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                printer.error(&err.to_string());
+                return 1;
+            }
+        };
+        return TaskRunner::list_tasks(&config, &printer);
     }
 
     if cli.sandbox_stop {

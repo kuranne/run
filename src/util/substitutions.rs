@@ -19,7 +19,7 @@ use crate::util::output::Printer;
 static VAR_PATTERN: OnceLock<Regex> = OnceLock::new();
 
 /// POSIX shell-quote `value` via `shlex::try_quote`, stripping NUL bytes first.
-fn shell_quote(value: &str) -> String {
+pub(crate) fn shell_quote(value: &str) -> String {
     let sanitized = value.replace('\0', "");
     shlex::try_quote(&sanitized)
         .map(|cow| cow.into_owned())
@@ -141,7 +141,7 @@ impl VariableSubstitutor {
         F: Fn(&str) -> Option<String>,
     {
         let re = VAR_PATTERN.get_or_init(|| {
-            Regex::new(r"(?:\$\{([a-zA-Z0-9_:]+)\}|\{([a-zA-Z0-9_:]+)\})")
+            Regex::new(r"(?:\$\{([a-zA-Z0-9_:.]+)\}|\{([a-zA-Z0-9_:.]+)\})")
                 .expect("valid static VAR_PATTERN")
         });
 

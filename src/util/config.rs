@@ -233,6 +233,14 @@ fn validate_toml_table(
         }
     }
 
+    if let Some(v) = table.get("vars")
+        && !v.is_table()
+    {
+        return Err(RunError::Config(
+            "'vars' section must be a table (dict)".to_string(),
+        ));
+    }
+
     if let Some(v) = table.get("tasks")
         && !v.is_table()
     {
@@ -462,6 +470,7 @@ impl Config {
 
         let core: CoreConfig = deserialize_section(table, "core")?;
         let sandbox: SandboxConfig = deserialize_section(table, "sandbox")?;
+        let vars: BTreeMap<String, String> = deserialize_section(table, "vars")?;
         let tasks: BTreeMap<String, TaskConfig> = deserialize_section(table, "tasks")?;
         let runners: BTreeMap<String, String> = deserialize_section(table, "runners")?;
         let presets: BTreeMap<String, BTreeMap<String, PresetFlags>> =
@@ -489,6 +498,7 @@ impl Config {
             path,
             core,
             sandbox,
+            vars,
             tasks,
             projects,
             runners,
@@ -504,6 +514,11 @@ impl Config {
             .get(lang)
             .cloned()
             .unwrap_or_else(|| default.to_string())
+    }
+
+    /// Return configured `[vars]`.
+    pub fn get_vars(&self) -> &BTreeMap<String, String> {
+        &self.vars
     }
 
     /// Return configured `[tasks]`.

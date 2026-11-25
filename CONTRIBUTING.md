@@ -33,8 +33,9 @@ run install
 
 ```text
 src/
-├── main.rs            # Thin CLI entrypoint, dispatch, watch loop, fzf picker, --json wrapper
-├── lib.rs             # Public crate root: core, model, tui, util
+├── main.rs            # Thin CLI entrypoint, dispatch, watch loop, fzf picker, --json/--mcp wrapper
+├── lib.rs             # Public crate root: core, mcp, model, tui, util
+├── mcp/               # Model Context Protocol (MCP) stdio server (--mcp, --mcp-root)
 ├── model/             # Pure data schemas, errors, options, reports, and trait abstractions
 │   ├── config.rs      # Run.toml structs
 │   ├── error.rs       # RunError enum
@@ -54,6 +55,7 @@ src/
 ├── tui/               # Interactive ratatui workspace (--tui)
 └── util/              # args, cache, completion, config, doctor, env, glob, output, process, sandbox, security, spinner, substitutions, templates
 
+scripts/               # Cross-platform dev/test helpers (dev-check.sh, test-local.sh, test-docker.sh, test-windows.sh)
 xtask/                 # Cross-platform Rust automation (install, uninstall, test, lint, completions)
 tests/
 ├── conftest.py        # Shared pytest fixtures (isolated HOME/cache/config)

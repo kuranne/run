@@ -29,6 +29,9 @@ shlex = "1"
 similar = "2"
 crossterm = "0.28"
 ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+rmcp = { version = "3.11", features = ["server", "macros", "transport-io"] }
+schemars = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "process", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

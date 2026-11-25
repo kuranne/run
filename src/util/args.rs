@@ -288,6 +288,10 @@ pub struct CliArgs {
     #[arg(long = "template", value_name = "NAME")]
     pub template: Option<String>,
 
+    /// List all tasks defined in `Run.toml` and exit.
+    #[arg(short = 'l', long = "list")]
+    pub list: bool,
+
     /// Diagnose available host compilers, runtimes, debuggers, and sandbox tools.
     #[arg(long = "doctor")]
     pub doctor: bool,
@@ -344,6 +348,10 @@ pub struct CliArgs {
     #[arg(long = "timeout", value_name = "SECONDS")]
     pub timeout: Option<f64>,
 
+    /// Enforce maximum execution resident memory (e.g. `256M`, `512MB`, `1G`, or bare MB).
+    #[arg(long = "mem-limit", value_name = "SIZE", value_parser = parse_mem_limit)]
+    pub mem_limit: Option<u64>,
+
     /// Dynamic stdin: `-` for piped stdin, existing file path for file input, or inline text otherwise.
     #[arg(
         short = 'i',
@@ -396,6 +404,14 @@ pub struct CliArgs {
     /// Print the JSON Schema for `--json` output and exit.
     #[arg(long = "json-schema")]
     pub json_schema: bool,
+
+    /// Start an MCP (Model Context Protocol) server over stdio for AI agents.
+    #[arg(long = "mcp", conflicts_with_all = ["tui", "plain", "json"])]
+    pub mcp: bool,
+
+    /// Restrict `--mcp` tool working directories and paths to `<DIR>`.
+    #[arg(long = "mcp-root", value_name = "DIR", requires = "mcp")]
+    pub mcp_root: Option<String>,
 
     /// Micro-benchmark target for `N` iterations (defaults to 10 when value is omitted).
     #[arg(long = "bench", value_name = "N")]
@@ -562,6 +578,7 @@ impl CliArgs {
             tsan: self.tsan,
             sanitize: self.sanitize.clone(),
             timeout: self.timeout,
+            mem_limit_bytes: self.mem_limit,
             stdin,
             stdin_text,
             env: self.env.clone(),
@@ -593,6 +610,44 @@ impl CliArgs {
             UiMode::Modern
         }
     }
+}
+
+/// Parse a human-readable memory limit (`256M`, `256MB`, `512K`, `1G`, `256MiB`, bare MB) into bytes.
+pub fn parse_mem_limit(raw: &str) -> Result<u64, String> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return Err("Memory limit cannot be empty".to_string());
+    }
+    let split_idx = s
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(s.len());
+    let (num_part, unit_part) = s.split_at(split_idx);
+    if num_part.is_empty() {
+        return Err(format!("Invalid memory limit '{raw}': missing number"));
+    }
+    let val: f64 = num_part
+        .parse()
+        .map_err(|_| format!("Invalid memory limit number '{num_part}'"))?;
+    if !val.is_finite() || val <= 0.0 {
+        return Err(format!("Memory limit must be positive (got '{raw}')"));
+    }
+    let unit = unit_part.trim().to_ascii_lowercase();
+    let multiplier: f64 = match unit.as_str() {
+        "" | "m" | "mb" | "mib" => 1024.0 * 1024.0,
+        "b" => 1.0,
+        "k" | "kb" | "kib" => 1024.0,
+        "g" | "gb" | "gib" => 1024.0 * 1024.0 * 1024.0,
+        _ => {
+            return Err(format!(
+                "Invalid memory unit '{unit_part}' in '{raw}'. Use B, K/KB, M/MB, or G/GB."
+            ));
+        }
+    };
+    let bytes = (val * multiplier).round();
+    if bytes < 1.0 || bytes > u64::MAX as f64 {
+        return Err(format!("Memory limit out of range: '{raw}'"));
+    }
+    Ok(bytes as u64)
 }
 
 /// Unescape common C-style escape sequences (`\n`, `\r`, `\t`, `\\`) for `--stdin-text` and dynamic `-i`.

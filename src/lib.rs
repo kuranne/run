@@ -13,6 +13,7 @@
 #![warn(missing_docs)]
 
 pub mod core;
+pub mod mcp;
 pub mod model;
 pub mod tui;
 pub mod util;

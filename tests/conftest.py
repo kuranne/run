@@ -186,6 +186,8 @@ def run_cli(
             env=env,
             input=stdin_text,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             timeout=timeout,
             check=False,

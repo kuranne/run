@@ -31,6 +31,8 @@ pub struct RunReport {
     pub stderr: String,
     /// Whether execution timed out.
     pub timed_out: bool,
+    /// Whether execution exceeded `--mem-limit`.
+    pub memory_limit_exceeded: bool,
 }
 
 /// Single `--test-dir` case outcome inside [`TestSuiteReport`].
@@ -185,6 +187,7 @@ impl JsonReport {
                     memory_bytes,
                     stdout,
                     timed_out,
+                    memory_limit_exceeded,
                 } => {
                     run_report = Some(RunReport {
                         duration_secs,
@@ -192,6 +195,7 @@ impl JsonReport {
                         stdout,
                         stderr: String::new(),
                         timed_out,
+                        memory_limit_exceeded,
                     });
                 }
                 UiEvent::TestCaseResult {
@@ -252,6 +256,9 @@ impl JsonReport {
                 stdout,
                 stderr: stderr_buf,
                 timed_out: false,
+                memory_limit_exceeded: errors
+                    .iter()
+                    .any(|e| e.to_ascii_lowercase().contains("memory limit exceeded")),
             });
         }
 
@@ -314,7 +321,8 @@ impl JsonReport {
                         "peak_memory_bytes": { "type": "integer" },
                         "stdout": { "type": "string" },
                         "stderr": { "type": "string" },
-                        "timed_out": { "type": "boolean" }
+                        "timed_out": { "type": "boolean" },
+                        "memory_limit_exceeded": { "type": "boolean" }
                     }
                 },
                 "diff": { "type": "array", "items": { "type": "string" } },
@@ -392,6 +400,7 @@ mod tests {
                 memory_bytes: Some(2_000_000),
                 stdout: "hello\n".to_string(),
                 timed_out: false,
+                memory_limit_exceeded: false,
             },
             UiEvent::Stderr("note\n".to_string()),
             UiEvent::Log {

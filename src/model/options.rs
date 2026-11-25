@@ -68,6 +68,8 @@ pub struct RunnerOptions {
     pub sanitize: Option<String>,
     /// Maximum execution/compilation timeout in seconds (`--timeout`).
     pub timeout: Option<f64>,
+    /// Maximum execution resident memory in bytes (`--mem-limit`).
+    pub mem_limit_bytes: Option<u64>,
     /// Stdin file path or `"-"` for buffered pipe input (`-i` / `--stdin` / `--stdin-file`).
     pub stdin: Option<String>,
     /// Inline stdin text unescaped (`\n`, `\t`, `\r`, `\\`) and piped to child (`--stdin-text` or dynamic `-i`).
@@ -217,6 +219,8 @@ pub struct ExecSpec {
     pub buffered_stdin: Option<Vec<u8>>,
     /// Optional wall-clock timeout in seconds.
     pub timeout_secs: Option<f64>,
+    /// Optional execution resident memory limit in bytes (`--mem-limit`).
+    pub mem_limit_bytes: Option<u64>,
     /// Optional active ephemeral container `(engine, container_name)` for timeout cleanup.
     pub active_container: Option<(String, String)>,
     /// Suppress compiler stdout/stderr when `--quiet` is active.

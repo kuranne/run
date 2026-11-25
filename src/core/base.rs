@@ -162,8 +162,9 @@ impl CommandExecutor for SystemCommandExecutor {
             }
         };
 
-        let output = child.wait_with_timeout(
+        let output = child.wait_with_limits(
             timeout_dur,
+            spec.mem_limit_bytes,
             kill_info.map(|_| &on_timeout_cb as &dyn Fn()),
         )?;
 
@@ -180,11 +181,37 @@ impl CommandExecutor for SystemCommandExecutor {
 
         if output.timed_out {
             let t_disp = spec.timeout_secs.unwrap_or(0.0);
+            if sink_active && !spec.compiling {
+                emit_tui_event(UiEvent::RunResult {
+                    duration_secs: elapsed_secs,
+                    memory_bytes: output.peak_memory_bytes,
+                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                    timed_out: true,
+                    memory_limit_exceeded: false,
+                });
+            }
             return Err(if spec.compiling {
                 RunError::compilation(format!("Compilation timed out after {t_disp} seconds."))
             } else {
                 RunError::execution(format!("Execution timed out after {t_disp} seconds."))
             });
+        }
+
+        if output.memory_limit_exceeded {
+            let limit_mb = spec.mem_limit_bytes.unwrap_or(0) as f64 / (1024.0 * 1024.0);
+            let used_mb = output.peak_memory_bytes.unwrap_or(0) as f64 / (1024.0 * 1024.0);
+            if sink_active && !spec.compiling {
+                emit_tui_event(UiEvent::RunResult {
+                    duration_secs: elapsed_secs,
+                    memory_bytes: output.peak_memory_bytes,
+                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                    timed_out: false,
+                    memory_limit_exceeded: true,
+                });
+            }
+            return Err(RunError::execution(format!(
+                "Memory limit exceeded ({used_mb:.2} MB > {limit_mb:.2} MB)."
+            )));
         }
 
         let captured_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -687,6 +714,11 @@ impl BaseRunner {
             stdin_path: self.options.stdin.clone(),
             buffered_stdin: self.buffered_stdin.clone(),
             timeout_secs,
+            mem_limit_bytes: if compiling {
+                None
+            } else {
+                self.options.mem_limit_bytes
+            },
             active_container,
             quiet: self.options.quiet,
             track_memory: self.options.memory,
@@ -790,6 +822,7 @@ impl BaseRunner {
                     memory_bytes: res.memory_bytes,
                     stdout: res.captured_stdout.clone(),
                     timed_out: false,
+                    memory_limit_exceeded: false,
                 });
             }
         }
