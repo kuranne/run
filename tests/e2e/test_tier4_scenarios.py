@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 import pytest
 
-from tests.e2e.conftest import ANSI_RE, require_optional_tool, strip_ansi
+from tests.e2e.conftest import ANSI_RE, has_tool, require_optional_tool, strip_ansi
 
 pytestmark = pytest.mark.tier4
 
@@ -321,6 +321,8 @@ def test_s05_polyglot_custom_languages_expect_no_color(
     work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
     """S05: Polyglot workspace with custom [[languages]], --expect diff/pass, and --no-color."""
+    if not has_tool("cc"):
+        pytest.skip("cc is not installed on PATH")
     (work_dir / "Run.toml").write_text(
         "[[languages]]\n"
         'name = "mini_dsl"\n'
@@ -456,6 +458,8 @@ def test_s07_monorepo_nested_config_git_isolation(
     run_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     """S07: .git stops Run.toml/Makefile upward search, falling back to $XDG_CONFIG_HOME/run/Run.toml."""
+    if not has_tool("make"):
+        pytest.skip("make is not installed on PATH")
     xdg_run = isolated_env["config_home"] / "run"
     xdg_run.mkdir(parents=True, exist_ok=True)
     (xdg_run / "Run.toml").write_text(

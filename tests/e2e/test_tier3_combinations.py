@@ -338,6 +338,8 @@ def test_t3_08_jobs_multi_compiler_override_and_verbose(
 ) -> None:
     """-j 2 + -m + --compiler + -v compiles multi-file C in parallel with explicit compiler."""
     compiler = "clang" if has_tool("clang") else "cc"
+    if not has_tool(compiler):
+        pytest.skip(f"{compiler} is not installed on PATH")
     (work_dir / "a.c").write_text(
         "#include <stdio.h>\n"
         "int fn_b(void);\n"
@@ -437,6 +439,8 @@ def test_t3_10_custom_language_compiler_test_dir_and_no_color(
     work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
     """[[languages]] custom compiler + --test-dir + --no-color produces clean summary & exit codes."""
+    if not has_tool("cc"):
+        pytest.skip("cc is not installed on PATH")
     (work_dir / "Run.toml").write_text(
         "[[languages]]\n"
         'name = "my_c"\n'
