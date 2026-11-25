@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0] - 2026-11-26
+
+### 🚀 Complete Rust Rewrite & Interactive CLI/TUI Platform
+
+Version `1.0.0` marks the full rewrite of `run` from Python into native Rust (Edition 2024), delivering faster startup, zero runtime dependencies, an interactive `ratatui` TUI dashboard, micro-benchmarking, differential stress testing, and machine-readable `--json` output for editors and AI agents.
+
+### Added
+- **Pure-Rust Core & Language Handlers**: Native compiler/runner engines for C, C++, Rust, Java, Python, Go, scripts, prebuilt binaries, and `PATH` commands (`-- <cmd>`).
+- **Animated CLI & `--tui` Dashboard**: Vite/Clack-inspired animated CLI (`--plain` for CI/non-TTY) and interactive `ratatui` TUI with auto-rerun watch toggle (`w`), inline stdin editor (`i`), `--test-dir` picker, fuzzy sidebar filter (`/`), and collapsible test output (`Ctrl+O`).
+- **Micro-Benchmarking (`--bench`, `--warmup`)**: Statistical timing (`min`, `median`, `mean`, `p95`, `max`) with sparkline visualization.
+- **Differential Stress Testing (`--stress`, `--runs`, `--seed`, `--checker`)**: Automated generator/brute-force/custom-checker fuzzing with progress bar and mismatch reproduction.
+- **Inline Input & Test Filtering**: Added `--stdin-text`, `--stdin-file`, dynamic `-i`/`--stdin`, and `--filter <glob>` for `--test-dir`.
+- **Machine-Readable JSON (`--json`, `--json-schema`)**: Structured JSON reports (compile/run timing, peak RSS, exit code, per-testcase diffs, bench stats, stress results) plus `.agents/skills/run-cli/` for token-efficient AI agent workflows.
+- **Cross-Platform Automation (`cargo xtask`)**: Pure-Rust `install`, `uninstall`, `test`, `lint`, and `completions` commands across Linux, macOS, and Windows.
+
+### Fixed & Improved
+- **Windows Process-Tree & Cleanup Reliability**: Added Win32 Job Objects (`KILL_ON_JOB_CLOSE` / `TerminateJobObject`) for `--timeout` grandchild cleanup and retry-on-lock `.exe` cleanup.
+- **Documentation & Contributor Experience**: Added `CONTRIBUTING.md`, `AGENTS.md`, modular `docs/`, and `Dockerfile.test`.
+
+---
+
 ## [0.2.1] - 2026-09-11
 
 ### 🛡️ Security, Stability & Process Lifecycle Hardening
