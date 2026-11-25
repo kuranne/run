@@ -6,7 +6,6 @@ pub mod completion;
 pub mod config;
 pub mod doctor;
 pub mod env;
-pub mod errors;
 pub mod glob;
 pub mod init_config;
 pub mod output;

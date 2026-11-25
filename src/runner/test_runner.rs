@@ -492,8 +492,8 @@ mod tests {
     #[test]
     fn test_run_tests_restores_state_on_compile_failure() {
         use std::sync::Arc;
-        use crate::runner::base::MockCommandExecutor;
-        use crate::util::errors::RunError;
+        use crate::model::options::MockCommandExecutor;
+        use crate::model::error::RunError;
 
         let tmp = TempDir::new().expect("tempdir");
         let td = tmp.path().join("cases");

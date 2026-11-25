@@ -19,60 +19,14 @@ use std::time::{Duration, Instant};
 use crate::runner::handler::RunnerOptions;
 use crate::util::config::{Config, SandboxConfig};
 use crate::util::env::PackageMetadata;
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::output::{Printer, TagColor};
 use crate::util::process::MonitoredChild;
+pub use crate::model::options::{CommandExecutor, ExecOutcome, ExecSpec};
 use crate::util::sandbox::{
     ComposeSandbox, ContainerSandbox, NativeRestrictor, PersistentSandbox,
 };
 use crate::util::security::SecurityManager;
-
-/// Parameters describing a single subprocess invocation handed to [`CommandExecutor`].
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExecSpec {
-    /// Final command argv (program + arguments) after optional sandbox/debugger wrapping.
-    pub cmd: Vec<String>,
-    /// Whether to invoke via the system shell (`sh -c` / `cmd /C`).
-    pub use_shell: bool,
-    /// True when this step is a compilation/build command rather than runtime execution.
-    pub compiling: bool,
-    /// True when standard output must be captured (e.g. for `--expect` verification).
-    pub capture_stdout: bool,
-    /// True when interactive debugger TTY passthrough is active (`--debug`/`--gdb`/`--lldb`).
-    pub is_debug: bool,
-    /// Sanitized child environment map.
-    pub env: BTreeMap<String, String>,
-    /// Optional stdin file path or `"-"` for buffered stdin.
-    pub stdin_path: Option<String>,
-    /// Optional buffered stdin bytes when `stdin_path == Some("-")`.
-    pub buffered_stdin: Option<Vec<u8>>,
-    /// Optional wall-clock timeout in seconds.
-    pub timeout_secs: Option<f64>,
-    /// Optional active ephemeral container `(engine, container_name)` for timeout cleanup.
-    pub active_container: Option<(String, String)>,
-    /// Suppress compiler stdout/stderr when `--quiet` is active.
-    pub quiet: bool,
-    /// Whether peak memory tracking is requested (`-M` / `--memory`).
-    pub track_memory: bool,
-}
-
-/// Raw execution outcome returned by a [`CommandExecutor`] implementation.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExecOutcome {
-    /// Captured standard output when `capture_stdout` was requested.
-    pub captured_stdout: String,
-    /// Wall-clock execution duration in seconds.
-    pub elapsed_secs: f64,
-    /// Harvested peak memory consumption in bytes, if available.
-    pub memory_bytes: Option<u64>,
-}
-
-/// Subprocess execution backend for [`BaseRunner`], enabling `mockall` white-box testing.
-#[cfg_attr(test, mockall::automock)]
-pub trait CommandExecutor: Send + Sync + std::fmt::Debug {
-    /// Execute the command described by `spec` and return its [`ExecOutcome`].
-    fn execute(&self, spec: &ExecSpec) -> Result<ExecOutcome, RunError>;
-}
 
 /// Default production [`CommandExecutor`] backed by OS processes and [`MonitoredChild`].
 #[derive(Debug, Clone, Copy, Default)]
@@ -909,6 +863,7 @@ impl BaseRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::options::MockCommandExecutor;
     use crate::runner::test_support::TempDir;
     use crate::util::output::{Colors, Verbosity};
 

@@ -13,7 +13,7 @@ use crate::runner::handler::{
 };
 use crate::util::config::Config;
 use crate::util::env::PackageMetadata;
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::output::Printer;
 use crate::util::sandbox::{SandboxEnv, SystemSandboxEnv};
 

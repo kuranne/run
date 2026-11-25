@@ -23,7 +23,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::util::env::PackageMetadata;
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 
 /// Target operating system classification for normalizing `rusage::ru_maxrss` units.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

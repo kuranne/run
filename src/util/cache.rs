@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::util::env::PackageMetadata;
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::output::Printer;
 
 /// Cached compilation entry stored in `cache.json`.

@@ -20,7 +20,7 @@ use crate::runner::handler::{
 };
 use crate::util::config::Config;
 use crate::util::env::PackageMetadata;
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::output::TagColor;
 
 /// Maximum bytes read per Java source file when scanning for `main` (10 MiB, matching `dev:jpm.py`).
@@ -406,7 +406,8 @@ mod tests {
     #[test]
     fn test_java_handler_multi_mock_argv_and_classpath_dedup() {
         use std::sync::Arc;
-        use crate::runner::base::{ExecOutcome, MockCommandExecutor};
+        use crate::model::options::MockCommandExecutor;
+        use crate::runner::base::ExecOutcome;
 
         let tmp = TempDir::new().expect("tempdir");
         let sub = tmp.path().join("pkg");
@@ -483,7 +484,8 @@ mod tests {
     #[test]
     fn test_java_handler_single_build_only_skips_runtime() {
         use std::sync::Arc;
-        use crate::runner::base::{ExecOutcome, MockCommandExecutor};
+        use crate::model::options::MockCommandExecutor;
+        use crate::runner::base::ExecOutcome;
 
         let tmp = TempDir::new().expect("tempdir");
         let app = tmp.path().join("App.java");

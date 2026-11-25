@@ -14,7 +14,7 @@ use crate::runner::handler::{
 };
 use crate::util::config::Config;
 use crate::util::env::PackageMetadata;
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 
 /// Return `true` if `path` (or its canonical target) matches any boundary in `stop_dirs`.
 fn is_stop_dir(path: &Path, stop_dirs: &[String]) -> bool {
@@ -346,7 +346,8 @@ mod tests {
     #[test]
     fn test_rust_standalone_cache_hit_skips_rustc() {
         use std::sync::Arc;
-        use crate::runner::base::{BaseRunner, ExecOutcome, MockCommandExecutor};
+        use crate::model::options::MockCommandExecutor;
+        use crate::runner::base::{BaseRunner, ExecOutcome};
         use crate::runner::handler::RunnerOptions;
         use crate::util::cache::CacheManager;
 
@@ -402,7 +403,8 @@ mod tests {
     #[test]
     fn test_rust_cargo_release_mode_argv_via_mock() {
         use std::sync::Arc;
-        use crate::runner::base::{BaseRunner, ExecOutcome, MockCommandExecutor};
+        use crate::model::options::MockCommandExecutor;
+        use crate::runner::base::{BaseRunner, ExecOutcome};
         use crate::runner::handler::RunnerOptions;
 
         let tmp = TempDir::new().expect("tempdir");

@@ -17,7 +17,7 @@ use crate::runner::rust_handler::RustHandler;
 use crate::runner::script_handler::ScriptHandler;
 use crate::util::cache::CacheManager;
 use crate::util::config::Config;
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::output::Printer;
 
 /// Prefix `-`-leading relative paths with `./` so compilers and interpreters
@@ -40,78 +40,7 @@ pub(crate) fn dotted_ext_lower(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// CLI and configuration options controlling compilation, execution, debugging, and isolation.
-#[derive(Debug, Clone, Default)]
-pub struct RunnerOptions {
-    /// Compile multiple source files together (`-m` / `--multi`).
-    pub multi: bool,
-    /// Keep compiled output binaries/classes after execution (`--keep` or `-B`).
-    pub keep: bool,
-    /// Compile only without executing the resulting binary (`-B` / `--build-only` / `--no-run`).
-    pub build_only: bool,
-    /// Measure and display wall-clock execution duration (`-t` / `--time`).
-    pub time: bool,
-    /// Measure and display peak resident memory usage (`-M` / `--mem` / `--memory`).
-    pub memory: bool,
-    /// Print commands without executing or deleting files (`-d` / `--dry-run`).
-    pub dry_run: bool,
-    /// Named preset from `Run.toml` `[presets.<name>]` (`-p` / `--preset`).
-    pub preset: Option<String>,
-    /// Disable build/shebang binary caching (`--no-cache`).
-    pub no_cache: bool,
-    /// Suppress routine compiler output and informational logs (`-q` / `--quiet`).
-    pub quiet: bool,
-    /// Watch mode flag (`-w` / `--watch`).
-    pub watch: bool,
-    /// Override interactive prompts, suspicious paths, foreign `.venv` UID, and outside `--expect` (`-f` / `--force`).
-    pub force: bool,
-    /// Parallel C/C++ object compilation worker count (`-j` / `--jobs`).
-    pub jobs: Option<usize>,
-    /// Expected output file path for diff verification (`--expect`).
-    pub expect: Option<String>,
-    /// Batch testcase directory (`--test-dir`).
-    pub test_dir: Option<String>,
-    /// Launch default interactive debugger (`--debug`).
-    pub debug: bool,
-    /// Launch interactive GDB (`--gdb`).
-    pub gdb: bool,
-    /// Launch interactive LLDB (`--lldb`).
-    pub lldb: bool,
-    /// Run binary under Valgrind leak checking (`--valgrind`).
-    pub valgrind: bool,
-    /// Compile with AddressSanitizer + UBSan (`--asan`).
-    pub asan: bool,
-    /// Compile with ThreadSanitizer (`--tsan`).
-    pub tsan: bool,
-    /// Compile with custom `-fsanitize=<value>` (`--sanitize`).
-    pub sanitize: Option<String>,
-    /// Maximum execution/compilation timeout in seconds (`--timeout`).
-    pub timeout: Option<f64>,
-    /// Stdin file path or `"-"` for buffered pipe input (`-i` / `--stdin`).
-    pub stdin: Option<String>,
-    /// Custom `KEY=VALUE` environment overrides passed via `--env`.
-    pub env: Vec<String>,
-    /// Output directory for compiled binaries (`--out-dir`).
-    pub out_dir: Option<String>,
-    /// Explicit compiler override (`--compiler`).
-    pub compiler: Option<String>,
-    /// Enable native Linux Bubblewrap isolation (`--restrict`).
-    pub restrict: bool,
-    /// Enable container sandboxing via Docker/Podman (`--sandbox`).
-    pub sandbox: bool,
-    /// Allow network access inside sandboxed execution (`--sandbox-net`).
-    pub sandbox_net: bool,
-    /// Allow running as root and bypass suspicious flag filtering (`--unsafe`).
-    pub unsafe_mode: bool,
-    /// Cargo release build flag used in Cargo project execution mode.
-    pub release: bool,
-    /// Active source paths, used to extend workspace containment checks for `--expect`.
-    pub target_files: Vec<PathBuf>,
-    /// Extra compiler/interpreter flags already split or appended before `extra_flags_str`.
-    pub extra_flags: Vec<String>,
-    /// Extra runtime arguments appended after target args.
-    pub run_args: Vec<String>,
-}
+pub use crate::model::options::RunnerOptions;
 
 /// Shared execution context passed into [`LanguageHandler`] implementations.
 pub struct ExecutionContext<'a> {

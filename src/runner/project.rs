@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::runner::base::BaseRunner;
 use crate::util::config::{Config, ProjectConfig, TaskConfig};
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::glob::{find_matching_manifests, has_glob_wildcard};
 use crate::util::output::{Printer, TagColor};
 use crate::util::substitutions::VariableSubstitutor;
@@ -501,7 +501,8 @@ mod tests {
     #[test]
     fn test_task_runner_short_circuits_and_via_mock() {
         use std::sync::Arc;
-        use crate::runner::base::{ExecOutcome, MockCommandExecutor};
+        use crate::model::options::MockCommandExecutor;
+        use crate::runner::base::ExecOutcome;
 
         let cfg = Config::from_toml_str(
             r#"

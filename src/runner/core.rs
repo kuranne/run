@@ -19,7 +19,7 @@ use crate::runner::script_handler::ScriptHandler;
 use crate::util::cache::CacheManager;
 use crate::util::config::Config;
 use crate::util::env::PackageMetadata;
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::glob::{match_extension, match_path};
 use crate::util::output::{Printer, TagColor};
 use crate::util::security::Validator;

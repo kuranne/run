@@ -27,7 +27,7 @@ use run::util::completion::CompletionGenerator;
 use run::util::config::{Config, SandboxConfig};
 use run::util::doctor::Doctor;
 use run::util::env::{load_dotenv, PackageMetadata};
-use run::util::errors::RunError;
+use run::model::error::RunError;
 use run::util::init_config::ConfigInitializer;
 use run::util::output::{Printer, TagColor, Verbosity};
 use run::util::sandbox::{ComposeSandbox, ContainerSandbox, PersistentSandbox};

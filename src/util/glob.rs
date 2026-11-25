@@ -15,7 +15,7 @@ use std::sync::{Mutex, OnceLock};
 use regex::{Regex, RegexBuilder};
 
 use crate::util::env::PackageMetadata;
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 
 /// Bounded cache storing compiled glob regular expressions.
 static GLOB_CACHE: OnceLock<Mutex<HashMap<(String, bool), Regex>>> = OnceLock::new();

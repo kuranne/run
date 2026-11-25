@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::runner::handler::{dotted_ext_lower, ExecutionContext, LanguageHandler};
 use crate::util::config::{Config, CustomLanguageConfig};
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::substitutions::VariableSubstitutor;
 
 /// Handler executing user-defined `[[languages]]` configurations and built-in Go.

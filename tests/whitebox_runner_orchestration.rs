@@ -17,7 +17,7 @@ use run::runner::{
     TaskRunner, TestcasesRunner,
 };
 use run::util::config::Config;
-use run::util::errors::RunError;
+use run::model::error::RunError;
 use run::util::output::{Colors, Printer, Verbosity};
 use run::util::sandbox::{ContainerSandbox, ExecOutput, HostOs, SandboxEnv};
 

@@ -18,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Deserialize;
 
 use crate::util::config::{Config, TemplateConfig, TemplateFileEntry, TemplateTable};
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::output::{Printer, TagColor};
 
 /// Embedded `Cargo.toml` used to parse `[package.metadata.run.templates]` defaults.

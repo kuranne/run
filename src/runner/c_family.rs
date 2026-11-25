@@ -22,7 +22,7 @@ use crate::runner::handler::{
 use crate::runner::script_handler::ScriptHandler;
 use crate::util::config::Config;
 use crate::util::env::PackageMetadata;
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::output::TagColor;
 
 /// Maximum bytes read per source file when scanning for `main()` (10 MiB, matching `dev:cpm.py`).
@@ -541,7 +541,8 @@ mod tests {
     #[test]
     fn test_c_family_multi_file_cache_hit_skips_object_compile() {
         use std::sync::Arc;
-        use crate::runner::base::{ExecOutcome, MockCommandExecutor};
+        use crate::model::options::MockCommandExecutor;
+        use crate::runner::base::ExecOutcome;
         use crate::util::cache::CacheManager;
 
         let tmp = TempDir::new().expect("tempdir");

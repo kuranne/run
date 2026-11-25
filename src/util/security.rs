@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path};
 
 use crate::util::env::{PackageMetadata, is_dangerous_env_var as env_is_dangerous};
-use crate::util::errors::RunError;
+use crate::model::error::RunError;
 use crate::util::output::Printer;
 
 /// Enforces privilege restrictions, environment sanitization, and compiler flag filtering.
