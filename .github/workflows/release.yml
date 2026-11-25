@@ -43,9 +43,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build release binary
-        env:
-          TARGET: ${{ matrix.target }}
-        run: cargo build --release --locked --target "$TARGET"
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Smoke test binary (Unix)
         if: runner.os != 'Windows'
@@ -67,9 +65,7 @@ jobs:
           & $bin --json-schema | Out-Null
 
       - name: Generate shell completions
-        env:
-          TARGET: ${{ matrix.target }}
-        run: cargo xtask completions --out-dir "target/$TARGET/completions"
+        run: cargo xtask completions --out-dir target/${{ matrix.target }}/completions
 
       - name: Package release archive (Unix)
         if: runner.os != 'Windows'
