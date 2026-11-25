@@ -1,89 +1,22 @@
-//! Cross-module white-box Rust integration tests using `mockall::mock!`.
+//! Cross-module orchestration white-box tests.
 //!
-//! Exercises orchestration across [`CompilerRunner`], [`Config`], [`CacheManager`],
-//! [`TestcasesRunner`], [`TaskRunner`], [`ProjectRunner`], and [`SandboxEnv`]
-//! without spawning external compilers, runtimes, or container daemons.
+//! Exercises [`CompilerRunner`], [`Config`], [`TestcasesRunner`], [`TaskRunner`],
+//! [`ProjectRunner`], and [`ContainerSandbox`] via `mockall`.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use mockall::mock;
 use mockall::Sequence;
 
-use run::core::{
-    CommandExecutor, CompilerRunner, ExecOutcome, ExecSpec, ProjectRunner, RunnerOptions,
-    TaskRunner, TestcasesRunner,
-};
-use run::util::config::Config;
-use run::model::error::RunError;
+use run::core::{CompilerRunner, ProjectRunner, TaskRunner, TestcasesRunner};
+use run::model::config::Config;
+use run::model::options::RunnerOptions;
+use run::model::sandbox::ExecOutput;
 use run::util::output::{Colors, Printer, Verbosity};
-use run::util::sandbox::{ContainerSandbox, ExecOutput, HostOs, SandboxEnv};
+use run::util::sandbox::ContainerSandbox;
 
-mock! {
-    #[derive(Debug)]
-    pub CmdExec {}
-    impl CommandExecutor for CmdExec {
-        fn execute(&self, spec: &ExecSpec) -> Result<ExecOutcome, RunError>;
-    }
-}
-
-mock! {
-    pub SbEnv {}
-    impl SandboxEnv for SbEnv {
-        fn os(&self) -> HostOs;
-        fn which(&self, bin: &str) -> Option<PathBuf>;
-        fn cwd(&self) -> Result<PathBuf, RunError>;
-        fn uid_gid(&self) -> Option<(u32, u32)>;
-        fn current_pid(&self) -> u32;
-        fn is_pid_alive(&self, pid: u32) -> bool;
-        fn xdg_cache_home(&self) -> Option<PathBuf>;
-        fn home_dir(&self) -> Option<PathBuf>;
-        fn run_capture(
-            &self,
-            program: &str,
-            args: &[String],
-            timeout: Option<Duration>,
-        ) -> Result<ExecOutput, RunError>;
-        fn warn(&self, msg: &str);
-    }
-}
-
-struct TempWorkspace(PathBuf);
-
-impl TempWorkspace {
-    fn new(label: &str) -> Self {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
-        let path = std::env::temp_dir().join(format!(
-            "run_wb_integ_{label}_{}_{}",
-            std::process::id(),
-            nanos
-        ));
-        fs::create_dir_all(&path).expect("create temp workspace");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempWorkspace {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn ok_outcome(stdout: &str) -> Result<ExecOutcome, RunError> {
-    Ok(ExecOutcome {
-        captured_stdout: stdout.to_string(),
-        elapsed_secs: 0.01,
-        memory_bytes: Some(2 * 1024 * 1024),
-    })
-}
+use super::helpers::{ok_outcome, MockCmdExec, MockSbEnv, TempWorkspace};
 
 /// Verify custom `[[languages]]` overrides built-in `.py`, merges preset + CLI flags,
 /// and invokes exact argv via `MockCmdExec`.
