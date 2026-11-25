@@ -4,8 +4,8 @@
 # Config search priority:
 # 1. Project directory (current working directory up to 4 parent levels)
 # 2. Global directory:
-#    - Linux / macOS: ~/.config/run_kuranne/Run.toml ($XDG_CONFIG_HOME)
-#    - Windows: %APPDATA%\run_kuranne\Run.toml
+#    - Linux / macOS: ~/.config/run/Run.toml ($XDG_CONFIG_HOME)
+#    - Windows: %APPDATA%\run\Run.toml
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -53,7 +53,9 @@
 # Extra CLI arguments after the task name are forwarded to the task command.
 # ------------------------------------------------------------------------------
 [tasks]
-# test = "pytest tests/ -v"
+test = "cargo xtask test"
+lint = "cargo xtask lint"
+install = "cargo xtask install"
 # bench = "cargo bench"
 # build = "cmake -B build && cmake --build build"
 # clean = "rm -rf build target"
