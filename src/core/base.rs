@@ -82,7 +82,8 @@ impl CommandExecutor for SystemCommandExecutor {
             }
         }
 
-        if spec.capture_stdout {
+        let sink_active = Printer::global().has_tui_sink();
+        if spec.capture_stdout || (sink_active && spec.compiling) {
             command.stdout(Stdio::piped());
         } else if spec.quiet && spec.compiling {
             command.stdout(Stdio::null());
@@ -90,7 +91,9 @@ impl CommandExecutor for SystemCommandExecutor {
             command.stdout(Stdio::inherit());
         }
 
-        if spec.quiet && spec.compiling {
+        if sink_active {
+            command.stderr(Stdio::piped());
+        } else if spec.quiet && spec.compiling {
             command.stderr(Stdio::null());
         } else {
             command.stderr(Stdio::inherit());
@@ -163,6 +166,11 @@ impl CommandExecutor for SystemCommandExecutor {
             timeout_dur,
             kill_info.map(|_| &on_timeout_cb as &dyn Fn()),
         )?;
+
+        if sink_active && !output.stderr.is_empty() {
+            let stderr_text = String::from_utf8_lossy(&output.stderr).into_owned();
+            emit_tui_event(UiEvent::Stderr(stderr_text));
+        }
 
         if let Some(writer_handle) = stdin_writer {
             let _ = writer_handle.join();
@@ -769,8 +777,23 @@ impl BaseRunner {
         let mem_bytes = if track_mem { res.memory_bytes } else { None };
         if compiling {
             self.last_compile_memory_bytes = res.memory_bytes;
+            if tui_active {
+                emit_tui_event(UiEvent::CompileResult {
+                    duration_secs: res.elapsed_secs,
+                    memory_bytes: res.memory_bytes,
+                    cached: false,
+                });
+            }
         } else {
             self.last_memory_bytes = mem_bytes;
+            if tui_active && !self.capture_silent {
+                emit_tui_event(UiEvent::RunResult {
+                    duration_secs: res.elapsed_secs,
+                    memory_bytes: res.memory_bytes,
+                    stdout: res.captured_stdout.clone(),
+                    timed_out: false,
+                });
+            }
         }
 
         let is_debug = self.options.debug || self.options.gdb || self.options.lldb;

@@ -8,6 +8,7 @@ pub mod config;
 pub mod error;
 pub mod metadata;
 pub mod options;
+pub mod report;
 pub mod sandbox;
 
 pub use config::{
@@ -21,4 +22,7 @@ pub use metadata::{
     PackageMetadata, SandboxMetadata, SecurityMetadata,
 };
 pub use options::{BenchStats, CommandExecutor, ExecOutcome, ExecSpec, RunnerOptions, UiMode};
+pub use report::{
+    CompileReport, JsonReport, RunReport, StressReport, TestCaseReport, TestSuiteReport,
+};
 pub use sandbox::{ExecOutput, HostOs, SandboxEnv};

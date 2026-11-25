@@ -292,7 +292,7 @@ impl TestcasesRunner {
                             passed: false,
                             elapsed_secs: Some(case_elapsed),
                             memory_bytes: runner.base.last_memory_bytes,
-                            actual_output: String::new(),
+                            actual_output: runner.base.last_captured_stdout.clone(),
                             expected_output,
                         });
                     }

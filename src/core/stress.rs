@@ -13,7 +13,7 @@ use crate::core::engine::CompilerRunner;
 use crate::core::test_runner::TestcasesRunner;
 use crate::model::error::RunError;
 use crate::model::options::UiMode;
-use crate::util::output::{Printer, TagColor, Verbosity};
+use crate::util::output::{emit_tui_event, Printer, TagColor, UiEvent, Verbosity};
 use crate::util::spinner::ProgressBar;
 
 /// Configuration for a `--stress` differential fuzzing session.
@@ -355,7 +355,7 @@ impl StressRunner {
 
             if !matched {
                 progress.clear();
-                let _ = Self::save_counterexample(&cfg.save_dir, &gen_input, &brute_out, &sol_out);
+                let saved = Self::save_counterexample(&cfg.save_dir, &gen_input, &brute_out, &sol_out).ok();
                 orig_printer.status(
                     "FAIL",
                     &format!(
@@ -366,6 +366,16 @@ impl StressRunner {
                     TagColor::Red,
                 );
                 orig_printer.diff(&brute_out, &sol_out, "expected.out");
+                emit_tui_event(UiEvent::StressResult {
+                    runs,
+                    start_seed: cfg.start_seed,
+                    passed: false,
+                    failed_iteration: Some(idx + 1),
+                    failed_seed: Some(seed),
+                    fail_in: saved.as_ref().map(|(p, _, _)| p.display().to_string()),
+                    expected_out: saved.as_ref().map(|(_, p, _)| p.display().to_string()),
+                    actual_out: saved.as_ref().map(|(_, _, p)| p.display().to_string()),
+                });
                 all_passed = false;
                 break;
             }
@@ -384,6 +394,16 @@ impl StressRunner {
         runner.base.printer = orig_base_printer;
 
         if all_passed {
+            emit_tui_event(UiEvent::StressResult {
+                runs,
+                start_seed: cfg.start_seed,
+                passed: true,
+                failed_iteration: None,
+                failed_seed: None,
+                fail_in: None,
+                expected_out: None,
+                actual_out: None,
+            });
             if runner.printer.ui_mode() == UiMode::Modern && !runner.printer.has_tui_sink() {
                 progress.finish(runs, 0);
             } else {

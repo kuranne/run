@@ -386,8 +386,16 @@ pub struct CliArgs {
     pub plain: bool,
 
     /// Launch full-screen interactive workspace TUI dashboard.
-    #[arg(long = "tui", conflicts_with = "plain")]
+    #[arg(long = "tui", conflicts_with_all = ["plain", "json"])]
     pub tui: bool,
+
+    /// Emit a single self-contained machine-readable JSON report on stdout.
+    #[arg(long = "json", conflicts_with = "tui")]
+    pub json: bool,
+
+    /// Print the JSON Schema for `--json` output and exit.
+    #[arg(long = "json-schema")]
+    pub json_schema: bool,
 
     /// Micro-benchmark target for `N` iterations (defaults to 10 when value is omitted).
     #[arg(long = "bench", value_name = "N")]
@@ -571,14 +579,15 @@ impl CliArgs {
             tui: self.tui,
             bench: self.bench,
             warmup: self.warmup.unwrap_or(2),
+            json: self.json,
         }
     }
 
-    /// Resolve active [`UiMode`] from `--tui`, `--plain`, and stdout TTY detection.
+    /// Resolve active [`UiMode`] from `--tui`, `--plain`, `--json`, and stdout TTY detection.
     pub const fn resolve_ui_mode(&self, is_tty: bool) -> UiMode {
         if self.tui {
             UiMode::Tui
-        } else if self.plain || !is_tty {
+        } else if self.plain || self.json || !is_tty {
             UiMode::Plain
         } else {
             UiMode::Modern

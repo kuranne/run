@@ -338,6 +338,14 @@ impl TuiApp {
                 self.last_bench = Some(stats);
                 self.tab = MainTab::Output;
             }
+            UiEvent::Stderr(text) => {
+                for line in text.lines() {
+                    self.output_lines.push(line.to_string());
+                }
+            }
+            UiEvent::CompileResult { .. }
+            | UiEvent::RunResult { .. }
+            | UiEvent::StressResult { .. } => {}
         }
     }
 

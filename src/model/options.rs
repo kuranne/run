@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use serde::Serialize;
+
 use crate::model::error::RunError;
 
 /// Terminal presentation mode resolved from CLI flags and TTY detection.
@@ -100,10 +102,12 @@ pub struct RunnerOptions {
     pub bench: Option<usize>,
     /// Warmup iteration count for `--bench` (`--warmup <W>`, default `2`).
     pub warmup: usize,
+    /// Emit structured machine-readable JSON output (`--json`).
+    pub json: bool,
 }
 
 /// Statistical summary computed across micro-benchmark iterations (`--bench`).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BenchStats {
     /// Number of measured iterations executed.
     pub runs: usize,

@@ -32,8 +32,9 @@ use run::util::doctor::Doctor;
 use run::util::env::{load_dotenv, PackageMetadata};
 use run::model::error::RunError;
 use run::model::options::UiMode;
+use run::model::report::JsonReport;
 use run::util::init_config::ConfigInitializer;
-use run::util::output::{Colors, Printer, TagColor, Verbosity};
+use run::util::output::{set_tui_sink, Colors, Printer, TagColor, UiEvent, Verbosity};
 use run::model::sandbox::SandboxEnv;
 use run::util::sandbox::{ComposeSandbox, ContainerSandbox, PersistentSandbox, SystemSandboxEnv};
 use run::util::security::SecurityManager;
@@ -678,6 +679,15 @@ fn run_once(
             };
         }
 
+        if cli.json {
+            printer.error("No target file specified.");
+            return RunOutcome {
+                exit_code: 1,
+                watch_files: Vec::new(),
+                captured_stdin,
+            };
+        }
+
         if let Some(prompted) = prompt_for_file(cwd, &config, &runner, printer.ui_mode()) {
             let target_files = vec![prompted];
             let (started_compose, _) = match prepare_sandbox(&mut runner, cli, &target_files, cwd)
@@ -838,9 +848,60 @@ fn real_main() -> i32 {
 
     let cli = CliArgs::parse_env();
 
+    if cli.json_schema {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&JsonReport::json_schema()).unwrap_or_default()
+        );
+        return 0;
+    }
+
     let verbosity = Verbosity::from_cli(cli.quiet, cli.verbose);
     let ui_mode = cli.resolve_ui_mode(Colors::is_stdout_tty());
-    let printer = Printer::init_global_with_ui(verbosity, cli.no_color, ui_mode);
+    let printer = Printer::init_global_with_ui(verbosity, cli.no_color || cli.json, ui_mode);
+
+    let json_rx = if cli.json {
+        let (tx, rx) = std::sync::mpsc::channel::<UiEvent>();
+        set_tui_sink(Some(tx));
+        Some(rx)
+    } else {
+        None
+    };
+
+    let code = execute_cli(&cli, printer, ui_mode);
+
+    if let Some(rx) = json_rx {
+        set_tui_sink(None);
+        let events: Vec<UiEvent> = rx.try_iter().collect();
+        let mode = if cli.stress.is_some() {
+            "stress"
+        } else if cli.test_dir.is_some() {
+            "test"
+        } else if cli.bench.is_some() {
+            "bench"
+        } else if cli.files.is_empty() && cli.extra_run_args.is_empty() {
+            "project"
+        } else {
+            "run"
+        };
+        let targets = if !cli.files.is_empty() {
+            cli.files.clone()
+        } else {
+            cli.extra_run_args.clone()
+        };
+        let report = JsonReport::from_events(mode, targets, code, events);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).unwrap_or_default()
+        );
+    }
+
+    code
+}
+
+/// Core CLI execution body separated so `--json` can capture and emit a single report on every exit path.
+fn execute_cli(cli: &CliArgs, printer: Printer, ui_mode: UiMode) -> i32 {
+    let verbosity = printer.verbosity();
 
     if let Some(ref shell) = cli.completion {
         if shell.eq_ignore_ascii_case("auto") {
@@ -901,7 +962,7 @@ fn real_main() -> i32 {
                 return 1;
             }
         };
-        return match run::tui::run_tui(&cli, config, &cwd) {
+        return match run::tui::run_tui(cli, config, &cwd) {
             Ok(code) => code,
             Err(err) => {
                 printer.error(&err.to_string());
@@ -917,7 +978,7 @@ fn real_main() -> i32 {
             &format!("run v{}", env!("CARGO_PKG_VERSION")),
             &format!("· {}", cwd.display()),
         );
-        let outcome = run_once(&cli, printer, &cwd, None);
+        let outcome = run_once(cli, printer, &cwd, None);
         if run::util::process::is_interrupted() {
             return 130;
         }
@@ -929,8 +990,8 @@ fn real_main() -> i32 {
     );
     let _ = io::stdout().flush();
 
-    let initial_stdin = read_piped_stdin_once(&cli);
-    let mut outcome = run_once(&cli, printer, &cwd, initial_stdin.as_ref());
+    let initial_stdin = read_piped_stdin_once(cli);
+    let mut outcome = run_once(cli, printer, &cwd, initial_stdin.as_ref());
 
     let mut tracked_mtimes = collect_mtimes(&outcome.watch_files, &cwd);
 
@@ -984,7 +1045,7 @@ fn real_main() -> i32 {
             printer.info("Change detected, Restarting...");
             let _ = io::stdout().flush();
             let cached = outcome.captured_stdin.as_ref();
-            outcome = run_once(&cli, printer, &cwd, cached);
+            outcome = run_once(cli, printer, &cwd, cached);
             tracked_mtimes = collect_mtimes(&outcome.watch_files, &cwd);
         }
     }

@@ -75,6 +75,47 @@ pub enum UiEvent {
     },
     /// Completed micro-benchmark statistics (`--bench`).
     BenchSummary(BenchStats),
+    /// Compilation step outcome for `--json` reporting.
+    CompileResult {
+        /// Compilation duration in seconds.
+        duration_secs: f64,
+        /// Peak resident memory in bytes during compilation.
+        memory_bytes: Option<u64>,
+        /// Whether a cached artifact was reused.
+        cached: bool,
+    },
+    /// Runtime execution outcome for `--json` reporting.
+    RunResult {
+        /// Wall-clock runtime duration in seconds.
+        duration_secs: f64,
+        /// Peak resident memory in bytes during execution.
+        memory_bytes: Option<u64>,
+        /// Captured standard output.
+        stdout: String,
+        /// Whether execution timed out.
+        timed_out: bool,
+    },
+    /// Captured child standard error text (for `--json` / `--tui`).
+    Stderr(String),
+    /// Completed `--stress` differential fuzzing summary.
+    StressResult {
+        /// Total requested stress iterations.
+        runs: usize,
+        /// Starting seed.
+        start_seed: u64,
+        /// Whether all iterations passed.
+        passed: bool,
+        /// 1-based failing iteration index, if failed.
+        failed_iteration: Option<usize>,
+        /// Failing seed value, if failed.
+        failed_seed: Option<u64>,
+        /// Path to saved `fail.in`, if failed.
+        fail_in: Option<String>,
+        /// Path to saved `expected.out`, if failed.
+        expected_out: Option<String>,
+        /// Path to saved `actual.out`, if failed.
+        actual_out: Option<String>,
+    },
 }
 
 /// Global TUI sink mutex accessor.
