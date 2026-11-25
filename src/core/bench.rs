@@ -112,15 +112,26 @@ impl BenchRunner {
         let orig_mem = runner.base.options.memory;
         let orig_quiet = runner.base.options.quiet;
         let orig_bench = runner.base.options.bench;
+        let orig_printer = runner.printer;
+        let orig_base_printer = runner.base.printer;
         let verbose = runner.printer.verbosity() >= Verbosity::Verbose;
 
         runner.base.options.time = false;
         runner.base.options.memory = true;
         runner.base.options.quiet = !verbose;
         runner.base.options.bench = Some(runs);
+        if !verbose {
+            let quiet_printer = Printer::with_ui_mode(
+                Verbosity::Quiet,
+                orig_printer.colors(),
+                orig_printer.ui_mode(),
+            );
+            runner.printer = quiet_printer;
+            runner.base.printer = quiet_printer;
+        }
 
         let total_steps = warmup + runs;
-        let progress = ProgressBar::new(runner.printer, total_steps);
+        let progress = ProgressBar::new(orig_printer, total_steps);
         let mut samples = Vec::with_capacity(runs);
         let mut peak_mem: Option<u64> = None;
         let mut succeeded = true;
@@ -146,14 +157,16 @@ impl BenchRunner {
                     }
                 }
                 Ok(false) => {
-                    runner.printer.error(&format!(
+                    progress.clear();
+                    orig_printer.error(&format!(
                         "Benchmark aborted: {label} failed during {step_label}"
                     ));
                     succeeded = false;
                     break;
                 }
                 Err(err) => {
-                    runner.printer.error(&format!(
+                    progress.clear();
+                    orig_printer.error(&format!(
                         "Benchmark aborted during {step_label}: {err}"
                     ));
                     succeeded = false;
@@ -166,6 +179,8 @@ impl BenchRunner {
         runner.base.options.memory = orig_mem;
         runner.base.options.quiet = orig_quiet;
         runner.base.options.bench = orig_bench;
+        runner.printer = orig_printer;
+        runner.base.printer = orig_base_printer;
 
         if !succeeded {
             return false;

@@ -13,7 +13,7 @@ use crate::core::engine::CompilerRunner;
 use crate::core::test_runner::TestcasesRunner;
 use crate::model::error::RunError;
 use crate::model::options::UiMode;
-use crate::util::output::TagColor;
+use crate::util::output::{Printer, TagColor, Verbosity};
 use crate::util::spinner::ProgressBar;
 
 /// Configuration for a `--stress` differential fuzzing session.
@@ -206,13 +206,22 @@ impl StressRunner {
         let orig_env = runner.base.options.env.clone();
         let orig_buffered = runner.base.buffered_stdin().map(|b| b.to_vec());
         let orig_silent = runner.base.capture_silent;
+        let orig_printer = runner.printer;
+        let orig_base_printer = runner.base.printer;
 
+        let quiet_printer = Printer::with_ui_mode(
+            Verbosity::Quiet,
+            orig_printer.colors(),
+            orig_printer.ui_mode(),
+        );
         runner.base.options.quiet = true;
         runner.base.options.time = false;
         runner.base.options.memory = false;
         runner.base.capture_silent = true;
+        runner.printer = quiet_printer;
+        runner.base.printer = quiet_printer;
 
-        let progress = ProgressBar::new(runner.printer, runs);
+        let progress = ProgressBar::new(orig_printer, runs);
         let mut all_passed = true;
 
         for idx in 0..runs {
@@ -229,7 +238,8 @@ impl StressRunner {
             let gen_input = match Self::run_target(runner, &gen_target, &[seed.to_string()]) {
                 Ok((true, out)) => out,
                 Ok((false, _)) => {
-                    runner.printer.error(&format!(
+                    progress.clear();
+                    orig_printer.error(&format!(
                         "Generator failed on iteration #{} (seed {seed})",
                         idx + 1
                     ));
@@ -237,7 +247,8 @@ impl StressRunner {
                     break;
                 }
                 Err(err) => {
-                    runner.printer.error(&format!(
+                    progress.clear();
+                    orig_printer.error(&format!(
                         "Generator error on iteration #{} (seed {seed}): {err}",
                         idx + 1
                     ));
@@ -256,8 +267,9 @@ impl StressRunner {
             let brute_out = match Self::run_target(runner, &brute_target, &[]) {
                 Ok((true, out)) => out,
                 Ok((false, out)) => {
+                    progress.clear();
                     let _ = Self::save_counterexample(&cfg.save_dir, &gen_input, &out, "");
-                    runner.printer.error(&format!(
+                    orig_printer.error(&format!(
                         "Brute/reference failed on iteration #{} (seed {seed}). Saved fail.in in {}",
                         idx + 1,
                         cfg.save_dir.display()
@@ -266,8 +278,9 @@ impl StressRunner {
                     break;
                 }
                 Err(err) => {
+                    progress.clear();
                     let _ = Self::save_counterexample(&cfg.save_dir, &gen_input, "", "");
-                    runner.printer.error(&format!(
+                    orig_printer.error(&format!(
                         "Brute/reference error on iteration #{} (seed {seed}): {err}",
                         idx + 1
                     ));
@@ -285,8 +298,9 @@ impl StressRunner {
             let sol_out = match Self::run_target(runner, &sol_target, &[]) {
                 Ok((true, out)) => out,
                 Ok((false, out)) => {
+                    progress.clear();
                     let _ = Self::save_counterexample(&cfg.save_dir, &gen_input, &brute_out, &out);
-                    runner.printer.status(
+                    orig_printer.status(
                         "FAIL",
                         &format!(
                             "Solution exited non-zero on iteration #{} (seed {seed}). Saved fail.in, expected.out, actual.out in {}",
@@ -299,8 +313,9 @@ impl StressRunner {
                     break;
                 }
                 Err(err) => {
+                    progress.clear();
                     let _ = Self::save_counterexample(&cfg.save_dir, &gen_input, &brute_out, "");
-                    runner.printer.status(
+                    orig_printer.status(
                         "FAIL",
                         &format!(
                             "Solution failed on iteration #{} (seed {seed}): {err}. Saved fail.in in {}",
@@ -339,8 +354,9 @@ impl StressRunner {
             };
 
             if !matched {
+                progress.clear();
                 let _ = Self::save_counterexample(&cfg.save_dir, &gen_input, &brute_out, &sol_out);
-                runner.printer.status(
+                orig_printer.status(
                     "FAIL",
                     &format!(
                         "Mismatch on iteration #{} (seed {seed}). Saved fail.in, expected.out, actual.out in {}",
@@ -349,9 +365,7 @@ impl StressRunner {
                     ),
                     TagColor::Red,
                 );
-                runner
-                    .printer
-                    .diff(&brute_out, &sol_out, "expected.out");
+                orig_printer.diff(&brute_out, &sol_out, "expected.out");
                 all_passed = false;
                 break;
             }
@@ -366,6 +380,8 @@ impl StressRunner {
         runner.base.options.env = orig_env;
         runner.base.set_buffered_stdin(orig_buffered);
         runner.base.capture_silent = orig_silent;
+        runner.printer = orig_printer;
+        runner.base.printer = orig_base_printer;
 
         if all_passed {
             if runner.printer.ui_mode() == UiMode::Modern && !runner.printer.has_tui_sink() {

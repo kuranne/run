@@ -199,6 +199,16 @@ impl ProgressBar {
         let _ = out.flush();
     }
 
+    /// Clear the active inline progress bar line on TTY without printing a summary.
+    pub fn clear(&self) {
+        if self.printer.ui_mode() == UiMode::Modern
+            && Colors::is_stdout_tty()
+            && !self.printer.has_tui_sink()
+        {
+            clear_line();
+        }
+    }
+
     /// Clear the inline progress bar and print the batch completion summary.
     pub fn finish(&self, passed: usize, failed: usize) {
         if self.printer.ui_mode() != UiMode::Modern || self.printer.has_tui_sink() {
