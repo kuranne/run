@@ -31,7 +31,8 @@ use run::model::error::RunError;
 use run::model::options::UiMode;
 use run::util::init_config::ConfigInitializer;
 use run::util::output::{Colors, Printer, TagColor, Verbosity};
-use run::util::sandbox::{ComposeSandbox, ContainerSandbox, PersistentSandbox};
+use run::model::sandbox::SandboxEnv;
+use run::util::sandbox::{ComposeSandbox, ContainerSandbox, PersistentSandbox, SystemSandboxEnv};
 use run::util::security::SecurityManager;
 use run::util::template_manager::TemplateManager;
 
@@ -144,9 +145,112 @@ fn read_piped_stdin_once(cli: &CliArgs) -> Option<Vec<u8>> {
     None
 }
 
-/// Prompt interactively (or read one line) when `run` is invoked with no target files or project.
-fn prompt_for_file() -> Option<PathBuf> {
-    print!("[ INPUT ] No file given. Enter file to run: ");
+/// Collect relative paths of runnable source files under `cwd` for `fzf` selection.
+fn collect_fzf_candidates(cwd: &Path, config: &Config, runner: &CompilerRunner) -> Vec<String> {
+    let meta = PackageMetadata::get();
+    let exclude = config.get_exclude();
+    let mut results = Vec::new();
+    let mut stack = vec![(cwd.to_path_buf(), 0usize)];
+
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            if path.is_dir() {
+                if depth < 4
+                    && !meta.excludes.discovery_ignore_dirs.iter().any(|d| d == &name)
+                    && !exclude.dirs.iter().any(|d| d == &name)
+                {
+                    stack.push((path, depth + 1));
+                }
+            } else if path.is_file()
+                && !exclude.files.iter().any(|f| f == &name)
+                && is_existing_runnable_target(&path.to_string_lossy(), runner)
+            {
+                let rel = path
+                    .strip_prefix(cwd)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .into_owned();
+                results.push(rel);
+            }
+        }
+    }
+
+    results.sort();
+    results
+}
+
+/// Launch interactive `fzf` picker on TTY when `fzf` is available on `PATH`.
+///
+/// Returns `Some(Some(path))` if a file was picked, `Some(None)` if the user
+/// cancelled `fzf`, or `None` if `fzf` is unavailable / stdout+stdin are non-TTY.
+fn try_fzf_picker(cwd: &Path, config: &Config, runner: &CompilerRunner) -> Option<Option<PathBuf>> {
+    if !io::stdin().is_tty() || !io::stdout().is_tty() {
+        return None;
+    }
+    let fzf_bin = SystemSandboxEnv.which("fzf")?;
+    let candidates = collect_fzf_candidates(cwd, config, runner);
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let mut child = std::process::Command::new(fzf_bin)
+        .args([
+            "--prompt",
+            "run > ",
+            "--height",
+            "40%",
+            "--layout",
+            "reverse",
+            "--border",
+            "--exit-0",
+        ])
+        .current_dir(cwd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .ok()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(candidates.join("\n").as_bytes());
+    }
+
+    let output = child.wait_with_output().ok()?;
+    if !output.status.success() {
+        return Some(None);
+    }
+    let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if selected.is_empty() {
+        Some(None)
+    } else {
+        Some(Some(PathBuf::from(selected)))
+    }
+}
+
+/// Prompt interactively (via `fzf` on TTY when installed, or line prompt fallback) when `run` is invoked with no target files or project.
+fn prompt_for_file(
+    cwd: &Path,
+    config: &Config,
+    runner: &CompilerRunner,
+    ui_mode: UiMode,
+) -> Option<PathBuf> {
+    if let Some(fzf_choice) = try_fzf_picker(cwd, config, runner) {
+        return fzf_choice;
+    }
+
+    if ui_mode == UiMode::Modern {
+        print!("│  ? No file given. Enter file to run: ");
+    } else {
+        print!("[ INPUT ] No file given. Enter file to run: ");
+    }
     let _ = io::stdout().flush();
 
     let mut line = String::new();
@@ -462,7 +566,7 @@ fn run_once(
             };
         }
 
-        if let Some(prompted) = prompt_for_file() {
+        if let Some(prompted) = prompt_for_file(cwd, &config, &runner, printer.ui_mode()) {
             let target_files = vec![prompted];
             let (started_compose, _) = match prepare_sandbox(&mut runner, cli, &target_files, cwd)
             {
@@ -855,6 +959,40 @@ mod tests {
         let cfg = Config::default();
         assert!(has_multi_compilable(&[src_c.clone(), src_py.clone()], &cfg));
         assert!(!has_multi_compilable(std::slice::from_ref(&src_py), &cfg));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_collect_fzf_candidates_filters_runnable_files() {
+        let dir = make_temp_dir("fzf");
+        let sub = dir.join("src");
+        let ignored = dir.join("node_modules");
+        fs::create_dir_all(&sub).unwrap();
+        fs::create_dir_all(&ignored).unwrap();
+        fs::write(dir.join("main.c"), "int main(void){return 0;}\n").unwrap();
+        fs::write(sub.join("helper.py"), "print(1)\n").unwrap();
+        fs::write(dir.join("README.md"), "# doc\n").unwrap();
+        fs::write(ignored.join("dep.py"), "print(2)\n").unwrap();
+
+        let printer = Printer::with_colors(Verbosity::Quiet, Colors::new(false));
+        let cfg = Config::default();
+        let runner = CompilerRunner::with_cache_base(
+            RunnerOptions::default(),
+            None,
+            None,
+            cfg.clone(),
+            printer,
+            &dir,
+            &dir.join("cache"),
+        )
+        .expect("runner");
+
+        let candidates = collect_fzf_candidates(&dir, &cfg, &runner);
+        assert!(candidates.contains(&"main.c".to_string()));
+        assert!(candidates.contains(&format!("src{}helper.py", std::path::MAIN_SEPARATOR)));
+        assert!(!candidates.iter().any(|c| c.contains("README.md")));
+        assert!(!candidates.iter().any(|c| c.contains("node_modules")));
 
         let _ = fs::remove_dir_all(&dir);
     }
