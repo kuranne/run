@@ -1,80 +1,91 @@
-# Testing & Benchmarking Guide
+# Testing, Benchmarking & Stress Testing Guide
 
-`run` includes built-in competitive programming tools, execution benchmarks, output expectation verification, and batch testcase runners.
+`run` includes built-in execution metrics, flexible stdin handling, output expectation diffs, batch testcase runners, micro-benchmarking, and differential stress testing.
 
 ---
 
-## Benchmarking: Execution Time & Memory
+## 1. Execution Time & Peak Memory (`-t`, `-M`)
 
-### Measuring Time (`-t, --time`)
-Measures exact wall-clock execution time:
 ```bash
-run solution.cpp -t
-# [ TIME ] Took 0.042s
-```
-
-### Measuring Peak Memory (`-M, --mem, --memory`)
-Tracks peak Resident Set Size (RSS) during execution:
-```bash
-run solution.py -M
-# [ MEMORY ] Peak Memory: 18.42 MB
-```
-
-### Combined Benchmark (`-tM`)
-```bash
-run solution.cpp -tM
-# [ BENCH ] Took 0.038s | Peak Memory: 4.12 MB
+run solution.cpp -t         # Wall-clock duration
+run solution.py -M          # Peak Resident Set Size (RSS)
+run solution.cpp -tM        # Both time and peak memory
+run -t -M ./prebuilt_bin    # Works on local binaries
+run -t -M -- ls -la         # Works on any PATH command
 ```
 
 ---
 
-## Standard Input Redirection (`-i, --stdin`)
+## 2. Standard Input (`-i` / `--stdin`, `--stdin-file`, `--stdin-text`)
 
-### Pipe from Shell Stream
-```bash
-echo "10 20" | run solution.py -i
-```
+| Flag | Behavior |
+|------|----------|
+| `-i` / `--stdin` (no value or `-`) | Reads piped stdin from the shell (`echo "1 2" \| run app.py -i`) |
+| `-i <source>` / `--stdin <source>` | **Dynamic**: reads from `<source>` if it is an existing file, otherwise passes `<source>` as inline text (unescaping `\n`, `\t`, `\r`, `\\`) |
+| `--stdin-file <file>` | Strictly reads from `<file>` (errors if missing or a directory) |
+| `--stdin-text <text>` | Strictly passes inline `<text>` (unescaping `\n`, `\t`, `\r`, `\\`) |
 
-### Read from File
 ```bash
-run solution.cpp -tM -i input.txt
+run main.c --stdin-text "5 10\n"
+run main.c --stdin-file input.txt
+run main.c -i "5 10\n"
+run main.c -i input.txt
+echo "5 10" | run main.c -i
 ```
 
 ---
 
-## Output Expectation Verification (`--expect`)
+## 3. Output Expectation Diffs (`--expect`)
 
-Automatically compares program output against an expected answer file and prints a colored unified diff if they differ:
+Compare program `stdout` against an expected file with colorized unified diffs on mismatch:
 
 ```bash
 run solution.cpp -i in.txt --expect out.txt -tM
 ```
 
-- If matches: `[ PASS ] Output matches out.txt`
-- If differs: `[ FAIL ] Output mismatch with out.txt` followed by line-by-line diff.
+---
+
+## 4. Batch Testcase Runner (`--test-dir` & `--filter`)
+
+Compiles compiled-language targets **once** and runs every paired testcase (`*.in`+`*.out`, `*.in`+`*.ans`, `in*.txt`+`out*.txt`) in natural numeric order:
+
+```bash
+run solution.cpp --test-dir cases/ -tM
+run solution.cpp --test-dir cases/ --filter "edge_*"
+```
 
 ---
 
-## Batch Testcase Directory Runner (`--test-dir`)
+## 5. Micro-Benchmarking (`--bench [N]` & `--warmup [W]`)
 
-Run a solution against an entire suite of testcases in one command:
+Compiles once (reusing the SHA-256 build cache), runs warmup + measured iterations, suppresses noisy child stdout (unless `-v` is passed), fails fast on errors, and reports **min / median / mean / p95 / max** wall-clock time and peak RSS (with a Unicode sparkline `▁▂▃▄▅▆▇█` on TTYs):
 
 ```bash
-run solution.cpp --test-dir ./testcases/ -tM
+run --bench main.c                      # Default: 10 runs, 2 warmup
+run --bench 50 --warmup 5 main.c        # Custom counts
+run --bench 20 ./a.out                  # Prebuilt binary
+run --bench 20 -- ls -la                # PATH command
 ```
 
-`run` automatically pairs matching files in the directory:
-- `01.in` + `01.out`
-- `test_01.in` + `test_01.ans`
-- `in1.txt` + `out1.txt`
+---
 
-### Sample Output:
-```text
-=== Running Test Suite (3 cases) ===
-[ 1/3 ] PASS (01.in -> 01.out) [0.012s]
-[ 2/3 ] PASS (02.in -> 02.out) [0.015s]
-[ 3/3 ] FAIL (03.in -> 03.out) [0.014s]
+## 6. Differential Stress Testing (`--stress`)
 
-=== Test Summary ===
-Passed: 2/3 (66.7%)
+Compare a fast candidate (`sol`) against a trusted reference (`brute`) on randomly generated inputs (`gen`) until they diverge:
+
+```bash
+run sol.cpp --stress gen.py brute.cpp
+run sol.rs  --stress gen.cpp brute.py --runs 500 --seed 42
+run sol.cpp --stress gen.py brute.cpp --checker check.py
 ```
+
+### Generator (`gen`) Contract
+- Receives the current seed as `argv[1]` and `RUN_SEED=<seed>` in its environment.
+- Prints **one complete test case** to `stdout`, which `run` pipes into both `brute` and `sol`.
+
+### Custom Checker (`--checker`) Contract
+- Receives `<in_path> <expected_path> <actual_path>` as positional arguments.
+- Exits `0` if valid, non-zero if invalid.
+
+### On Failure
+- Stops immediately (fail-fast), saves `fail.in`, `expected.out`, and `actual.out` (in cwd or `--out-dir`), and prints the failing seed and colorized unified diff.

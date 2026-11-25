@@ -1,201 +1,87 @@
-# Auto Compiler & Runner
+# `run` — Universal Compiler, Runner & Dev Toolkit
 
-A smart, high-performance build system, test runner, and developer productivity tool. It handles automatic language detection, compilation, execution, testing, benchmarking, and cleanup across multiple programming languages.
-
----
-
-## Table of Contents
-
-- [Features](#-features)
-- [Supported Languages](#-supported-languages)
-- [Installation](#-installation)
-- [Updating](#-updating)
-- [Basic Usage](#-basic-usage)
-- [Essential Daily Flags](#-essential-daily-flags)
-- [Configuration (`Run.toml`)](#-configuration-runtoml)
-- [Documentation Hub](#-documentation-hub)
+A fast, cross-platform Rust CLI for compiling, running, testing, benchmarking, stress-testing, and debugging code across multiple languages — with a Vite/Clack-style animated CLI, an interactive `ratatui` TUI, and machine-readable `--json` output for scripts and AI agents.
 
 ---
 
-## Features
+## Install
 
-- **Multi-Language Support**: Automatically detects and runs C/C++, Rust, Python, Java, Go, Zig, Node.js, Ruby, Perl, Lua, and Bash.
-- **C/C++ Scripting & Shebang Execution**: Run C and C++ programs as executable scripts with `#!/usr/bin/env run`, persistent binary caching, inline directives (`// run: -lm`), and zero workspace pollution.
-- **Smart Compilation**: Compiles C/C++/Rust/Java automatically before execution and cleans up temporary binaries.
-- **CPM (C Project Manager)**: Multi-file compilation with automatic `main()` entrypoint detection regardless of file ordering.
-- **Built-in Testing & Benchmarks**: Real-time execution time (`-t`), peak memory tracking (`-M`), output expectation diffs (`--expect`), and batch testcase runner (`--test-dir`).
-- **Interactive Debuggers & Sanitizers**: One-flag launch for LLDB, GDB, Python pdb, Node inspector, Valgrind, AddressSanitizer, and ThreadSanitizer.
-- **Template Scaffolding**: Generate single-file starter code or multi-file project bundles (`run --new`).
-- **Intelligent Caching**: Fast incremental compilation with automatic cache management.
-- **Shell Autocompletion**: Tab completion for Zsh (including `_evalcache`), Bash, Fish, and PowerShell.
-- **Cross-Platform**: Full support for Linux, macOS, and Windows.
+**Requirements:** Rust toolchain (`cargo` / `rustc`) and `git`.
 
----
-
-## Supported Languages
-
-| Language | Extension | Method | Default Runner |
-|----------|-----------|--------|----------------|
-| **C** | `.c` | Compiler | `gcc` / `clang` |
-| **C++** | `.cpp`, `.cc`, `.cxx` | Compiler | `g++` / `clang++` |
-| **Rust** | `.rs` | Compiler / Cargo | `rustc` / `cargo` |
-| **Java** | `.java` | Compiler | `javac` → `java` |
-| **Python** | `.py` | Interpreter | Auto-detects `.venv` / `python3` |
-| **Go** | `.go` | Compiler / Runner | `go` |
-| **Zig** | `.zig` | Compiler | `zig` |
-| **JavaScript / TypeScript** | `.js`, `.ts` | Interpreter | `node` |
-| **Bash / Shell** | `.sh` | Interpreter | `bash` / `sh` |
-| **Ruby / Perl / Lua** | `.rb`, `.pl`, `.lua` | Interpreter | System default |
-| **Custom** | Custom | Custom | Configurable via `Run.toml` |
-
----
-
-## Installation
-
-### Requirements
-- **Rust toolchain (`cargo` / `rustc`)**
-- **Git**
-- Linux, macOS, or Windows
-
-### All Platforms (Linux, macOS, Windows)
 ```bash
-git clone https://github.com/kuranne/run.git ~/.local/share/run
+git clone https://github.com/kuranne/Run.git ~/.local/share/run
 cd ~/.local/share/run
 cargo xtask install
 ```
 
-Or install directly into `~/.cargo/bin`:
+Update anytime with `git pull && cargo xtask install` (or uninstall with `cargo xtask uninstall`).
+
+---
+
+## Quick Start
+
 ```bash
-cargo install --path . --locked
+# Compile & run any source file (auto-cleans temporary binaries, even on Ctrl+C)
+run main.c
+run app.py -- arg1 arg2
+
+# Run prebuilt local binaries or PATH commands with metrics (like `time <cmd>`)
+run -t -M ./a.out
+run -t -M -- ls -la
+
+# Pass quick inline stdin, file stdin, or piped stdin dynamically
+run main.c -i "5 10\n"
+run main.c --stdin-file input.txt
+
+# Batch test, micro-benchmark, or differential stress-test
+run sol.cpp --test-dir cases/ --filter "edge_*"
+run sol.cpp --bench 20 --warmup 3
+run sol.cpp --stress gen.py brute.cpp --runs 200
+
+# Interactive workspace TUI or fuzzy file finder (when no file is given)
+run --tui
+run
+
+# Machine-readable JSON output for CI, editors, and LLM agents
+run --json --test-dir cases/ sol.cpp
 ```
 
 ---
 
-## Updating
+## Highlights
 
-To update `run` to the latest version:
-
-```bash
-cd ~/.local/share/run  # Or your installation directory
-git pull
-cargo xtask install
-```
-
----
-
-## Basic Usage
-
-```bash
-run <files...> [options] [-- <program-args...>]
-```
-
-### Quick Examples
-
-```bash
-# Run a Python script (auto-detects virtualenv)
-run script.py
-
-# Compile and run a C++ file with execution timing and memory tracking
-run solution.cpp -tM
-
-# Pipe input directly into program
-echo "10 20" | run solution.py -i
-
-# Run with an interactive debugger (LLDB on macOS, GDB on Linux)
-run main.cpp --debug
-
-# Scaffold a new file from template
-run --new solution.cpp
-
-# Diagnose system toolchains
-run --doctor
-```
+| Capability | Key Flags / Features |
+|------------|----------------------|
+| **Multi-Language & Binaries** | C, C++, Rust/Cargo, Java, Python (auto `.venv`), Go, Zig, Node/TS, Bash, Ruby, Perl, Lua, custom `[[languages]]`, C/C++ `#!` shebangs, prebuilt ELF/Mach-O/PE binaries, and `PATH` commands |
+| **Smart Build Cache & CPM** | SHA-256 incremental cache, automatic `main()` multi-file linking (`-m`, `-L`), guaranteed cleanup on `SIGINT`/`SIGTERM` |
+| **Testing & Fuzzing** | `--expect` unified diffs, `--test-dir` + `--filter`, `--bench [N]` + `--warmup`, `--stress <gen> <brute>` + `--checker` |
+| **Modern UI, TUI & Plain** | Vite/Clack animated CLI + Braille spinners on TTY, `--plain` classic `[ TAG ]` mode, `ratatui` `--tui` (`Ctrl+O` collapsible tests, `/` fuzzy filter, `i` stdin editor, `d` test-dir picker, `w` auto-watch, `b` sparkline bench), `fzf` picker |
+| **Debugging & Sandboxing** | `--debug` / `--gdb` / `--lldb` / `--valgrind` / `--asan` / `--tsan`, Docker/Podman `--sandbox`, Linux Bubblewrap `--restrict` |
+| **Agent & CI Friendly** | `--json` single-object report, `--json-schema` Draft 2020-12 schema, reusable `.agents/skills/run-cli/` skill |
 
 ---
-
-## Common Flags
-
-| Shorthand | Long Flag | Description |
-|-----------|-----------|-------------|
-| `-w` | `--watch` | Watch mode: re-compile and run on file change |
-| `-t` | `--time` | Measure and display execution time |
-| `-M` | `--mem`, `--memory` | Measure and display peak memory usage (combine as `-tM`) |
-| | `--restrict` | Native OS isolation (Linux Bubblewrap; on macOS/Windows use `--sandbox`) |
-| | `--sandbox` | Run inside an isolated Docker/Podman container |
-| | `--sandbox-net` | Allow network access within sandboxed execution |
-| `-i` | `--stdin [file]` | Redirect standard input from file or pipe |
-| `-d` | `--dry-run` | Preview commands without executing |
-| `-m` | `--multi` | Compile multiple source files together |
-| `-p` | `--preset <name>` | Use a build preset from `Run.toml` (e.g. `debug`, `release`) |
-| `-j` | `--jobs <N>` | Number of parallel compilation threads |
-| `-q` | `--quiet` | Silence compiler output and banners |
-| `-v` | `--verbose` | Enable verbose debug logging (`-v`) or trace (`-vv`) |
-| `-f` | `--force` | Force continue on errors / non-interactive mode |
-| `-V` | `--version` | Display installed version |
-| `-h` | `--help` | Show help screen |
-
-> For all advanced flags (`--debug`, `--asan`, `--valgrind`, `--test-dir`, `--expect`, `--build-only`), see the [UNIX Man Page](docs/man/run.1) or the [Documentation Hub](#-documentation-hub).
-
----
-
-## Configuration (`Run.toml`)
-
-### Configuration File Hierarchy
-
-`run` searches for configuration in the following order:
-1. **Workspace Directory** (Highest Priority): `./Run.toml`, `../Run.toml`, up to 4 parent levels.
-2. **Global Config Directory** (Lowest Priority):
-   - Linux/macOS: `~/.config/run/Run.toml` (or `$XDG_CONFIG_HOME/run/Run.toml`)
-   - Windows: `%APPDATA%\run\Run.toml`
-
-### Basic `Run.toml` Example
-
-```toml
-[core]
-exclude_files = ["*.tmp.c", "tests/**/mock_*.c"]
-exclude_dirs = ["vendor*", "dist"]
-
-[projects.dotnet]
-file = "*.sln"
-command = "dotnet run --project ${file}"
-
-[runners]
-cpp = "clang++"
-c = "clang"
-
-[presets.debug]
-cpp = ["-g", "-Wall", "-Wextra", "-std=c++20"]
-
-[presets.release]
-cpp = ["-O3", "-Wall", "-std=c++20"]
-
-[sandbox]
-image = "ubuntu:latest"
-# dockerfile = "Dockerfile.dev"
-# compose = "docker-compose.yml"
-
-[tasks]
-test = "pytest tests/"
-build = "cargo build --release"
-```
-
-Initialize a template config for your project with:
-```bash
-run --init
-```
-
-
 
 ## Documentation Hub
 
-Explore detailed topic guides and documentation:
+| Guide | Topics Covered |
+|-------|----------------|
+| [Configuration (`Run.toml`)](docs/configuration.md) | `[core]`, `[runners]`, `[presets]`, `[tasks]`, `[projects]`, `[[languages]]`, `[sandbox]` |
+| [Testing, Benchmarking & Stress](docs/testing_and_benchmarking.md) | `-t`/`-M`, `-i`/`--stdin-text`/`--stdin-file`, `--expect`, `--test-dir`/`--filter`, `--bench`, `--stress`/`--checker` |
+| [UI, Animations & Interactive TUI](docs/ui_and_tui.md) | Vite/Clack CLI, `--plain`, `--tui` hotkeys, `Ctrl+O` collapsible tests, `fzf` finder |
+| [Agent & `--json` Integration](docs/agent_and_json.md) | `--json` schema, `--json-schema`, CI/LLM workflows, token-saving `run_compact.py` |
+| [Debugging & Sanitizers](docs/debugging_and_sanitizers.md) | `--debug`, `--gdb`, `--lldb`, `--valgrind`, `--asan`, `--tsan`, `--sanitize` |
+| [Sandboxed Execution](docs/sandboxed_execution.md) | Docker/Podman `--sandbox`, Dockerfiles, Compose, persistent watch containers, `--restrict` |
+| [Templates & Scaffolding](docs/templates_and_scaffolding.md) | `--new`, `--template`, `--init`, multi-file templates |
+| [Shell Completions](docs/completions.md) | Zsh, Bash, Fish, PowerShell tab completion |
+| [Troubleshooting](docs/troubleshooting.md) | Common errors and `run --doctor` diagnostics |
 
-- **[UNIX Man Page (`docs/man/run.1`)](docs/man/run.1)** - Complete CLI reference manual (`man ./docs/man/run.1`).
-- **[Configuration Guide (`docs/configuration.md`)](docs/configuration.md)** - Full `Run.toml` schema, runners, custom languages, and task runner.
-- **[Sandboxed Execution Guide (`docs/sandboxed_execution.md`)](docs/sandboxed_execution.md)** - Native OS isolation (`bwrap`), Docker/Podman containerization, and Compose workflows.
-- **[Debugging & Sanitizers Guide (`docs/debugging_and_sanitizers.md`)](docs/debugging_and_sanitizers.md)** - Interactive debugging (LLDB, GDB, pdb), Valgrind, and ASan/TSan sanitizers.
-- **[Testing & Benchmarking Guide (`docs/testing_and_benchmarking.md`)](docs/testing_and_benchmarking.md)** - Batch test runner (`--test-dir`), output diffs (`--expect`), and benchmarking.
-- **[Templates & Scaffolding Guide (`docs/templates_and_scaffolding.md`)](docs/templates_and_scaffolding.md)** - Single-file and multi-file code generator (`run --new`).
-- **[Shell Autocompletion Guide (`docs/completions.md`)](docs/completions.md)** - Tab completion setup for Zsh (`_evalcache`), Bash, Fish, and PowerShell.
-- **[Troubleshooting & Tips (`docs/troubleshooting.md`)](docs/troubleshooting.md)** - Diagnostic scanner, error fixes, and performance tips.
-- **[Changelog (`CHANGELOG.md`)](CHANGELOG.md)** - Release notes and version history.
+---
+
+## Contributing & AI Agents
+
+- **Human contributors**: See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, coding standards, testing, and PR workflow.
+- **AI coding agents**: See [AGENTS.md](AGENTS.md) and [.agents/skills/run-cli/SKILL.md](.agents/skills/run-cli/SKILL.md).
+
+## License
+
+MIT
