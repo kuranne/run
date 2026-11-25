@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 import pytest
 
-from tests.e2e.conftest import ANSI_RE, clean_path, is_pid_alive, strip_ansi
+from tests.e2e.conftest import ANSI_RE, REPO_ROOT, clean_path, is_pid_alive, strip_ansi
 
 pytestmark = pytest.mark.tier2
 
@@ -421,10 +421,15 @@ def test_f09_vv_debug_output_and_quiet_precedence(
 def test_f09_help_and_version_exact_cargo_version(
     run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
+    import tomllib
+
+    expected_version = tomllib.loads((REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8"))[
+        "package"
+    ]["version"]
     for vflag in ("--version", "-V"):
         ver = run_cli([vflag])
         assert ver.returncode == 0, _combined(ver)
-        assert "0.2.1" in _combined(ver)
+        assert expected_version in _combined(ver)
 
     for hflag in ("--help", "-h"):
         hlp = run_cli([hflag])
