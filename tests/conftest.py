@@ -131,7 +131,7 @@ def isolated_env(tmp_path: Path) -> dict[str, Any]:
         "TERM": os.environ.get("TERM", "xterm-256color"),
     }
     if os.name == "nt":
-        for key in ("SYSTEMROOT", "COMSPEC", "PATHEXT", "WINDIR"):
+        for key in ("SYSTEMROOT", "COMSPEC", "PATHEXT", "WINDIR", "LIB", "LIBPATH", "INCLUDE"):
             if key in os.environ:
                 env[key] = os.environ[key]
 

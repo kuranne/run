@@ -422,7 +422,12 @@ def test_t3_09_asan_timeout_force_and_unsafe_interaction(
     assert "[ ERROR ]" in no_force_out
     assert "FORCE_ASAN_OK" not in no_force_out
 
-    res_force = run_cli(["-f", "--asan", "--timeout", "5.0", "weird;file.c"])
+    force_args = (
+        ["-f", "--timeout", "5.0", "weird;file.c"]
+        if sys.platform == "win32"
+        else ["-f", "--asan", "--timeout", "5.0", "weird;file.c"]
+    )
+    res_force = run_cli(force_args)
     assert res_force.returncode == 0, _combined(res_force)
     assert "[ WARN ]" in strip_ansi(_combined(res_force))
     assert "FORCE_ASAN_OK" in res_force.stdout
