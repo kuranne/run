@@ -74,13 +74,17 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ] \
             || [ "$BASE_REF" = "main" ] \
             || { [ "$EVENT_NAME" = "push" ] && [ "$REF_NAME" = "main" ]; }; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "chore=true" >> "$GITHUB_OUTPUT"
-            echo "workflows=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "code=true"
+              echo "chore=true"
+              echo "workflows=true"
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "code=$F_CODE" >> "$GITHUB_OUTPUT"
-            echo "chore=$F_CHORE" >> "$GITHUB_OUTPUT"
-            echo "workflows=$F_WORKFLOWS" >> "$GITHUB_OUTPUT"
+            {
+              echo "code=$F_CODE"
+              echo "chore=$F_CHORE"
+              echo "workflows=$F_WORKFLOWS"
+            } >> "$GITHUB_OUTPUT"
           fi
 
   workflow-check:
