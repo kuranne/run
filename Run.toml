@@ -4,8 +4,8 @@
 # Config search priority:
 # 1. Project directory (current working directory up to 4 parent levels)
 # 2. Global directory:
-#    - Linux / macOS: ~/.config/run_kuranne/Run.toml ($XDG_CONFIG_HOME)
-#    - Windows: %APPDATA%\run_kuranne\Run.toml
+#    - Linux / macOS: ~/.config/run/Run.toml ($XDG_CONFIG_HOME)
+#    - Windows: %APPDATA%\run\Run.toml
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -18,7 +18,7 @@
 # exclude_files = ["test_private.cpp", "*.tmp", "tests/**/*.mock.c"]
 
 # exclude_dirs (List[str]): Directory names or glob patterns to skip during directory walks.
-# Default ignored: .git, .venv, venv, env, node_modules, .run_cache, build, target, __pycache__
+# Default ignored: .git, .venv, venv, env, node_modules, build, target, __pycache__
 # exclude_dirs = ["vendor", "dist", "tmp_*"]
 
 # exclude_extensions (List[str]): File extensions or glob patterns to skip during directory scans.
@@ -53,10 +53,12 @@
 # Extra CLI arguments after the task name are forwarded to the task command.
 # ------------------------------------------------------------------------------
 [tasks]
-# test = "pytest tests/ -v"
+test = "cargo xtask test"
+lint = "cargo xtask lint"
+install = "cargo xtask install"
 # bench = "cargo bench"
 # build = "cmake -B build && cmake --build build"
-# clean = "rm -rf build target .run_cache"
+# clean = "rm -rf build target"
 
 # You can also run tasks inside the sandbox by using table syntax:
 # [tasks.sandboxed_test]

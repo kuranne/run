@@ -13,3 +13,9 @@ run
 
 # other
 run.egg-info/
+
+# Rust
+target/
+
+# Environment
+.env

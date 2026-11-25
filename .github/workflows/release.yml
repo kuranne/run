@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name to release (defaults to ref name)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Release (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+
+      - name: Smoke test binary (Unix)
+        if: runner.os != 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          bin="target/$TARGET/release/run"
+          "$bin" --version
+          "$bin" --json-schema > /dev/null
+
+      - name: Smoke test binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $bin = "target/$env:TARGET/release/run.exe"
+          & $bin --version
+          & $bin --json-schema | Out-Null
+
+      - name: Generate shell completions
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo xtask completions --out-dir "target/$TARGET/completions"
+
+      - name: Package release archive (Unix)
+        if: runner.os != 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag="${INPUT_TAG:-$REF_NAME}"
+          stage="dist/run-${tag}-${TARGET}"
+          mkdir -p "$stage/completions"
+          cp "target/${TARGET}/release/run" "$stage/run"
+          chmod +x "$stage/run"
+          cp -r "target/${TARGET}/completions/." "$stage/completions/"
+          cp README.md LICENSE "$stage/"
+          if [ -f docs/man/run.1 ]; then
+            cp docs/man/run.1 "$stage/run.1"
+          fi
+          mkdir -p release-assets
+          tar -C dist -czf "release-assets/run-${tag}-${TARGET}.tar.gz" "run-${tag}-${TARGET}"
+
+      - name: Package release archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = if ($env:INPUT_TAG) { $env:INPUT_TAG } else { $env:REF_NAME }
+          $name = "run-$tag-$env:TARGET"
+          $stage = "dist/$name"
+          New-Item -ItemType Directory -Force -Path "$stage/completions" | Out-Null
+          Copy-Item "target/$env:TARGET/release/run.exe" "$stage/run.exe"
+          Copy-Item "target/$env:TARGET/completions/*" "$stage/completions/"
+          Copy-Item "README.md", "LICENSE" "$stage/"
+          if (Test-Path "docs/man/run.1") {
+            Copy-Item "docs/man/run.1" "$stage/run.1"
+          }
+          New-Item -ItemType Directory -Force -Path "release-assets" | Out-Null
+          Compress-Archive -Path "$stage" -DestinationPath "release-assets/$name.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA256SUMS.txt
+        run: |
+          cd release-assets
+          sha256sum ./* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: "run ${{ inputs.tag || github.ref_name }}"
+          generate_release_notes: true
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.zip
+            release-assets/SHA256SUMS.txt
