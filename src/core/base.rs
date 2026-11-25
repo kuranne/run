@@ -124,7 +124,14 @@ impl CommandExecutor for SystemCommandExecutor {
             });
         }
 
-        let mut child = MonitoredChild::spawn(&mut command).map_err(|err| match err {
+        let interactive_tty_stdin =
+            !spec.compiling && spec.stdin_path.is_none() && std::io::stdin().is_terminal();
+        let mut child = if interactive_tty_stdin {
+            MonitoredChild::spawn_foreground(&mut command)
+        } else {
+            MonitoredChild::spawn(&mut command)
+        }
+        .map_err(|err| match err {
             RunError::Io(io_err) if io_err.kind() == ErrorKind::NotFound => {
                 RunError::execution(format!("Command '{}' not found.", spec.cmd[0]))
             }

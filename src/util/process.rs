@@ -312,15 +312,27 @@ const DEFAULT_SIGTERM: i32 = 15;
 impl MonitoredChild {
     /// Spawn `cmd` in an isolated process group with concurrent pipe readers and optional Linux sampler.
     pub fn spawn(cmd: &mut Command) -> Result<Self, RunError> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            cmd.process_group(0);
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
+        Self::spawn_inner(cmd, true)
+    }
+
+    /// Spawn `cmd` in the caller's foreground process group so interactive TTY `stdin` (`Enter` / `Ctrl+D`) works without `SIGTTIN`.
+    pub fn spawn_foreground(cmd: &mut Command) -> Result<Self, RunError> {
+        Self::spawn_inner(cmd, false)
+    }
+
+    /// Shared spawn implementation optionally isolating the child into its own process group.
+    fn spawn_inner(cmd: &mut Command, isolate_pgid: bool) -> Result<Self, RunError> {
+        if isolate_pgid {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                cmd.process_group(0);
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
+            }
         }
 
         let mut child = cmd.spawn().map_err(RunError::Io)?;
