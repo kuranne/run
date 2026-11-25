@@ -302,6 +302,7 @@ pub struct MonitoredChild {
     /// Harvested peak memory in bytes once reaped (`None` while running).
     peak_memory_bytes: Option<u64>,
     /// Optional Linux procfs background sampler.
+    #[cfg(unix)]
     procfs_sampler: Option<Arc<ProcfsSampler>>,
     /// Windows Job Object handle keeping all descendant processes in one killable tree.
     #[cfg(windows)]
@@ -364,6 +365,7 @@ impl MonitoredChild {
         #[cfg(windows)]
         let job = WindowsJob::attach(&child);
 
+        #[cfg(unix)]
         let procfs_sampler = if cfg!(target_os = "linux") {
             let interval =
                 Duration::from_millis(PackageMetadata::get().limits.procfs_poll_interval_ms);
@@ -382,6 +384,7 @@ impl MonitoredChild {
             pid,
             exit_status: None,
             peak_memory_bytes: None,
+            #[cfg(unix)]
             procfs_sampler,
             #[cfg(windows)]
             job,
@@ -610,7 +613,7 @@ impl MonitoredChild {
                 sampler.sample();
                 return sampler.peak_bytes();
             }
-            read_proc_status_rss(self.pid)
+            read_procfs_vmhwm(self.pid)
         }
         #[cfg(target_os = "macos")]
         {
@@ -1043,21 +1046,31 @@ impl Drop for WindowsJob {
 mod tests {
     use super::*;
     use std::process::Stdio;
+    #[cfg(unix)]
     use std::sync::atomic::AtomicUsize;
 
-    /// Build a cross-platform `Command` invoking a short Python or shell inline snippet.
-    ///
-    /// Uses `python3` if present on Unix/macOS for exact MB allocation tests matching
-    /// `test_memory_tracking.py`; falls back to `sh` where needed.
+    /// Return the platform Python executable (`python` on Windows to bypass Store `python3` alias).
+    fn python_bin() -> &'static str {
+        #[cfg(windows)]
+        {
+            "python"
+        }
+        #[cfg(not(windows))]
+        {
+            "python3"
+        }
+    }
+
+    /// Build a cross-platform `Command` invoking a short Python inline snippet.
     fn python_cmd(code: &str) -> Command {
-        let mut cmd = Command::new("python3");
+        let mut cmd = Command::new(python_bin());
         cmd.arg("-c").arg(code);
         cmd
     }
 
-    /// Return `true` if `python3` is available in `PATH` for memory allocation tests.
+    /// Return `true` if Python is available in `PATH` for memory allocation tests.
     fn has_python3() -> bool {
-        Command::new("python3")
+        Command::new(python_bin())
             .arg("--version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())

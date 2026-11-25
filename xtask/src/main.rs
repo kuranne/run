@@ -152,6 +152,7 @@ fn build_release(root: &Path, offline: bool) -> Result<PathBuf, String> {
 
 /// Copy built binary (and Unix man page if present) into `prefix`.
 fn install_artifacts(root: &Path, release_bin: &Path, prefix: &Path) -> Result<PathBuf, String> {
+    let _ = root;
     if !release_bin.is_file() {
         return Err(format!(
             "Release binary not found at {}",
