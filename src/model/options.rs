@@ -48,6 +48,8 @@ pub struct RunnerOptions {
     pub expect: Option<String>,
     /// Batch testcase directory (`--test-dir`).
     pub test_dir: Option<String>,
+    /// Glob pattern filtering testcases under `--test-dir` (`--filter`).
+    pub test_filter: Option<String>,
     /// Launch default interactive debugger (`--debug`).
     pub debug: bool,
     /// Launch interactive GDB (`--gdb`).
@@ -64,8 +66,10 @@ pub struct RunnerOptions {
     pub sanitize: Option<String>,
     /// Maximum execution/compilation timeout in seconds (`--timeout`).
     pub timeout: Option<f64>,
-    /// Stdin file path or `"-"` for buffered pipe input (`-i` / `--stdin`).
+    /// Stdin file path or `"-"` for buffered pipe input (`-i` / `--stdin` / `--stdin-file`).
     pub stdin: Option<String>,
+    /// Inline stdin text unescaped (`\n`, `\t`, `\r`, `\\`) and piped to child (`--stdin-text` or dynamic `-i`).
+    pub stdin_text: Option<String>,
     /// Custom `KEY=VALUE` environment overrides passed via `--env`.
     pub env: Vec<String>,
     /// Output directory for compiled binaries (`--out-dir`).

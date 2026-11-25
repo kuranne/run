@@ -678,7 +678,7 @@ def test_f05_stdin_missing_file_and_directory_error(
     (work_dir / "echo.py").write_text('import sys\nprint(sys.stdin.read())\n', encoding="utf-8")
     (work_dir / "subdir").mkdir()
 
-    r_missing = run_cli(["echo.py", "-i", "no_such.txt"])
+    r_missing = run_cli(["echo.py", "--stdin-file", "no_such.txt"])
     missing_combined = strip_ansi(_combined(r_missing))
     assert "[ ERROR ]" in missing_combined
     assert "Failed to open stdin file" in missing_combined

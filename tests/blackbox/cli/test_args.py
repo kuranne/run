@@ -77,6 +77,21 @@ def test_args_stdin_and_optional_flags(
     assert res_pipe.returncode == 0, combined_output(res_pipe)
     assert "IN:from_pipe" in res_pipe.stdout
 
+    # Explicit --stdin-text with \n escape
+    res_text = run_cli(["--stdin-text", "5 10\\n", "read_in.py"])
+    assert res_text.returncode == 0, combined_output(res_text)
+    assert "IN:5 10" in res_text.stdout
+
+    # Explicit --stdin-file
+    res_sfile = run_cli(["--stdin-file", "data.txt", "read_in.py"])
+    assert res_sfile.returncode == 0, combined_output(res_sfile)
+    assert "IN:from_file" in res_sfile.stdout
+
+    # Dynamic -i / --stdin: non-existent path treated as inline text
+    res_dyn = run_cli(["-i", "hello_inline\\n", "read_in.py"])
+    assert res_dyn.returncode == 0, combined_output(res_dyn)
+    assert "IN:hello_inline" in res_dyn.stdout
+
 
 def test_args_plain_and_tui_conflict(
     work_dir: Path, run_cli: Callable[..., object]

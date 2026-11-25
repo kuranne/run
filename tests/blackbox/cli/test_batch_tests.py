@@ -46,3 +46,24 @@ def test_batch_test_dir_failure_exit_code_1(
     out = strip_ansi(combined_output(res))
     assert "[ FAIL ]" in out
     assert "Passed: 0/1 (0.0%)" in out
+
+
+def test_batch_test_dir_filter_glob(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "echo.py").write_text("import sys\nprint(sys.stdin.read().strip())\n", encoding="utf-8")
+    cases = work_dir / "cases"
+    cases.mkdir()
+    (cases / "edge_1.in").write_text("ok1\n", encoding="utf-8")
+    (cases / "edge_1.out").write_text("ok1\n", encoding="utf-8")
+    (cases / "edge_2.in").write_text("ok2\n", encoding="utf-8")
+    (cases / "edge_2.out").write_text("ok2\n", encoding="utf-8")
+    # Failing non-matching case should be skipped by --filter "edge_*"
+    (cases / "normal_1.in").write_text("a\n", encoding="utf-8")
+    (cases / "normal_1.out").write_text("WRONG\n", encoding="utf-8")
+
+    res = run_cli(["--test-dir", "cases", "--filter", "edge_*", "echo.py"])
+    assert res.returncode == 0, combined_output(res)
+    out = strip_ansi(res.stdout)
+    assert "Discovered 2 test case(s)" in out
+    assert "Passed: 2/2 (100.0%)" in out

@@ -23,9 +23,12 @@ const VALUE_FLAGS_LONG: &[&str] = &[
     "--template",
     "--expect",
     "--test-dir",
+    "--filter",
     "--jobs",
     "--sanitize",
     "--timeout",
+    "--stdin-file",
+    "--stdin-text",
     "--env",
     "--out-dir",
     "--compiler",
@@ -301,6 +304,10 @@ pub struct CliArgs {
     #[arg(long = "test-dir", value_name = "DIR")]
     pub test_dir: Option<String>,
 
+    /// Filter `--test-dir` testcases by filename glob pattern (e.g. `edge_*`).
+    #[arg(long = "filter", value_name = "GLOB")]
+    pub filter: Option<String>,
+
     /// Maximum parallel worker jobs for multi-file C/C++ object compilation.
     #[arg(short = 'j', long = "jobs", value_name = "N")]
     pub jobs: Option<usize>,
@@ -337,9 +344,30 @@ pub struct CliArgs {
     #[arg(long = "timeout", value_name = "SECONDS")]
     pub timeout: Option<f64>,
 
-    /// Provide stdin from a file path or `-` for piped stdin (`-i` defaults to `-`).
-    #[arg(short = 'i', long = "stdin", value_name = "SOURCE")]
+    /// Dynamic stdin: `-` for piped stdin, existing file path for file input, or inline text otherwise.
+    #[arg(
+        short = 'i',
+        long = "stdin",
+        value_name = "SOURCE",
+        conflicts_with_all = ["stdin_file", "stdin_text"]
+    )]
     pub stdin: Option<String>,
+
+    /// Read child stdin strictly from a file path.
+    #[arg(
+        long = "stdin-file",
+        value_name = "FILE",
+        conflicts_with_all = ["stdin", "stdin_text"]
+    )]
+    pub stdin_file: Option<String>,
+
+    /// Pass quick inline text as child stdin (supports `\n`, `\t`, `\r`, `\\`).
+    #[arg(
+        long = "stdin-text",
+        value_name = "TEXT",
+        conflicts_with_all = ["stdin", "stdin_file"]
+    )]
+    pub stdin_text: Option<String>,
 
     /// Inject custom `KEY=VALUE` environment variable(s) into child execution.
     #[arg(long = "env", value_name = "KEY=VALUE", action = ArgAction::Append)]
@@ -488,6 +516,20 @@ impl CliArgs {
 
     /// Convert CLI flags into [`RunnerOptions`] for `CompilerRunner` / `BaseRunner`.
     pub fn to_runner_options(&self) -> RunnerOptions {
+        let (stdin, stdin_text) = if let Some(ref text) = self.stdin_text {
+            (None, Some(text.clone()))
+        } else if let Some(ref file) = self.stdin_file {
+            (Some(file.clone()), None)
+        } else if let Some(ref dyn_val) = self.stdin {
+            if dyn_val == "-" || Path::new(dyn_val).exists() {
+                (Some(dyn_val.clone()), None)
+            } else {
+                (None, Some(dyn_val.clone()))
+            }
+        } else {
+            (None, None)
+        };
+
         RunnerOptions {
             multi: self.multi,
             keep: self.keep,
@@ -503,6 +545,7 @@ impl CliArgs {
             jobs: self.jobs,
             expect: self.expect.clone(),
             test_dir: self.test_dir.clone(),
+            test_filter: self.filter.clone(),
             debug: self.debug,
             gdb: self.gdb,
             lldb: self.lldb,
@@ -511,7 +554,8 @@ impl CliArgs {
             tsan: self.tsan,
             sanitize: self.sanitize.clone(),
             timeout: self.timeout,
-            stdin: self.stdin.clone(),
+            stdin,
+            stdin_text,
             env: self.env.clone(),
             out_dir: self.out_dir.clone(),
             compiler: self.compiler.clone(),
@@ -540,6 +584,30 @@ impl CliArgs {
             UiMode::Modern
         }
     }
+}
+
+/// Unescape common C-style escape sequences (`\n`, `\r`, `\t`, `\\`) for `--stdin-text` and dynamic `-i`.
+pub fn unescape_inline_stdin(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('r') => out.push('\r'),
+                Some('t') => out.push('\t'),
+                Some('\\') => out.push('\\'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

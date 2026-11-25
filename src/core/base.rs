@@ -367,9 +367,15 @@ impl BaseRunner {
         run_args_str: Option<&str>,
         config: &Config,
         printer: Printer,
-        buffered_stdin: Option<Vec<u8>>,
+        mut buffered_stdin: Option<Vec<u8>>,
     ) -> Result<Self, RunError> {
         let meta = PackageMetadata::get();
+
+        if let Some(ref inline_text) = options.stdin_text {
+            let unescaped = crate::util::args::unescape_inline_stdin(inline_text);
+            buffered_stdin = Some(unescaped.into_bytes());
+            options.stdin = Some("-".to_string());
+        }
 
         // Merge [core] sandbox/restrict defaults into CLI flags.
         if !options.sandbox {

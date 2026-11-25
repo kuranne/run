@@ -172,12 +172,29 @@ impl TestcasesRunner {
             is_multi = true;
         }
 
-        let pairs = Self::discover_test_pairs(test_dir);
+        let mut pairs = Self::discover_test_pairs(test_dir);
+        if let Some(ref filter_pat) = runner.base.options.test_filter {
+            pairs.retain(|(in_path, _)| {
+                let stem = in_path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                crate::util::glob::match_path(in_path, filter_pat, Some(test_dir), false)
+                    || crate::util::glob::match_path(Path::new(&stem), filter_pat, None, false)
+            });
+        }
         if pairs.is_empty() {
-            runner.printer.warning(&format!(
-                "No matching test pairs found in '{}'. Expected *.in + *.out or in*.txt + out*.txt.",
-                test_dir.display()
-            ));
+            if let Some(ref filter_pat) = runner.base.options.test_filter {
+                runner.printer.warning(&format!(
+                    "No test cases in '{}' matched --filter '{filter_pat}'.",
+                    test_dir.display()
+                ));
+            } else {
+                runner.printer.warning(&format!(
+                    "No matching test pairs found in '{}'. Expected *.in + *.out or in*.txt + out*.txt.",
+                    test_dir.display()
+                ));
+            }
             return false;
         }
 
