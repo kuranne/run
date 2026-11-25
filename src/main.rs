@@ -39,17 +39,24 @@ use run::util::template_manager::TemplateManager;
 /// Global termination flag flipped on `SIGINT` / Ctrl+C so watch mode exits cleanly.
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// Async-signal-safe `SIGINT` handler flagging watch loop termination.
+/// Async-signal-safe `SIGINT` / `SIGTERM` handler flagging termination and child cleanup.
 #[cfg(unix)]
 extern "C" fn handle_sigint(_sig: libc::c_int) {
     STOP_REQUESTED.store(true, Ordering::Relaxed);
+    run::util::process::request_interrupt();
 }
 
-/// Register a minimal `SIGINT` handler on Unix during `--watch` mode.
+/// Register minimal `SIGINT` and `SIGTERM` handlers on Unix without `SA_RESTART`
+/// so blocking waits wake up immediately to kill children and clean up artifacts.
 #[cfg(unix)]
 fn install_sigint_handler() {
     unsafe {
-        libc::signal(libc::SIGINT, handle_sigint as *const () as usize);
+        let mut sa: libc::sigaction = std::mem::zeroed();
+        sa.sa_sigaction = handle_sigint as *const () as usize;
+        libc::sigemptyset(&mut sa.sa_mask);
+        sa.sa_flags = 0; // No SA_RESTART so wait4 returns EINTR immediately.
+        libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
+        libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
     }
 }
 
@@ -776,15 +783,20 @@ fn real_main() -> i32 {
         };
     }
 
+    install_sigint_handler();
+
     if !cli.watch {
         printer.banner(
             &format!("run v{}", env!("CARGO_PKG_VERSION")),
             &format!("· {}", cwd.display()),
         );
-        return run_once(&cli, printer, &cwd, None).exit_code;
+        let outcome = run_once(&cli, printer, &cwd, None);
+        if run::util::process::is_interrupted() {
+            return 130;
+        }
+        return outcome.exit_code;
     }
 
-    install_sigint_handler();
     printer.info(
         "Watch mode enabled. Watching for changes... (Press Ctrl+C to exit, 'c' or Enter to re-run)",
     );

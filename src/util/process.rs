@@ -129,6 +129,24 @@ fn read_procfs_vmhwm(pid: u32) -> Option<u64> {
     parse_proc_status_vmhwm(&content)
 }
 
+/// Process-wide termination flag set by `SIGINT` / `SIGTERM` handlers so waiting children abort and clean up.
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// Mark the process as interrupted by `SIGINT` / `SIGTERM`.
+pub fn request_interrupt() {
+    INTERRUPTED.store(true, Ordering::Release);
+}
+
+/// Return `true` if a termination signal (`SIGINT` / `SIGTERM`) has been received.
+pub fn is_interrupted() -> bool {
+    INTERRUPTED.load(Ordering::Acquire)
+}
+
+/// Clear the global interrupt flag (primarily for tests).
+pub fn clear_interrupt() {
+    INTERRUPTED.store(false, Ordering::Release);
+}
+
 /// Read `/proc/<pid>/stat` `starttime` for PID-recycling detection.
 fn read_procfs_starttime(pid: u32) -> Option<u64> {
     let content = read_proc_text(&format!("/proc/{pid}/stat"), 1024)?;
@@ -483,7 +501,12 @@ impl MonitoredChild {
                     }
                     return Ok(Some(status));
                 }
-                Err(errno) if errno == libc::EINTR && options == 0 => continue,
+                Err(errno) if errno == libc::EINTR && options == 0 => {
+                    if is_interrupted() {
+                        return Err(RunError::execution("Interrupted by signal"));
+                    }
+                    continue;
+                }
                 Err(errno) if errno == libc::ECHILD => {
                     if let Some(s) = &self.procfs_sampler {
                         let sampler_bytes = s.stop();
@@ -575,7 +598,19 @@ impl MonitoredChild {
         on_timeout: Option<&dyn Fn()>,
     ) -> Result<MonitoredOutput, RunError> {
         let Some(limit) = timeout else {
-            let status = self.wait()?;
+            let status = match self.wait() {
+                Ok(s) => s,
+                Err(err) if is_interrupted() => {
+                    if let Some(cb) = on_timeout {
+                        cb();
+                    }
+                    let grace =
+                        Duration::from_millis(PackageMetadata::get().limits.kill_grace_period_ms);
+                    self.kill_process_tree(DEFAULT_SIGTERM, grace);
+                    return Err(err);
+                }
+                Err(err) => return Err(err),
+            };
             let (stdout, stderr) = self.take_output();
             let peak_memory_bytes = self.peak_memory_bytes();
             return Ok(MonitoredOutput {
@@ -589,6 +624,15 @@ impl MonitoredChild {
 
         let deadline = Instant::now() + limit;
         loop {
+            if is_interrupted() {
+                if let Some(cb) = on_timeout {
+                    cb();
+                }
+                let grace =
+                    Duration::from_millis(PackageMetadata::get().limits.kill_grace_period_ms);
+                self.kill_process_tree(DEFAULT_SIGTERM, grace);
+                return Err(RunError::execution("Interrupted by signal"));
+            }
             if let Some(status) = self.try_wait()? {
                 let (stdout, stderr) = self.take_output();
                 let peak_memory_bytes = self.peak_memory_bytes();

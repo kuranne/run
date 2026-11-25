@@ -68,3 +68,38 @@ def test_core_timeout_kills_process(
     res = run_cli(["--timeout", "0.3", "slow.py"])
     assert res.returncode == 1
     assert "timed out" in strip_ansi(combined_output(res)).lower()
+
+
+def test_core_sigint_cleans_up_compiled_binary(
+    work_dir: Path, run_binary: Path, isolated_env: dict[str, str]
+) -> None:
+    import signal
+    import subprocess
+    import time
+
+    src = work_dir / "hang.c"
+    src.write_text(
+        "#include <stdio.h>\n#include <unistd.h>\n"
+        "int main(void) { puts(\"READY\"); fflush(stdout); sleep(10); return 0; }\n",
+        encoding="utf-8",
+    )
+
+    proc = subprocess.Popen(
+        [str(run_binary), "--no-cache", "--out-dir", str(work_dir), str(src)],
+        cwd=str(work_dir),
+        env=isolated_env["env"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert proc.stdout is not None
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        line = proc.stdout.readline()
+        if "READY" in line:
+            break
+    proc.send_signal(signal.SIGINT)
+    proc.wait(timeout=5)
+
+    assert proc.returncode != 0
+    assert not (work_dir / "hang.out").exists()

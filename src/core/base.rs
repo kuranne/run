@@ -891,6 +891,13 @@ impl BaseRunner {
     }
 }
 
+impl Drop for BaseRunner {
+    /// Ensure temporary compiled artifacts are always cleaned up on drop (unless `--keep` / `-B`).
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
