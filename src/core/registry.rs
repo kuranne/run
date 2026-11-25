@@ -8,13 +8,13 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::runner::base::BaseRunner;
-use crate::runner::c_family::CFamilyHandler;
-use crate::runner::custom_handler::CustomLanguageHandler;
-use crate::runner::java_handler::JavaHandler;
-use crate::runner::python_handler::PythonHandler;
-use crate::runner::rust_handler::RustHandler;
-use crate::runner::script_handler::ScriptHandler;
+use crate::core::base::BaseRunner;
+use crate::core::handlers::c_family::CFamilyHandler;
+use crate::core::handlers::custom_handler::CustomLanguageHandler;
+use crate::core::handlers::java_handler::JavaHandler;
+use crate::core::handlers::python_handler::PythonHandler;
+use crate::core::handlers::rust_handler::RustHandler;
+use crate::core::handlers::script_handler::ScriptHandler;
 use crate::util::cache::CacheManager;
 use crate::util::config::Config;
 use crate::model::error::RunError;

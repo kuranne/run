@@ -8,14 +8,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::runner::base::BaseRunner;
-use crate::runner::c_family::CFamilyHandler;
-use crate::runner::custom_handler::CustomLanguageHandler;
-use crate::runner::handler::{
+use crate::core::base::BaseRunner;
+use crate::core::handlers::c_family::CFamilyHandler;
+use crate::core::handlers::custom_handler::CustomLanguageHandler;
+use crate::core::registry::{
     dotted_ext_lower, ExecutionContext, HandlerRegistry, LanguageHandler, RunnerOptions,
 };
-use crate::runner::java_handler::JavaHandler;
-use crate::runner::script_handler::ScriptHandler;
+use crate::core::handlers::java_handler::JavaHandler;
+use crate::core::handlers::script_handler::ScriptHandler;
 use crate::util::cache::CacheManager;
 use crate::util::config::Config;
 use crate::util::env::PackageMetadata;
@@ -369,7 +369,7 @@ impl CompilerRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::test_support::TempDir;
+    use crate::core::test_support::TempDir;
     use crate::util::output::{Colors, Verbosity};
 
     /// Helper building a [`CompilerRunner`] isolated inside `tmp`.

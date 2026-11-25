@@ -16,10 +16,10 @@ use std::thread;
 
 use regex::Regex;
 
-use crate::runner::handler::{
+use crate::core::registry::{
     dotted_ext_lower, normalize_leading_dash, ExecutionContext, LanguageHandler,
 };
-use crate::runner::script_handler::ScriptHandler;
+use crate::core::handlers::script_handler::ScriptHandler;
 use crate::util::config::Config;
 use crate::util::env::PackageMetadata;
 use crate::model::error::RunError;
@@ -448,10 +448,10 @@ impl LanguageHandler for CFamilyHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::base::BaseRunner;
-    use crate::runner::handler::RunnerOptions;
+    use crate::core::base::BaseRunner;
+    use crate::core::registry::RunnerOptions;
     use crate::util::output::{Colors, Printer, Verbosity};
-    use crate::runner::test_support::TempDir;
+    use crate::core::test_support::TempDir;
 
     /// Port of `dev:tests/test_cpm.py::test_cpm_get_main_file`.
     #[test]
@@ -542,7 +542,7 @@ mod tests {
     fn test_c_family_multi_file_cache_hit_skips_object_compile() {
         use std::sync::Arc;
         use crate::model::options::MockCommandExecutor;
-        use crate::runner::base::ExecOutcome;
+        use crate::core::base::ExecOutcome;
         use crate::util::cache::CacheManager;
 
         let tmp = TempDir::new().expect("tempdir");

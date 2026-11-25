@@ -10,7 +10,7 @@ use std::path::Path;
 
 use clap::{ArgAction, Parser};
 
-use crate::runner::handler::RunnerOptions;
+use crate::core::registry::RunnerOptions;
 
 /// Long flags taking an explicit following value token.
 const VALUE_FLAGS_LONG: &[&str] = &[

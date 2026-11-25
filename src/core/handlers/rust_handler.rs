@@ -9,7 +9,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::runner::handler::{
+use crate::core::registry::{
     dotted_ext_lower, normalize_leading_dash, ExecutionContext, LanguageHandler,
 };
 use crate::util::config::Config;
@@ -271,7 +271,7 @@ impl LanguageHandler for RustHandler {
 mod tests {
     use super::*;
     use crate::util::output::{Colors, Printer, Verbosity};
-    use crate::runner::test_support::TempDir;
+    use crate::core::test_support::TempDir;
 
     fn test_printer() -> Printer {
         Printer::with_colors(Verbosity::Info, Colors::new(false))
@@ -347,8 +347,8 @@ mod tests {
     fn test_rust_standalone_cache_hit_skips_rustc() {
         use std::sync::Arc;
         use crate::model::options::MockCommandExecutor;
-        use crate::runner::base::{BaseRunner, ExecOutcome};
-        use crate::runner::handler::RunnerOptions;
+        use crate::core::base::{BaseRunner, ExecOutcome};
+        use crate::core::registry::RunnerOptions;
         use crate::util::cache::CacheManager;
 
         let tmp = TempDir::new().expect("tempdir");
@@ -404,8 +404,8 @@ mod tests {
     fn test_rust_cargo_release_mode_argv_via_mock() {
         use std::sync::Arc;
         use crate::model::options::MockCommandExecutor;
-        use crate::runner::base::{BaseRunner, ExecOutcome};
-        use crate::runner::handler::RunnerOptions;
+        use crate::core::base::{BaseRunner, ExecOutcome};
+        use crate::core::registry::RunnerOptions;
 
         let tmp = TempDir::new().expect("tempdir");
         let toml_path = tmp.path().join("Cargo.toml");

@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use crate::runner::handler::{
+use crate::core::registry::{
     dotted_ext_lower, normalize_leading_dash, ExecutionContext, LanguageHandler,
 };
 use crate::util::config::Config;
@@ -284,7 +284,7 @@ impl LanguageHandler for ScriptHandler {
 mod tests {
     use super::*;
     use std::fs;
-    use crate::runner::test_support::TempDir;
+    use crate::core::test_support::TempDir;
 
     /// Port of `dev:tests/test_c_shebang.py::test_is_run_shebang`.
     #[test]

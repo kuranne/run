@@ -8,7 +8,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::runner::handler::{
+use crate::core::registry::{
     dotted_ext_lower, normalize_leading_dash, ExecutionContext, LanguageHandler, RunnerOptions,
 };
 use crate::util::config::Config;
@@ -158,7 +158,7 @@ impl LanguageHandler for PythonHandler {
 mod tests {
     use super::*;
     use crate::util::output::{Colors, Verbosity};
-    use crate::runner::test_support::TempDir;
+    use crate::core::test_support::TempDir;
 
     /// Port of `dev:tests/test_security.py::test_python_handler_venv_ownership_verification`.
     #[test]

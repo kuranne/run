@@ -1,25 +1,21 @@
-//! Language handlers, execution engine, and project/task/test runners.
+//! Core execution engines, language handlers, registry, and project/task/test runners.
 //!
 //! Organizes compilation and runtime execution around [`LanguageHandler`],
 //! [`HandlerRegistry`], [`ExecutionContext`], [`BaseRunner`], and
 //! [`CompilerRunner`].
 
 pub mod base;
-pub mod c_family;
-pub mod core;
-pub mod custom_handler;
-pub mod handler;
-pub mod java_handler;
+pub mod engine;
+pub mod handlers;
 pub mod project;
-pub mod python_handler;
-pub mod rust_handler;
-pub mod script_handler;
+pub mod registry;
 pub mod test_runner;
 
-pub use base::{BaseRunner, CommandExecutor, ExecOutcome, ExecSpec, SystemCommandExecutor};
-pub use core::CompilerRunner;
-pub use handler::{ExecutionContext, HandlerRegistry, LanguageHandler, RunnerOptions};
+pub use base::{BaseRunner, SystemCommandExecutor};
+pub use crate::model::options::{CommandExecutor, ExecOutcome, ExecSpec, RunnerOptions};
+pub use engine::CompilerRunner;
 pub use project::{split_compound_command, ProjectRunner, TaskRunner};
+pub use registry::{ExecutionContext, HandlerRegistry, LanguageHandler};
 pub use test_runner::TestcasesRunner;
 
 /// Minimal RAII temporary directory helper for `#[cfg(test)]` modules (avoids adding `tempfile` crate).
@@ -47,7 +43,7 @@ pub(crate) mod test_support {
                 .map_or(0, |d| d.as_nanos());
             let seq = SEQ.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "run_runner_test_{}_{}_{}",
+                "run_core_test_{}_{}_{}",
                 std::process::id(),
                 nanos,
                 seq

@@ -8,7 +8,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::runner::base::BaseRunner;
+use crate::core::base::BaseRunner;
 use crate::util::config::{Config, ProjectConfig, TaskConfig};
 use crate::model::error::RunError;
 use crate::util::glob::{find_matching_manifests, has_glob_wildcard};
@@ -366,8 +366,8 @@ fn collect_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::handler::RunnerOptions;
-    use crate::runner::test_support::TempDir;
+    use crate::core::registry::RunnerOptions;
+    use crate::core::test_support::TempDir;
     use crate::util::output::{Colors, Verbosity};
 
     fn make_base(opts: RunnerOptions) -> BaseRunner {
@@ -502,7 +502,7 @@ mod tests {
     fn test_task_runner_short_circuits_and_via_mock() {
         use std::sync::Arc;
         use crate::model::options::MockCommandExecutor;
-        use crate::runner::base::ExecOutcome;
+        use crate::core::base::ExecOutcome;
 
         let cfg = Config::from_toml_str(
             r#"

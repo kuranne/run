@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::runner::handler::RunnerOptions;
+use crate::core::registry::RunnerOptions;
 use crate::util::config::{Config, SandboxConfig};
 use crate::util::env::PackageMetadata;
 use crate::model::error::RunError;
@@ -598,7 +598,7 @@ impl BaseRunner {
     }
 
     /// Execute a command cleanly using `&self`, enabling both sequential `run_command`
-    /// and concurrent multi-file compilation in [`crate::runner::c_family::CFamilyHandler`].
+    /// and concurrent multi-file compilation in [`crate::core::handlers::c_family::CFamilyHandler`].
     fn execute_inner(
         &self,
         cmd: &[String],
@@ -864,7 +864,7 @@ impl BaseRunner {
 mod tests {
     use super::*;
     use crate::model::options::MockCommandExecutor;
-    use crate::runner::test_support::TempDir;
+    use crate::core::test_support::TempDir;
     use crate::util::output::{Colors, Verbosity};
 
     /// Helper creating a silent plain-text [`Printer`] for unit tests.

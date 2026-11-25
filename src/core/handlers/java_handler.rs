@@ -15,7 +15,7 @@ use std::time::SystemTime;
 
 use regex::Regex;
 
-use crate::runner::handler::{
+use crate::core::registry::{
     dotted_ext_lower, normalize_leading_dash, ExecutionContext, LanguageHandler,
 };
 use crate::util::config::Config;
@@ -327,10 +327,10 @@ impl LanguageHandler for JavaHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::base::BaseRunner;
-    use crate::runner::handler::RunnerOptions;
+    use crate::core::base::BaseRunner;
+    use crate::core::registry::RunnerOptions;
     use crate::util::output::{Colors, Printer, Verbosity};
-    use crate::runner::test_support::TempDir;
+    use crate::core::test_support::TempDir;
 
     /// Port of `dev:tests/test_jpm.py::test_jpm_get_main_class` and `test_jpm_get_main_file`.
     #[test]
@@ -407,7 +407,7 @@ mod tests {
     fn test_java_handler_multi_mock_argv_and_classpath_dedup() {
         use std::sync::Arc;
         use crate::model::options::MockCommandExecutor;
-        use crate::runner::base::ExecOutcome;
+        use crate::core::base::ExecOutcome;
 
         let tmp = TempDir::new().expect("tempdir");
         let sub = tmp.path().join("pkg");
@@ -485,7 +485,7 @@ mod tests {
     fn test_java_handler_single_build_only_skips_runtime() {
         use std::sync::Arc;
         use crate::model::options::MockCommandExecutor;
-        use crate::runner::base::ExecOutcome;
+        use crate::core::base::ExecOutcome;
 
         let tmp = TempDir::new().expect("tempdir");
         let app = tmp.path().join("App.java");

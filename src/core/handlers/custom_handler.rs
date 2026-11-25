@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::runner::handler::{dotted_ext_lower, ExecutionContext, LanguageHandler};
+use crate::core::registry::{dotted_ext_lower, ExecutionContext, LanguageHandler};
 use crate::util::config::{Config, CustomLanguageConfig};
 use crate::model::error::RunError;
 use crate::util::substitutions::VariableSubstitutor;
@@ -226,8 +226,8 @@ impl LanguageHandler for CustomLanguageHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::base::BaseRunner;
-    use crate::runner::handler::RunnerOptions;
+    use crate::core::base::BaseRunner;
+    use crate::core::registry::RunnerOptions;
     use crate::util::output::{Colors, Printer, Verbosity};
 
     /// Port of `dev:tests/test_go_runner.py::test_go_builtin_config`.

@@ -15,12 +15,12 @@ use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal;
 use crossterm::tty::IsTty;
 
-use run::runner::c_family::CFamilyHandler;
-use run::runner::custom_handler::CustomLanguageHandler;
-use run::runner::handler::LanguageHandler;
-use run::runner::java_handler::JavaHandler;
-use run::runner::script_handler::ScriptHandler;
-use run::runner::{CompilerRunner, ProjectRunner, TaskRunner, TestcasesRunner};
+use run::core::handlers::c_family::CFamilyHandler;
+use run::core::handlers::custom_handler::CustomLanguageHandler;
+use run::core::registry::LanguageHandler;
+use run::core::handlers::java_handler::JavaHandler;
+use run::core::handlers::script_handler::ScriptHandler;
+use run::core::{CompilerRunner, ProjectRunner, TaskRunner, TestcasesRunner};
 use run::util::args::CliArgs;
 use run::util::cache::CacheManager;
 use run::util::completion::CompletionGenerator;
@@ -735,7 +735,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use run::runner::RunnerOptions;
+    use run::core::RunnerOptions;
     use run::util::output::Colors;
     use std::time::UNIX_EPOCH;
 

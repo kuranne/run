@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use mockall::mock;
 use mockall::Sequence;
 
-use run::runner::{
+use run::core::{
     CommandExecutor, CompilerRunner, ExecOutcome, ExecSpec, ProjectRunner, RunnerOptions,
     TaskRunner, TestcasesRunner,
 };

@@ -12,10 +12,10 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use crate::runner::c_family::{CFamilyHandler, CPM};
-use crate::runner::core::CompilerRunner;
-use crate::runner::handler::dotted_ext_lower;
-use crate::runner::java_handler::JavaHandler;
+use crate::core::handlers::c_family::{CFamilyHandler, CPM};
+use crate::core::engine::CompilerRunner;
+use crate::core::registry::dotted_ext_lower;
+use crate::core::handlers::java_handler::JavaHandler;
 use crate::util::env::PackageMetadata;
 use crate::util::output::TagColor;
 
@@ -387,8 +387,8 @@ impl TestcasesRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::handler::RunnerOptions;
-    use crate::runner::test_support::TempDir;
+    use crate::core::registry::RunnerOptions;
+    use crate::core::test_support::TempDir;
     use crate::util::config::Config;
     use crate::util::output::{Colors, Printer, Verbosity};
 
