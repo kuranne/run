@@ -14,4 +14,5 @@
 
 pub mod core;
 pub mod model;
+pub mod tui;
 pub mod util;

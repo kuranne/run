@@ -10,7 +10,7 @@ use std::path::Path;
 
 use clap::{ArgAction, Parser};
 
-use crate::core::registry::RunnerOptions;
+use crate::model::options::{RunnerOptions, UiMode};
 
 /// Long flags taking an explicit following value token.
 const VALUE_FLAGS_LONG: &[&str] = &[
@@ -330,6 +330,14 @@ pub struct CliArgs {
     #[arg(long = "no-color")]
     pub no_color: bool,
 
+    /// Force classic `[ TAG ]` output instead of Node-style animated CLI.
+    #[arg(long = "plain", conflicts_with = "tui")]
+    pub plain: bool,
+
+    /// Launch full-screen interactive workspace TUI dashboard.
+    #[arg(long = "tui", conflicts_with = "plain")]
+    pub tui: bool,
+
     /// Override compiler or interpreter executable for the active language.
     #[arg(long = "compiler", value_name = "BIN")]
     pub compiler: Option<String>,
@@ -468,6 +476,19 @@ impl CliArgs {
             target_files: Vec::new(),
             extra_flags: Vec::new(),
             run_args: self.extra_run_args.clone(),
+            plain: self.plain,
+            tui: self.tui,
+        }
+    }
+
+    /// Resolve active [`UiMode`] from `--tui`, `--plain`, and stdout TTY detection.
+    pub const fn resolve_ui_mode(&self, is_tty: bool) -> UiMode {
+        if self.tui {
+            UiMode::Tui
+        } else if self.plain || !is_tty {
+            UiMode::Plain
+        } else {
+            UiMode::Modern
         }
     }
 }
@@ -602,5 +623,22 @@ mod tests {
         assert_eq!(cli.stdin.as_deref(), Some("in.txt"));
         assert_eq!(cli.expect.as_deref(), Some("expected.txt"));
         assert_eq!(cli.files, vec!["src"]);
+    }
+
+    #[test]
+    fn test_ui_mode_resolution_and_flags() {
+        let default_cli = parse(&["main.c"]);
+        assert_eq!(default_cli.resolve_ui_mode(true), UiMode::Modern);
+        assert_eq!(default_cli.resolve_ui_mode(false), UiMode::Plain);
+
+        let plain_cli = parse(&["--plain", "main.c"]);
+        assert_eq!(plain_cli.resolve_ui_mode(true), UiMode::Plain);
+        assert!(plain_cli.to_runner_options().plain);
+
+        let tui_cli = parse(&["--tui"]);
+        assert_eq!(tui_cli.resolve_ui_mode(false), UiMode::Tui);
+        assert!(tui_cli.to_runner_options().tui);
+
+        assert!(CliArgs::parse_from_raw(["run", "--plain", "--tui"]).is_err());
     }
 }

@@ -28,8 +28,9 @@ use run::util::config::{Config, SandboxConfig};
 use run::util::doctor::Doctor;
 use run::util::env::{load_dotenv, PackageMetadata};
 use run::model::error::RunError;
+use run::model::options::UiMode;
 use run::util::init_config::ConfigInitializer;
-use run::util::output::{Printer, TagColor, Verbosity};
+use run::util::output::{Colors, Printer, TagColor, Verbosity};
 use run::util::sandbox::{ComposeSandbox, ContainerSandbox, PersistentSandbox};
 use run::util::security::SecurityManager;
 use run::util::template_manager::TemplateManager;
@@ -600,7 +601,8 @@ fn real_main() -> i32 {
     let cli = CliArgs::parse_env();
 
     let verbosity = Verbosity::from_cli(cli.quiet, cli.verbose);
-    let printer = Printer::init_global(verbosity, cli.no_color);
+    let ui_mode = cli.resolve_ui_mode(Colors::is_stdout_tty());
+    let printer = Printer::init_global_with_ui(verbosity, cli.no_color, ui_mode);
 
     if let Some(ref shell) = cli.completion {
         if shell.eq_ignore_ascii_case("auto") {
@@ -653,7 +655,28 @@ fn real_main() -> i32 {
         return 0;
     }
 
+    if ui_mode == UiMode::Tui {
+        let config = match Config::load(Some(&cwd), None) {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                printer.error(&err.to_string());
+                return 1;
+            }
+        };
+        return match run::tui::run_tui(&cli, config, &cwd) {
+            Ok(code) => code,
+            Err(err) => {
+                printer.error(&err.to_string());
+                1
+            }
+        };
+    }
+
     if !cli.watch {
+        printer.banner(
+            &format!("run v{}", env!("CARGO_PKG_VERSION")),
+            &format!("· {}", cwd.display()),
+        );
         return run_once(&cli, printer, &cwd, None).exit_code;
     }
 

@@ -16,8 +16,10 @@ use crate::core::handlers::c_family::{CFamilyHandler, CPM};
 use crate::core::engine::CompilerRunner;
 use crate::core::registry::dotted_ext_lower;
 use crate::core::handlers::java_handler::JavaHandler;
+use crate::model::options::UiMode;
 use crate::util::env::PackageMetadata;
-use crate::util::output::TagColor;
+use crate::util::output::{emit_tui_event, TagColor, UiEvent};
+use crate::util::spinner::ProgressBar;
 
 /// Cached regex splitting filenames into numeric and non-numeric chunks.
 static NAT_SPLIT_RE: OnceLock<Regex> = OnceLock::new();
@@ -184,12 +186,16 @@ impl TestcasesRunner {
             "Discovered {total} test case(s) in {}",
             test_dir.display()
         ));
-        let banner = runner.printer.colors().style_text(
-            &format!("=== Running Test Suite ({total} cases) ==="),
-            TagColor::Cyan,
-            true,
-        );
-        println!("\n{banner}\n");
+        let tui_active = runner.printer.has_tui_sink();
+        let ui_mode = runner.printer.ui_mode();
+        if !tui_active && ui_mode == UiMode::Plain {
+            let banner = runner.printer.colors().style_text(
+                &format!("=== Running Test Suite ({total} cases) ==="),
+                TagColor::Cyan,
+                true,
+            );
+            println!("\n{banner}\n");
+        }
 
         // Phase 1: Compile once if target uses a compiled language.
         let (is_compiled, bin_path) = match Self::prepare_compiled_binary(runner, target_files, is_multi)
@@ -209,8 +215,14 @@ impl TestcasesRunner {
 
         runner.base.options.test_dir = Some(test_dir.to_string_lossy().into_owned());
 
+        let progress = ProgressBar::new(runner.printer, total);
         let mut passed_count = 0usize;
         for (idx, (in_path, out_path)) in pairs.iter().enumerate() {
+            let case_name = in_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| in_path.display().to_string());
+            progress.update(idx + 1, &case_name);
             let in_bytes = match fs::read(in_path) {
                 Ok(bytes) => bytes,
                 Err(err) => {
@@ -227,6 +239,7 @@ impl TestcasesRunner {
             runner.base.options.expect = Some(out_path.to_string_lossy().into_owned());
             runner.base.set_buffered_stdin(Some(in_bytes));
 
+            let case_started = std::time::Instant::now();
             let outcome = if is_compiled
                 && let Some(ref bin) = bin_path
                 && bin.exists()
@@ -237,19 +250,52 @@ impl TestcasesRunner {
             } else {
                 runner.handle_single_file(&target_files[0])
             };
+            let case_elapsed = case_started.elapsed().as_secs_f64();
 
             match outcome {
-                Ok(true) => passed_count += 1,
-                Ok(false) => {}
+                Ok(true) => {
+                    passed_count += 1;
+                    if tui_active {
+                        let expected_output = fs::read_to_string(out_path).unwrap_or_default();
+                        emit_tui_event(UiEvent::TestCaseResult {
+                            name: case_name,
+                            passed: true,
+                            elapsed_secs: Some(case_elapsed),
+                            memory_bytes: runner.base.last_memory_bytes,
+                            actual_output: expected_output.clone(),
+                            expected_output,
+                        });
+                    }
+                }
+                Ok(false) => {
+                    if tui_active {
+                        let expected_output = fs::read_to_string(out_path).unwrap_or_default();
+                        emit_tui_event(UiEvent::TestCaseResult {
+                            name: case_name,
+                            passed: false,
+                            elapsed_secs: Some(case_elapsed),
+                            memory_bytes: runner.base.last_memory_bytes,
+                            actual_output: String::new(),
+                            expected_output,
+                        });
+                    }
+                }
                 Err(err) => {
-                    let name = in_path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| in_path.display().to_string());
                     runner.printer.error(&format!(
-                        "Test #{} ({name}) failed with exception: {err}",
+                        "Test #{} ({case_name}) failed with exception: {err}",
                         idx + 1
                     ));
+                    if tui_active {
+                        let expected_output = fs::read_to_string(out_path).unwrap_or_default();
+                        emit_tui_event(UiEvent::TestCaseResult {
+                            name: case_name,
+                            passed: false,
+                            elapsed_secs: Some(case_elapsed),
+                            memory_bytes: runner.base.last_memory_bytes,
+                            actual_output: err.to_string(),
+                            expected_output,
+                        });
+                    }
                 }
             }
         }
@@ -259,21 +305,35 @@ impl TestcasesRunner {
         runner.base.options.test_dir = orig_test_dir;
         runner.base.set_buffered_stdin(orig_buffered_stdin);
 
-        let colors = runner.printer.colors();
-        let summary_header = colors.style_text("=== Test Summary ===", TagColor::Cyan, true);
-        let pct = (passed_count as f64 / total as f64) * 100.0;
-        let summary_color = if passed_count == total {
-            TagColor::Green
+        if tui_active {
+            runner.printer.status(
+                if passed_count == total { "PASS" } else { "FAIL" },
+                &format!("Passed: {passed_count}/{total}"),
+                if passed_count == total {
+                    TagColor::Green
+                } else {
+                    TagColor::Red
+                },
+            );
+        } else if ui_mode == UiMode::Modern {
+            progress.finish(passed_count, total - passed_count);
         } else {
-            TagColor::Red
-        };
-        let summary_line = colors.style_text(
-            &format!("Passed: {passed_count}/{total} ({pct:.1}%)"),
-            summary_color,
-            false,
-        );
-        println!("\n{summary_header}");
-        println!("{summary_line}\n");
+            let colors = runner.printer.colors();
+            let summary_header = colors.style_text("=== Test Summary ===", TagColor::Cyan, true);
+            let pct = (passed_count as f64 / total as f64) * 100.0;
+            let summary_color = if passed_count == total {
+                TagColor::Green
+            } else {
+                TagColor::Red
+            };
+            let summary_line = colors.style_text(
+                &format!("Passed: {passed_count}/{total} ({pct:.1}%)"),
+                summary_color,
+                false,
+            );
+            println!("\n{summary_header}");
+            println!("{summary_line}\n");
+        }
 
         passed_count == total
     }

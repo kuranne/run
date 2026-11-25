@@ -76,3 +76,18 @@ def test_args_stdin_and_optional_flags(
     res_pipe = run_cli(["-i", "-q", "read_in.py"], stdin_text="from_pipe\n")
     assert res_pipe.returncode == 0, combined_output(res_pipe)
     assert "IN:from_pipe" in res_pipe.stdout
+
+
+def test_args_plain_and_tui_conflict(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    (work_dir / "hello.py").write_text('print("PLAIN_OK")\n', encoding="utf-8")
+
+    res_plain = run_cli(["--plain", "hello.py"])
+    assert res_plain.returncode == 0, combined_output(res_plain)
+    out = strip_ansi(res_plain.stdout)
+    assert "[ RUN ]" in out
+    assert "PLAIN_OK" in out
+
+    res_conflict = run_cli(["--plain", "--tui", "hello.py"])
+    assert res_conflict.returncode != 0

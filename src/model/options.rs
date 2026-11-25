@@ -5,6 +5,18 @@ use std::path::PathBuf;
 
 use crate::model::error::RunError;
 
+/// Terminal presentation mode resolved from CLI flags and TTY detection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UiMode {
+    /// Classic `[ TAG ]` line output (used for `--plain` and non-TTY pipes/CI).
+    #[default]
+    Plain,
+    /// Node-style Vite/Clack rail output with Braille spinners on interactive TTYs.
+    Modern,
+    /// Full-screen interactive workspace dashboard powered by `ratatui`.
+    Tui,
+}
+
 /// CLI and configuration options controlling compilation, execution, debugging, and isolation.
 #[derive(Debug, Clone, Default)]
 pub struct RunnerOptions {
@@ -76,6 +88,10 @@ pub struct RunnerOptions {
     pub extra_flags: Vec<String>,
     /// Extra runtime arguments appended after target args.
     pub run_args: Vec<String>,
+    /// Force classic `[ TAG ]` output instead of Node-style animated CLI (`--plain`).
+    pub plain: bool,
+    /// Launch full-screen interactive workspace TUI (`--tui`).
+    pub tui: bool,
 }
 
 /// Parameters describing a single subprocess invocation handed to [`CommandExecutor`].

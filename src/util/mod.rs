@@ -12,5 +12,6 @@ pub mod output;
 pub mod process;
 pub mod sandbox;
 pub mod security;
+pub mod spinner;
 pub mod substitutions;
 pub mod template_manager;

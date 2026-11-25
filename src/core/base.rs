@@ -20,8 +20,9 @@ use crate::core::registry::RunnerOptions;
 use crate::util::config::{Config, SandboxConfig};
 use crate::util::env::PackageMetadata;
 use crate::model::error::RunError;
-use crate::util::output::{Printer, TagColor};
+use crate::util::output::{emit_tui_event, Printer, TagColor, UiEvent};
 use crate::util::process::MonitoredChild;
+use crate::util::spinner::Spinner;
 pub use crate::model::options::{CommandExecutor, ExecOutcome, ExecSpec};
 use crate::util::sandbox::{
     ComposeSandbox, ContainerSandbox, NativeRestrictor, PersistentSandbox,
@@ -666,13 +667,31 @@ impl BaseRunner {
             track_memory: self.options.memory,
         };
 
+        let spinner_label = spec
+            .cmd
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "target".to_string());
+        let mut spinner = if compiling {
+            Some(Spinner::start(self.printer, format!("Compiling ({spinner_label})")))
+        } else {
+            None
+        };
+
         let outcome = self.executor.execute(&spec).inspect_err(|err| {
+            if let Some(ref mut sp) = spinner {
+                sp.finish_err("Compilation failed");
+            }
             if let RunError::Execution(msg) = err
                 && msg.starts_with("Failed to open stdin file ")
             {
                 self.printer.error(msg);
             }
         })?;
+
+        if let Some(ref mut sp) = spinner {
+            sp.finish_ok("Compiled");
+        }
 
         Ok(RawExecResult {
             captured_stdout: outcome.captured_stdout,
@@ -709,7 +728,8 @@ impl BaseRunner {
             self.validate_expect_containment(exp, cmd)?;
         }
 
-        let capture_stdout = expect_path.is_some();
+        let tui_active = self.printer.has_tui_sink();
+        let capture_stdout = expect_path.is_some() || (!compiling && tui_active);
         let res = match self.execute_inner(cmd, use_shell, compiling, capture_stdout) {
             Ok(ok) => ok,
             Err(err) => {
@@ -732,7 +752,11 @@ impl BaseRunner {
 
         let is_debug = self.options.debug || self.options.gdb || self.options.lldb;
         if !compiling && !is_debug {
-            if expect_path.is_some()
+            if tui_active && !res.captured_stdout.is_empty() && !self.options.quiet {
+                for line in res.captured_stdout.lines() {
+                    emit_tui_event(UiEvent::OutputLine(line.to_string()));
+                }
+            } else if expect_path.is_some()
                 && !res.captured_stdout.is_empty()
                 && !self.options.quiet
             {
