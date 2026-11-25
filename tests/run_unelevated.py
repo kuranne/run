@@ -4,9 +4,9 @@ GitHub Actions ``windows-latest`` runners execute steps as an elevated
 Administrator (``runneradmin``). Because ``run`` intentionally refuses to
 compile/execute arbitrary code as root/Administrator unless ``--unsafe`` is
 passed (which also disables suspicious-flag filtering), this helper drops
-Administrator elevation via Win32 ``CreateRestrictedToken(LUA_TOKEN)`` before
-spawning ``pytest`` so all security and CLI tests run under standard-user
-privileges with inherited stdio.
+Administrator elevation via Win32 ``CreateRestrictedToken(LUA_TOKEN)`` and
+updates ``TokenDefaultDacl`` / ``TokenOwner`` to the user's SID before spawning
+``pytest`` so standard-user pipe/process creation and CLI security tests work.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import sys
 
 def _run_unelevated_windows(argv: list[str]) -> int:
     import ctypes
-    from ctypes import byref, c_void_p, sizeof, wintypes
+    from ctypes import byref, c_ubyte, c_void_p, sizeof, wintypes
 
     advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -37,6 +37,30 @@ def _run_unelevated_windows(argv: list[str]) -> int:
     )
     LUA_TOKEN = 0x0004
     INFINITE = 0xFFFFFFFF
+
+    TOKEN_USER_CLASS = 1
+    TOKEN_OWNER_CLASS = 4
+    TOKEN_DEFAULT_DACL_CLASS = 6
+    ACL_REVISION = 2
+    GENERIC_ALL = 0x10000000
+    WIN_LOCAL_SYSTEM_SID = 22
+    SECURITY_MAX_SID_SIZE = 68
+    ACL_BUFFER_SIZE = 512
+
+    class SID_AND_ATTRIBUTES(ctypes.Structure):
+        _fields_ = [
+            ("Sid", c_void_p),
+            ("Attributes", wintypes.DWORD),
+        ]
+
+    class TOKEN_USER(ctypes.Structure):
+        _fields_ = [("User", SID_AND_ATTRIBUTES)]
+
+    class TOKEN_OWNER(ctypes.Structure):
+        _fields_ = [("Owner", c_void_p)]
+
+    class TOKEN_DEFAULT_DACL(ctypes.Structure):
+        _fields_ = [("DefaultDacl", c_void_p)]
 
     class STARTUPINFOW(ctypes.Structure):
         _fields_ = [
@@ -103,6 +127,46 @@ def _run_unelevated_windows(argv: list[str]) -> int:
     ]
     advapi32.CreateRestrictedToken.restype = wintypes.BOOL
 
+    advapi32.GetTokenInformation.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+
+    advapi32.SetTokenInformation.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        c_void_p,
+        wintypes.DWORD,
+    ]
+    advapi32.SetTokenInformation.restype = wintypes.BOOL
+
+    advapi32.CreateWellKnownSid.argtypes = [
+        wintypes.DWORD,
+        c_void_p,
+        c_void_p,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.CreateWellKnownSid.restype = wintypes.BOOL
+
+    advapi32.InitializeAcl.argtypes = [
+        c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+    ]
+    advapi32.InitializeAcl.restype = wintypes.BOOL
+
+    advapi32.AddAccessAllowedAce.argtypes = [
+        c_void_p,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        c_void_p,
+    ]
+    advapi32.AddAccessAllowedAce.restype = wintypes.BOOL
+
     advapi32.CreateProcessAsUserW.argtypes = [
         wintypes.HANDLE,
         wintypes.LPCWSTR,
@@ -130,6 +194,58 @@ def _run_unelevated_windows(argv: list[str]) -> int:
 
         if not advapi32.CreateRestrictedToken(
             token, LUA_TOKEN, 0, None, 0, None, 0, None, byref(restricted)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        # Query the user SID so the unelevated token owns and can access its own pipes/handles.
+        needed = wintypes.DWORD(0)
+        advapi32.GetTokenInformation(
+            restricted, TOKEN_USER_CLASS, None, 0, byref(needed)
+        )
+        if needed.value == 0:
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        user_buf = (c_ubyte * needed.value)()
+        if not advapi32.GetTokenInformation(
+            restricted, TOKEN_USER_CLASS, user_buf, needed.value, byref(needed)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        user_sid = TOKEN_USER.from_buffer(user_buf).User.Sid
+
+        sys_sid_buf = (c_ubyte * SECURITY_MAX_SID_SIZE)()
+        sys_sid_len = wintypes.DWORD(SECURITY_MAX_SID_SIZE)
+        if not advapi32.CreateWellKnownSid(
+            WIN_LOCAL_SYSTEM_SID, None, sys_sid_buf, byref(sys_sid_len)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        acl_buf = (c_ubyte * ACL_BUFFER_SIZE)()
+        if not advapi32.InitializeAcl(acl_buf, ACL_BUFFER_SIZE, ACL_REVISION):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not advapi32.AddAccessAllowedAce(
+            acl_buf, ACL_REVISION, GENERIC_ALL, user_sid
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if not advapi32.AddAccessAllowedAce(
+            acl_buf, ACL_REVISION, GENERIC_ALL, sys_sid_buf
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        default_dacl = TOKEN_DEFAULT_DACL(DefaultDacl=ctypes.addressof(acl_buf))
+        if not advapi32.SetTokenInformation(
+            restricted,
+            TOKEN_DEFAULT_DACL_CLASS,
+            byref(default_dacl),
+            sizeof(default_dacl),
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        owner = TOKEN_OWNER(Owner=user_sid)
+        if not advapi32.SetTokenInformation(
+            restricted,
+            TOKEN_OWNER_CLASS,
+            byref(owner),
+            sizeof(owner),
         ):
             raise ctypes.WinError(ctypes.get_last_error())
 
