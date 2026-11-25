@@ -12,8 +12,8 @@ The runner searches for `Run.toml` in the following priority order:
    - `../Run.toml`
    - `../../Run.toml`
 2. **Global Config Directory**:
-   - **Linux / macOS**: `~/.config/run_kuranne/Run.toml` (or `$XDG_CONFIG_HOME/run_kuranne/Run.toml`)
-   - **Windows**: `%APPDATA%\run_kuranne\Run.toml`
+   - **Linux / macOS**: `~/.config/run/Run.toml` (or `$XDG_CONFIG_HOME/run/Run.toml`)
+   - **Windows**: `%APPDATA%\run\Run.toml`
 
 Workspace configurations take precedence over global settings.
 
@@ -275,7 +275,7 @@ chmod +x calc.c
 
 ### Key Capabilities
 
-1. **Persistent Binary Caching**: Binaries are compiled directly into `~/.cache/run_kuranne/<hash>/bin/` and cached with composite SHA-256 hashes of the source file and local `#include` headers. Subsequent script invocations execute instantly without re-compilation.
+1. **Persistent Binary Caching**: Binaries are compiled directly into `~/.cache/run/<hash>/bin/` (or `$XDG_CACHE_HOME/run/<hash>/bin/`) and cached with composite SHA-256 hashes of the source file and local `#include` headers. Subsequent script invocations execute instantly without re-compilation.
 2. **1:1 Line Number Preservation**: The shebang line is replaced with `#line 2 "<file>"` during compilation, ensuring compiler errors and debugger symbols point accurately to your original script and line numbers.
 3. **Inline Compiler Directives**: Embed compiler flags directly in the script using `// run: <flags>` or `// flags: <flags>` (e.g. `// run: -lm -O3 -pthread`).
 4. **Extensionless Scripts**: Run extensionless scripts (e.g. `chmod +x my_tool && ./my_tool`) with automatic heuristic detection for C vs. C++ (or explicit `// lang: cpp`).

@@ -1,0 +1,376 @@
+[workspace]
+members = [".", "xtask"]
+default-members = ["."]
+
+[package]
+name = "run"
+version = "0.2.1"
+edition = "2024"
+description = "A fast, smart CLI compiler and runner for multiple languages"
+authors = ["kuranne"]
+license = "MIT"
+
+[lib]
+name = "run"
+path = "src/lib.rs"
+
+[[bin]]
+name = "run"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = { version = "0.8", features = ["preserve_order"] }
+serde_json = "1"
+sha2 = "0.10"
+regex = "1"
+shlex = "1"
+similar = "2"
+crossterm = "0.28"
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+] }
+
+[dev-dependencies]
+mockall = "0.13"
+
+[package.metadata.run]
+config_dir_name = "run"
+cache_dir_name = "run"
+config_file = "Run.toml"
+dotenv_file = ".env"
+config_search_depth = 4
+cargo_search_depth = 3
+stop_dirs = ["/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp"]
+
+[package.metadata.run.cache]
+metadata_file = "cache.json"
+hash_prefix_len = 16
+objs_dir = "objs"
+bin_dir = "bin"
+src_dir = "src"
+hash_chunk_bytes = 4096
+shebang_head_bytes = 1024
+
+[package.metadata.run.excludes]
+extensions = [".toml", ".lock"]
+files = [".git", ".gitignore"]
+dirs = [".git", "__pycache__", "venv", ".venv", "build", "bin", "obj", "node_modules", ".run_cache"]
+discovery_ignore_dirs = [".git", ".venv", "venv", "env", "node_modules", ".run_cache", "build", "target", "__pycache__"]
+init_extensions = [".md", ".txt", ".json", ".yaml", ".bak"]
+
+[package.metadata.run.default_runners]
+c = "gcc"
+cpp = "g++"
+rust = "rustc"
+cargo = "cargo"
+java = "javac"
+java_runtime = "java"
+python = ["python", "python3"]
+sh = ["bash", "sh"]
+ruby = ["ruby"]
+node = ["node", "nodejs"]
+perl = ["perl"]
+lua = ["lua", "luajit"]
+
+[package.metadata.run.extensions]
+c = [".c"]
+cpp = [".cpp", ".cc", ".cxx"]
+c_headers = [".h", ".hpp", ".hxx"]
+java = [".java"]
+compiled = [".c", ".cpp", ".cc", ".cxx", ".rs", ".java", ".go"]
+python_venv_dirs = [".venv", ".env"]
+
+[package.metadata.run.flags]
+asan = ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
+tsan = ["-fsanitize=thread"]
+valgrind = ["--leak-check=full", "--track-origins=yes"]
+
+[[package.metadata.run.default_projects]]
+name = "cargo"
+file = "Cargo.toml"
+command = "cargo run -q"
+
+[[package.metadata.run.default_projects]]
+name = "go"
+file = "go.mod"
+command = "go run ."
+
+[[package.metadata.run.default_projects]]
+name = "zig"
+file = "build.zig"
+command = "zig build run"
+
+[[package.metadata.run.default_projects]]
+name = "cmake"
+file = "CMakeLists.txt"
+build = "cmake -B build && cmake --build build"
+run = "./build/app"
+
+[[package.metadata.run.default_projects]]
+name = "make"
+file = "Makefile"
+command = "make"
+
+[[package.metadata.run.builtin_languages]]
+name = "go"
+extensions = [".go"]
+compile = "go build -o ${out} ${files}"
+type = "compiler"
+
+[package.metadata.run.sandbox]
+default_image = "ubuntu:latest"
+compose_default_service = "app"
+image_prefix = "run-sandbox-"
+persist_prefix = "run-persist-"
+dockerfile_hash_len = 12
+probe_timeout_secs = 3
+cleanup_timeout_secs = 5
+
+[[package.metadata.run.sandbox.image_heuristics]]
+image = "gcc:latest"
+executables = ["gcc", "g++", "clang"]
+extensions = [".c", ".cpp", ".cc", ".cxx"]
+
+[[package.metadata.run.sandbox.image_heuristics]]
+image = "python:3-slim"
+executables = ["python", "pytest"]
+extensions = [".py"]
+
+[[package.metadata.run.sandbox.image_heuristics]]
+image = "rust:latest"
+executables = ["rustc", "cargo"]
+extensions = [".rs"]
+
+[[package.metadata.run.sandbox.image_heuristics]]
+image = "openjdk:latest"
+executables = ["java", "javac"]
+extensions = [".java"]
+
+[[package.metadata.run.sandbox.image_heuristics]]
+image = "golang:latest"
+executables = ["go"]
+extensions = [".go"]
+
+[[package.metadata.run.sandbox.image_heuristics]]
+image = "node:latest"
+executables = ["node", "npm", "npx"]
+extensions = [".js", ".ts"]
+
+[[package.metadata.run.sandbox.image_heuristics]]
+image = "ruby:latest"
+executables = ["ruby"]
+extensions = [".rb"]
+
+[package.metadata.run.limits]
+procfs_poll_interval_ms = 1
+sampler_join_timeout_ms = 50
+kill_grace_period_ms = 1000
+interrupt_grace_period_ms = 500
+taskkill_timeout_secs = 5
+wait_after_kill_secs = 1
+doctor_probe_timeout_secs = 2
+watch_poll_interval_ms = 1000
+max_parallel_jobs_cap = 32
+parallel_jobs_extra = 4
+glob_cache_size = 512
+procfs_read_bytes = 4096
+inline_directive_scan_lines = 30
+shebang_c_detect_lines = 50
+
+[package.metadata.run.security]
+dangerous_env_vars = [
+    "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "LD_BIND_NOW", "LD_PROFILE", "GLIBC_TUNABLES", "GCONV_PATH",
+    "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH", "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_IMAGE_SUFFIX", "DYLD_PRINT_LIBRARIES", "DYLD_SHARED_CACHE_DIR",
+    "BASH_ENV", "ENV", "PROMPT_COMMAND", "IFS", "SHELLOPTS",
+    "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PYTHONUSERBASE",
+    "NODE_PATH", "NODE_OPTIONS",
+    "PERL5LIB", "PERL5OPT", "RUBYLIB", "RUBYOPT", "LUA_PATH", "LUA_CPATH",
+    "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH",
+    "RUSTFLAGS", "RUSTC_WRAPPER", "GOFLAGS",
+]
+dangerous_env_prefixes = ["DYLD_", "LD_", "BASH_FUNC_"]
+safe_env_whitelist = [
+    "PATH", "HOME", "USER", "LOGNAME", "TERM", "LANG", "LC_ALL", "LC_CTYPE",
+    "TMPDIR", "PWD", "TZ", "SHELL",
+    "DOCKER_HOST", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "DOCKER_CONTEXT",
+    "CONTAINER_HOST", "CONTAINER_SSHKEY", "PODMAN_SOCKET",
+]
+suspicious_flag_substrings = [
+    "-Wl,-rpath", "-Wl,--wrap", "-fplugin", "-x assembler", "-xassembler", "-specs=",
+    "-wrapper", "-Xclang", "-Clinker=", "-C linker=", "-Clink-arg=", "-C link-arg=",
+]
+suspicious_flag_exact = ["-specs", "-wrapper", "-Xclang"]
+
+[package.metadata.run.doctor]
+truncation_limit = 60
+ellipsis = "..."
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "C / C++"
+tools = [
+    ["gcc", "--version"],
+    ["g++", "--version"],
+    ["clang", "--version"],
+    ["clang++", "--version"],
+    ["make", "--version"],
+    ["cmake", "--version"],
+    ["ninja", "--version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "Rust"
+tools = [
+    ["rustc", "--version"],
+    ["cargo", "--version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "Python"
+tools = [
+    ["python3", "--version"],
+    ["pip", "--version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "Java"
+tools = [
+    ["javac", "-version"],
+    ["java", "-version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "JavaScript / TypeScript"
+tools = [
+    ["node", "--version"],
+    ["bun", "--version"],
+    ["deno", "--version"],
+    ["npm", "--version"],
+    ["ts-node", "--version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "Go"
+tools = [
+    ["go", "version"],
+]
+
+[[package.metadata.run.doctor.toolchain_groups]]
+name = "Zig"
+tools = [
+    ["zig", "version"],
+]
+
+[package.metadata.run.templates.builtins]
+".c" = '''#include <stdio.h>
+
+int main(void) {
+    printf("Hello, World!\n");
+    return 0;
+}
+'''
+".cpp" = '''#include <iostream>
+
+using namespace std;
+
+int main() {
+    cout << "Hello, World!" << endl;
+    return 0;
+}
+'''
+".cc" = '''#include <iostream>
+
+using namespace std;
+
+int main() {
+    cout << "Hello, World!" << endl;
+    return 0;
+}
+'''
+".py" = '''def main():
+    print("Hello, World!")
+
+if __name__ == "__main__":
+    main()
+'''
+".rs" = '''fn main() {
+    println!("Hello, World!");
+}
+'''
+".java" = '''public class {{name}} {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}
+'''
+".go" = '''package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello, World!")
+}
+'''
+".zig" = '''const std = @import("std");
+
+pub fn main() !void {
+    const stdout = std.io.getStdOut().writer();
+    try stdout.print("Hello, World!\n", .{});
+}
+'''
+".js" = '''console.log("Hello, World!");
+'''
+".ts" = '''console.log("Hello, World!");
+'''
+".sh" = '''#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Hello, World!"
+'''
+
+[package.metadata.run.init]
+[package.metadata.run.init.filename_techs]
+"Cargo.toml" = "rust_cargo"
+"CMakeLists.txt" = "cmake"
+"go.mod" = "go"
+"build.zig" = "zig"
+"package.json" = "node"
+"Makefile" = "make"
+
+[package.metadata.run.init.extension_techs]
+".cpp" = "cpp"
+".cc" = "cpp"
+".cxx" = "cpp"
+".hpp" = "cpp"
+".c" = "c"
+".h" = "c"
+".py" = "python"
+".rs" = "rust"
+".java" = "java"
+".go" = "go"
+".zig" = "zig"
+
+[package.metadata.run.init.debug_presets]
+cpp = ["-g", "-Wall", "-Wextra", "-std=c++20", "-O0"]
+c = ["-g", "-Wall", "-Wextra", "-O0"]
+rust = ["-g"]
+java = ["-g"]
+
+[package.metadata.run.init.release_presets]
+cpp = ["-O3", "-std=c++20", "-march=native", "-DNDEBUG"]
+c = ["-O3", "-march=native", "-DNDEBUG"]
+rust = ["-C", "opt-level=3"]
+java = ["-O"]
