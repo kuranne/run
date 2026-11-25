@@ -301,6 +301,9 @@ pub struct MonitoredChild {
     peak_memory_bytes: Option<u64>,
     /// Optional Linux procfs background sampler.
     procfs_sampler: Option<Arc<ProcfsSampler>>,
+    /// Windows Job Object handle keeping all descendant processes in one killable tree.
+    #[cfg(windows)]
+    job: Option<WindowsJob>,
     /// Join handle for concurrent stdout pipe reader thread.
     stdout_handle: Option<JoinHandle<Vec<u8>>>,
     /// Join handle for concurrent stderr pipe reader thread.
@@ -356,6 +359,9 @@ impl MonitoredChild {
         let mut child = cmd.spawn().map_err(RunError::Io)?;
         let pid = child.id();
 
+        #[cfg(windows)]
+        let job = WindowsJob::attach(&child);
+
         let procfs_sampler = if cfg!(target_os = "linux") {
             let interval =
                 Duration::from_millis(PackageMetadata::get().limits.procfs_poll_interval_ms);
@@ -375,6 +381,8 @@ impl MonitoredChild {
             exit_status: None,
             peak_memory_bytes: None,
             procfs_sampler,
+            #[cfg(windows)]
+            job,
             stdout_handle,
             stderr_handle,
             stdout_buf: Vec::new(),
@@ -692,7 +700,13 @@ impl MonitoredChild {
             }
             let _ = initial_sig;
             let _ = grace_period;
-            kill_windows_process_tree(self.pid, &mut self.child);
+            if let Some(ref job) = self.job
+                && job.terminate()
+            {
+                let _ = self.child.kill();
+            } else {
+                kill_windows_process_tree(self.pid, &mut self.child);
+            }
             if self.exit_status.is_none()
                 && let Ok(s) = self.child.wait()
             {
@@ -823,23 +837,101 @@ fn kill_windows_process_tree(pid: u32, child: &mut Child) {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    match cmd.spawn() {
-        Ok(mut tk) => {
-            let deadline = Instant::now() + timeout;
-            loop {
-                match tk.try_wait() {
-                    Ok(Some(_)) => return,
-                    Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
-                    _ => {
-                        let _ = tk.kill();
-                        let _ = tk.wait();
-                        break;
-                    }
+    let mut reaped_via_taskkill = false;
+    if let Ok(mut tk) = cmd.spawn() {
+        let deadline = Instant::now() + timeout;
+        loop {
+            match tk.try_wait() {
+                Ok(Some(status)) => {
+                    reaped_via_taskkill = status.success();
+                    break;
+                }
+                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+                _ => {
+                    let _ = tk.kill();
+                    let _ = tk.wait();
+                    break;
                 }
             }
         }
-        Err(_) => {
-            let _ = child.kill();
+    }
+    if !reaped_via_taskkill {
+        let _ = child.kill();
+    }
+}
+
+/// RAII wrapper around a Windows Job Object configured with `KILL_ON_JOB_CLOSE`.
+#[cfg(windows)]
+#[derive(Debug)]
+struct WindowsJob(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+// SAFETY: A Win32 Job Object HANDLE is an opaque kernel handle safe to send/drop across threads.
+unsafe impl Send for WindowsJob {}
+#[cfg(windows)]
+unsafe impl Sync for WindowsJob {}
+
+#[cfg(windows)]
+impl WindowsJob {
+    /// Create a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and assign `child` to it.
+    fn attach(child: &Child) -> Option<Self> {
+        use std::mem::size_of;
+        use std::os::windows::io::AsRawHandle;
+        use std::ptr;
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+
+        // SAFETY: Null security/name creates an anonymous job object owned by this process.
+        let job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
+        if job.is_null() {
+            return None;
+        }
+
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `info` matches `JobObjectExtendedLimitInformation` and its byte size.
+        let ok_set = unsafe {
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&raw const info).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if ok_set == 0 {
+            unsafe { CloseHandle(job) };
+            return None;
+        }
+
+        let proc_handle = child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+        // SAFETY: `job` and `proc_handle` are valid kernel handles for this process lifetime.
+        let ok_assign = unsafe { AssignProcessToJobObject(job, proc_handle) };
+        if ok_assign == 0 {
+            unsafe { CloseHandle(job) };
+            return None;
+        }
+
+        Some(Self(job))
+    }
+
+    /// Terminate every process currently inside the job object.
+    fn terminate(&self) -> bool {
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        // SAFETY: `self.0` is a valid job object handle owned by `Self`.
+        unsafe { TerminateJobObject(self.0, 1) != 0 }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WindowsJob {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is a non-null handle created by `CreateJobObjectW`.
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
         }
     }
 }

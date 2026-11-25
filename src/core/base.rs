@@ -921,13 +921,34 @@ impl BaseRunner {
                 );
                 continue;
             }
-            if let Err(err) = fs::remove_file(path)
+            if let Err(err) = remove_file_with_retry(path)
                 && err.kind() != ErrorKind::NotFound
             {
                 self.printer
                     .warning(&format!("Failed to cleanup {}: {err}", path.display()));
             }
         }
+    }
+}
+
+/// Remove a file, retrying briefly on Windows when the OS/AV holds a transient lock on a just-exited `.exe`.
+fn remove_file_with_retry(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        for attempt in 0..10 {
+            match fs::remove_file(path) {
+                Ok(()) => return Ok(()),
+                Err(err) if err.kind() == ErrorKind::PermissionDenied && attempt < 9 => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        unreachable!()
+    }
+    #[cfg(not(windows))]
+    {
+        fs::remove_file(path)
     }
 }
 

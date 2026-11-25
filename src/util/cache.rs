@@ -98,6 +98,26 @@ fn path_hash_prefix(path: &Path, prefix_len: usize) -> String {
     digest.chars().take(prefix_len).collect()
 }
 
+/// Remove a file, retrying briefly on Windows when Defender/OS holds a transient lock on a cached `.exe`.
+fn remove_file_retry(path: &Path) {
+    #[cfg(windows)]
+    {
+        for attempt in 0..10 {
+            match fs::remove_file(path) {
+                Ok(()) => return,
+                Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied && attempt < 9 => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(_) => return,
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = fs::remove_file(path);
+    }
+}
+
 /// Resolve the OS-specific base cache directory from explicit env values (pure helper).
 ///
 /// Resolves to `$XDG_CACHE_HOME/run` or `$HOME/.cache/run` on Unix/macOS, and
@@ -502,14 +522,14 @@ impl CacheManager {
                                 if meta.file_type().is_dir() {
                                     let _ = fs::remove_dir_all(&path);
                                 } else {
-                                    let _ = fs::remove_file(&path);
+                                    remove_file_retry(&path);
                                 }
                             }
                         }
                     }
                     let _ = fs::remove_dir(dir);
                 } else {
-                    let _ = fs::remove_file(dir);
+                    remove_file_retry(dir);
                 }
             }
         }
