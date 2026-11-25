@@ -13,15 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Shellcheck setup.sh
-        run: shellcheck setup.sh
       - name: Validate Makefile targets
-        run: make -n build release test lint doc install uninstall clean >/dev/null
+        run: make -n build release test lint doc completions install uninstall clean >/dev/null
       - name: Validate TOML files
         run: |
           python3 - <<'EOF'
           import pathlib, tomllib
-          for name in ("Cargo.toml", "Run.toml"):
+          for name in ("Cargo.toml", "xtask/Cargo.toml", ".cargo/config.toml", "Run.toml"):
               p = pathlib.Path(name)
               if p.is_file():
                   tomllib.loads(p.read_text(encoding="utf-8"))

@@ -57,19 +57,16 @@ A smart, high-performance build system, test runner, and developer productivity 
 - **Git**
 - Linux, macOS, or Windows
 
-### Linux / macOS
+### All Platforms (Linux, macOS, Windows)
 ```bash
 git clone https://github.com/kuranne/run.git ~/.local/share/run
 cd ~/.local/share/run
-./setup.sh
+cargo xtask install
 ```
 
-### Windows (PowerShell)
-```powershell
-Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-git clone https://github.com/kuranne/run.git "$HOME\AppData\Local\run"
-cd "$HOME\AppData\Local\run"
-.\setup.ps1
+Or install directly into `~/.cargo/bin`:
+```bash
+cargo install --path . --locked
 ```
 
 ---
@@ -81,7 +78,7 @@ To update `run` to the latest version:
 ```bash
 cd ~/.local/share/run  # Or your installation directory
 git pull
-./setup.sh             # On Windows: .\setup.ps1
+cargo xtask install
 ```
 
 ---

@@ -47,13 +47,13 @@ jobs:
           filters: |
             code:
               - 'src/**'
+              - 'xtask/**'
               - 'tests/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
+              - '.cargo/config.toml'
             chore:
               - 'Makefile'
-              - 'setup.sh'
-              - 'setup.ps1'
               - 'Dockerfile.test'
               - 'Run.toml'
               - '.gitignore'

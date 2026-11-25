@@ -46,21 +46,14 @@ lint:
 doc:
 	RUSTDOCFLAGS="-D warnings" $(CARGO) doc --no-deps
 
-completions: release
-	@mkdir -p $(COMPLETIONS_DIR)
-	$(TARGET_BIN) --completion zsh > $(COMPLETIONS_DIR)/_run
-	$(TARGET_BIN) --completion bash > $(COMPLETIONS_DIR)/run
-	$(TARGET_BIN) --completion fish > $(COMPLETIONS_DIR)/run.fish
+completions:
+	$(CARGO) xtask completions --out-dir $(COMPLETIONS_DIR)
 
-install: release
-	@mkdir -p $(BINDIR) $(MANDIR)
-	install -m 755 $(TARGET_BIN) $(BINDIR)/run
-	@if [ -f docs/man/run.1 ]; then install -m 644 docs/man/run.1 $(MANDIR)/run.1; fi
-	@echo "Installed run to $(BINDIR)/run"
+install:
+	$(CARGO) xtask install --prefix $(PREFIX)
 
 uninstall:
-	@rm -f $(BINDIR)/run $(MANDIR)/run.1
-	@echo "Uninstalled run from $(PREFIX)"
+	$(CARGO) xtask uninstall --prefix $(PREFIX)
 
 clean:
 	$(CARGO) clean
