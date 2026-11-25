@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 import pytest
 
-from tests.e2e.conftest import ANSI_RE, clean_path, strip_ansi
+from tests.e2e.conftest import ANSI_RE, clean_path, is_pid_alive, strip_ansi
 
 pytestmark = pytest.mark.tier2
 
@@ -270,8 +270,7 @@ def test_f08_timeout_kills_multithreaded_and_grandchild_tree(
     assert pid_file.exists(), "tree.py did not write grandchild.pid before timeout fired"
     grandchild_pid = int(pid_file.read_text(encoding="utf-8").strip())
     time.sleep(0.2)
-    with pytest.raises(ProcessLookupError):
-        os.kill(grandchild_pid, 0)
+    assert not is_pid_alive(grandchild_pid)
 
     (work_dir / "mt.py").write_text(
         "import threading, time\n"
@@ -291,6 +290,7 @@ def test_f08_timeout_kills_multithreaded_and_grandchild_tree(
     assert "timed out" in c_mt.lower()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="MinGW GCC on Windows lacks libasan/libubsan")
 def test_f08_asan_detects_use_after_free_at_runtime(
     work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
@@ -452,6 +452,7 @@ def test_f09_invalid_cli_flags_exit_code_2(
     assert res.returncode == 2
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGINT/select on pipes not supported on Windows")
 def test_f09_watch_mode_error_resilience_reload_and_sigint(
     work_dir: Path, spawn_cli: Callable[..., subprocess.Popen[str]]
 ) -> None:
@@ -725,21 +726,31 @@ def test_f11_unset_env_expansion_and_default_home_paths_no_legacy(
     run_cli: Callable[..., subprocess.CompletedProcess[str]],
 ) -> None:
     home = isolated_env["home"]
-    legacy_cfg_dir = home / ".config" / "run_kuranne"
+    if os.name == "nt":
+        legacy_cfg_dir = home / "AppData" / "Roaming" / "run_kuranne"
+        modern_cfg_dir = home / "AppData" / "Roaming" / "run"
+        modern_cache_dir = home / "AppData" / "Local" / "run"
+        legacy_cache_dir = home / "AppData" / "Local" / "run_kuranne"
+    else:
+        legacy_cfg_dir = home / ".config" / "run_kuranne"
+        modern_cfg_dir = home / ".config" / "run"
+        modern_cache_dir = home / ".cache" / "run"
+        legacy_cache_dir = home / ".cache" / "run_kuranne"
+
     legacy_cfg_dir.mkdir(parents=True)
     (legacy_cfg_dir / "Run.toml").write_text(
         '[tasks]\nprobe = "python3 -c \\"print(\'LEGACY_CFG\')\\""\n',
         encoding="utf-8",
     )
 
-    modern_cfg_dir = home / ".config" / "run"
     modern_cfg_dir.mkdir(parents=True)
     (modern_cfg_dir / "Run.toml").write_text(
         '[tasks]\nprobe = "python3 -c \\"print(\'UNSET=[${env:DEFINITELY_UNSET_999}]\')\\""\n',
         encoding="utf-8",
     )
 
-    r_cfg = run_cli(["probe"], strip_env=["XDG_CONFIG_HOME", "XDG_CACHE_HOME"])
+    strip_vars = ["XDG_CONFIG_HOME", "XDG_CACHE_HOME", "APPDATA", "LOCALAPPDATA"]
+    r_cfg = run_cli(["probe"], strip_env=strip_vars)
     assert r_cfg.returncode == 0, _combined(r_cfg)
     assert "UNSET=[]" in r_cfg.stdout
     assert "LEGACY_CFG" not in r_cfg.stdout
@@ -750,11 +761,11 @@ def test_f11_unset_env_expansion_and_default_home_paths_no_legacy(
         'int main(void) { printf("HOME_CACHE_OK\\n"); return 0; }\n',
         encoding="utf-8",
     )
-    r_cache = run_cli(["cached.c"], strip_env=["XDG_CONFIG_HOME", "XDG_CACHE_HOME"])
+    r_cache = run_cli(["cached.c"], strip_env=strip_vars)
     assert r_cache.returncode == 0, _combined(r_cache)
     assert "HOME_CACHE_OK" in r_cache.stdout
-    assert (home / ".cache" / "run").exists()
-    assert not (home / ".cache" / "run_kuranne").exists()
+    assert modern_cache_dir.exists()
+    assert not legacy_cache_dir.exists()
 
 
 @pytest.mark.parametrize(
@@ -903,7 +914,13 @@ def test_f12_suspicious_preset_flag_blocked_unless_unsafe(
         "bad; rm.py",
         "$(id).py",
         "`id`.py",
-        "bad\nname.py",
+        pytest.param(
+            "bad\nname.py",
+            marks=pytest.mark.skipif(
+                sys.platform == "win32",
+                reason="Newlines are invalid in Windows filenames",
+            ),
+        ),
     ],
 )
 def test_f12_path_traversal_and_shell_metachars_blocked_unless_force(

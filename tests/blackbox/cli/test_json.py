@@ -34,7 +34,7 @@ def test_json_single_c_run_and_missing_file_error(
     assert data["exit_code"] == 0
     assert data["mode"] == "run"
     assert data["compile"] is not None
-    assert data["run"]["stdout"] == "JSON_HI\n"
+    assert data["run"]["stdout"].replace("\r\n", "\n") == "JSON_HI\n"
 
     # Missing file still emits valid JSON with ok=false and non-empty errors.
     res_err = run_cli(["--json", "does_not_exist.c"])

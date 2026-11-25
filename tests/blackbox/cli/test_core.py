@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import os
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Callable
 
+import pytest
 from conftest import combined_output, strip_ansi
 
 
@@ -70,6 +75,7 @@ def test_core_timeout_kills_process(
     assert "timed out" in strip_ansi(combined_output(res)).lower()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGINT not supported on Windows")
 def test_core_sigint_cleans_up_compiled_binary(
     work_dir: Path, run_binary: Path, isolated_env: dict[str, str]
 ) -> None:
@@ -120,7 +126,7 @@ def test_core_direct_binary_and_path_command_execution(
     )
     build = run_cli(["-B", "--no-cache", "--out-dir", str(work_dir), str(src)])
     assert build.returncode == 0, combined_output(build)
-    bin_path = work_dir / "hello_bin.out"
+    bin_path = work_dir / ("hello_bin.exe" if os.name == "nt" else "hello_bin.out")
     assert bin_path.exists()
 
     res_bin = run_cli(["-t", str(bin_path), "world"])

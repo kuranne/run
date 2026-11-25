@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -401,14 +402,20 @@ def test_t3_09_asan_timeout_force_and_unsafe_interaction(
     assert "-fsanitize=address,undefined" in dry_out
     assert "-Wl,-rpath,/tmp" in dry_out
 
-    res_asan = run_cli(["--asan", "--timeout", "5.0", "clean.c"])
-    assert res_asan.returncode == 0, _combined(res_asan)
-    assert "ASAN_CLEAN_OK" in res_asan.stdout
+    if sys.platform != "win32":
+        res_asan = run_cli(["--asan", "--timeout", "5.0", "clean.c"])
+        assert res_asan.returncode == 0, _combined(res_asan)
+        assert "ASAN_CLEAN_OK" in res_asan.stdout
 
-    res_timeout = run_cli(["--asan", "--timeout", "1.0", "slow.c"], timeout=10.0)
-    to_out = strip_ansi(_combined(res_timeout))
-    assert "[ ERROR ]" in to_out
-    assert "timed out" in to_out.lower()
+        res_timeout = run_cli(["--asan", "--timeout", "1.0", "slow.c"], timeout=10.0)
+        to_out = strip_ansi(_combined(res_timeout))
+        assert "[ ERROR ]" in to_out
+        assert "timed out" in to_out.lower()
+    else:
+        res_timeout = run_cli(["--timeout", "1.0", "slow.c"], timeout=10.0)
+        to_out = strip_ansi(_combined(res_timeout))
+        assert "[ ERROR ]" in to_out
+        assert "timed out" in to_out.lower()
 
     res_no_force = run_cli(["--asan", "--timeout", "5.0", "weird;file.c"])
     no_force_out = strip_ansi(_combined(res_no_force))

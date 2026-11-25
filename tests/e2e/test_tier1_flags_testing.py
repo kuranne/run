@@ -12,7 +12,7 @@ from typing import Callable
 
 import pytest
 
-from tests.e2e.conftest import strip_ansi
+from tests.e2e.conftest import is_pid_alive, strip_ansi
 
 pytestmark = pytest.mark.tier1
 
@@ -465,9 +465,10 @@ def test_f08_asan_dry_run_and_exec(
     assert "-fsanitize=address,undefined" in dry.stdout
     assert "-fno-omit-frame-pointer" in dry.stdout
 
-    live = run_cli(["--asan", "clean.c"])
-    assert live.returncode == 0, _combined(live)
-    assert "asan_clean_ok" in live.stdout
+    if sys.platform != "win32":
+        live = run_cli(["--asan", "clean.c"])
+        assert live.returncode == 0, _combined(live)
+        assert "asan_clean_ok" in live.stdout
 
 
 def test_f08_tsan_and_sanitize_dry_run(
@@ -508,8 +509,7 @@ def test_f08_timeout_kills_runaway_process_and_grandchild(
     grandchild_pid = int(pid_file.read_text(encoding="utf-8").strip())
     # Give OS a tiny moment to reap if needed, then verify grandchild is gone.
     time.sleep(0.2)
-    with pytest.raises(ProcessLookupError):
-        os.kill(grandchild_pid, 0)
+    assert not is_pid_alive(grandchild_pid)
 
 
 def test_f08_debug_and_lldb_dry_run(

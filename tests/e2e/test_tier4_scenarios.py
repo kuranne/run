@@ -7,6 +7,7 @@ import re
 import selectors
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable
@@ -430,12 +431,18 @@ def test_s06_security_hardened_ci_pipeline(
     assert res_unsafe.returncode == 0, _combined(res_unsafe)
     assert "-Wl,-rpath,/tmp" in strip_ansi(res_unsafe.stdout)
 
-    res_asan = run_cli(["--asan", "--timeout", "5.0", "app.c"])
-    assert res_asan.returncode == 0, _combined(res_asan)
-    assert "CI_APP_OK" in res_asan.stdout
+    if sys.platform != "win32":
+        res_asan = run_cli(["--asan", "--timeout", "5.0", "app.c"])
+        assert res_asan.returncode == 0, _combined(res_asan)
+        assert "CI_APP_OK" in res_asan.stdout
 
     t0 = time.monotonic()
-    res_to = run_cli(["--asan", "--timeout", "1.0", "slow.c"], timeout=10.0)
+    timeout_args = (
+        ["--timeout", "1.0", "slow.c"]
+        if sys.platform == "win32"
+        else ["--asan", "--timeout", "1.0", "slow.c"]
+    )
+    res_to = run_cli(timeout_args, timeout=10.0)
     elapsed = time.monotonic() - t0
     assert elapsed < 8.0
     to_out = strip_ansi(_combined(res_to))
@@ -505,6 +512,7 @@ def test_s07_monorepo_nested_config_git_isolation(
     assert "FROM_SVC_B" in res_svc_b.stdout
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGINT/select on pipes not supported on Windows")
 def test_s08_live_watch_mode_reload_and_sigint(
     work_dir: Path, spawn_cli: Callable[..., subprocess.Popen[str]]
 ) -> None:

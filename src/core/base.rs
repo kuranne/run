@@ -485,11 +485,9 @@ impl BaseRunner {
             return Ok(dir.join(filename));
         }
 
-        if cfg!(windows) {
-            Ok(PathBuf::from(filename))
-        } else {
-            Ok(PathBuf::from(format!("./{filename}")))
-        }
+        // Prefix with `./` even on Windows so hyphenated stems (e.g. `-main.exe`)
+        // are not parsed as linker/compiler flags by gcc/ld.
+        Ok(PathBuf::from(format!("./{filename}")))
     }
 
     /// Parse `--env KEY=VALUE` pairs into a [`BTreeMap`].

@@ -18,6 +18,35 @@ REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 ANSI_RE: re.Pattern[str] = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
+def is_pid_alive(pid: int) -> bool:
+    """Return True if *pid* is currently running across POSIX and Windows."""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = wintypes.DWORD(0)
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def strip_ansi(text: str) -> str:
     """Remove ANSI CSI escape sequences from terminal output."""
     return ANSI_RE.sub("", text)
@@ -218,8 +247,11 @@ def _build_sanitized_env(
         env[key] = val
 
     env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
     env["XDG_CONFIG_HOME"] = str(config_home)
     env["XDG_CACHE_HOME"] = str(cache_home)
+    env["APPDATA"] = str(config_home)
+    env["LOCALAPPDATA"] = str(cache_home)
     env["PATH"] = clean_path(env.get("PATH"))
 
     # Preserve rustup/cargo toolchain locations when HOME is isolated for tests.

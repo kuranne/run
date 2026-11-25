@@ -102,6 +102,7 @@ def test_f09_version_and_help(
     assert "--tasks" not in help_text
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGINT/select on pipes not supported on Windows")
 def test_f09_watch_mode_initial_run_and_sigint(
     work_dir: Path, spawn_cli: Callable[..., subprocess.Popen[str]]
 ) -> None:
