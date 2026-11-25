@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 import pytest
 
-from tests.e2e.conftest import ANSI_RE, strip_ansi
+from tests.e2e.conftest import ANSI_RE, REPO_ROOT, strip_ansi
 
 pytestmark = pytest.mark.tier1
 
@@ -88,9 +88,14 @@ def test_f09_no_color_flag_and_env(
 def test_f09_version_and_help(
     run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
+    import tomllib
+
+    expected_version = tomllib.loads((REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8"))[
+        "package"
+    ]["version"]
     ver_res = run_cli(["-V"])
     assert ver_res.returncode == 0, _combined(ver_res)
-    assert "0.2.1" in _combined(ver_res)
+    assert expected_version in _combined(ver_res)
 
     help_res = run_cli(["--help"])
     assert help_res.returncode == 0, _combined(help_res)

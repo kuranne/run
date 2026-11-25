@@ -612,7 +612,7 @@ checksum = "d902046e6a28a1e4c3cab97258a0ce11e994903f01c2d97a9447a0b3df85f4f6"
 
 [[package]]
 name = "run"
-version = "0.2.1"
+version = "1.0.0"
 dependencies = [
  "clap",
  "crossterm",
