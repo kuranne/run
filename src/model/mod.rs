@@ -20,5 +20,5 @@ pub use metadata::{
     ExcludesMetadata, ExtensionsMetadata, FlagsMetadata, ImageHeuristicMetadata, LimitsMetadata,
     PackageMetadata, SandboxMetadata, SecurityMetadata,
 };
-pub use options::{CommandExecutor, ExecOutcome, ExecSpec, RunnerOptions, UiMode};
+pub use options::{BenchStats, CommandExecutor, ExecOutcome, ExecSpec, RunnerOptions, UiMode};
 pub use sandbox::{ExecOutput, HostOs, SandboxEnv};

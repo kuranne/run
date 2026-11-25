@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::model::options::BenchStats;
 use crate::util::output::{TagColor, UiEvent};
 
 /// Active focus region in the TUI layout.
@@ -76,6 +77,8 @@ pub enum TuiAction {
     None,
     /// Compile and run the currently selected sidebar item.
     RunSelected,
+    /// Micro-benchmark the currently selected sidebar item (`b`).
+    BenchSelected,
     /// Exit the TUI cleanly.
     Quit,
 }
@@ -123,6 +126,8 @@ pub struct TuiApp {
     pub last_memory: Option<u64>,
     /// Optional `--test-dir` path passed via CLI.
     pub test_dir: Option<String>,
+    /// Most recent micro-benchmark summary (`--bench` or `b` hotkey).
+    pub last_bench: Option<BenchStats>,
 }
 
 impl TuiApp {
@@ -163,6 +168,7 @@ impl TuiApp {
             last_duration: None,
             last_memory: None,
             test_dir,
+            last_bench: None,
         }
     }
 
@@ -181,6 +187,7 @@ impl TuiApp {
         self.test_cases.clear();
         self.selected_test_case = 0;
         self.scroll = 0;
+        self.last_bench = None;
     }
 
     /// Apply an incoming [`UiEvent`] emitted by the background runner worker.
@@ -232,6 +239,14 @@ impl TuiApp {
                     expanded: false,
                 });
                 self.tab = MainTab::Tests;
+            }
+            UiEvent::BenchSummary(stats) => {
+                self.last_duration = Some(stats.median_secs);
+                if stats.peak_memory_bytes.is_some() {
+                    self.last_memory = stats.peak_memory_bytes;
+                }
+                self.last_bench = Some(stats);
+                self.tab = MainTab::Output;
             }
         }
     }
@@ -286,6 +301,7 @@ impl TuiApp {
                 TuiAction::None
             }
             KeyCode::Enter | KeyCode::Char('r') => TuiAction::RunSelected,
+            KeyCode::Char('b') => TuiAction::BenchSelected,
             KeyCode::Char('p') => {
                 self.cycle_preset();
                 TuiAction::None

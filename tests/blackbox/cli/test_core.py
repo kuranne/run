@@ -141,3 +141,27 @@ def test_core_direct_binary_and_path_command_execution(
     assert res_dash.returncode == 0, combined_output(res_dash)
     assert "dash_cmd" in res_dash.stdout
     assert "Took" in strip_ansi(res_dash.stdout)
+
+
+def test_core_micro_benchmark_c_and_path_command(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    src = work_dir / "bench_demo.c"
+    src.write_text(
+        '#include <stdio.h>\nint main(void) { puts("NOISY_LINE"); return 0; }\n',
+        encoding="utf-8",
+    )
+    res_c = run_cli(["--bench", "3", "--warmup", "1", str(src)])
+    assert res_c.returncode == 0, combined_output(res_c)
+    out_c = strip_ansi(res_c.stdout)
+    assert "[ BENCH ]" in out_c
+    assert "(3 runs, 1 warmup)" in out_c
+    assert "min:" in out_c and "median:" in out_c and "mean:" in out_c and "p95:" in out_c
+    # Child output should be suppressed during non-verbose bench runs.
+    assert "NOISY_LINE" not in out_c
+
+    res_cmd = run_cli(["--bench", "3", "--warmup", "1", "--", "echo", "bench_echo"])
+    assert res_cmd.returncode == 0, combined_output(res_cmd)
+    out_cmd = strip_ansi(res_cmd.stdout)
+    assert "[ BENCH ]" in out_cmd
+    assert "(3 runs, 1 warmup)" in out_cmd

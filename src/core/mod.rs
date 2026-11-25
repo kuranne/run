@@ -5,6 +5,7 @@
 //! [`CompilerRunner`].
 
 pub mod base;
+pub mod bench;
 pub mod engine;
 pub mod handlers;
 pub mod project;
@@ -12,6 +13,7 @@ pub mod registry;
 pub mod test_runner;
 
 pub use base::{BaseRunner, SystemCommandExecutor};
+pub use bench::BenchRunner;
 pub use crate::model::options::{CommandExecutor, ExecOutcome, ExecSpec, RunnerOptions};
 pub use engine::CompilerRunner;
 pub use project::{split_compound_command, ProjectRunner, TaskRunner};

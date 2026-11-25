@@ -18,7 +18,7 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use crate::core::{CompilerRunner, TaskRunner, TestcasesRunner};
+use crate::core::{BenchRunner, CompilerRunner, TaskRunner, TestcasesRunner};
 use crate::model::config::Config;
 use crate::model::error::RunError;
 use crate::util::args::CliArgs;
@@ -158,22 +158,30 @@ fn run_event_loop(
                     if let Some(item) = app.items.get(app.selected_item).cloned() {
                         app.clear_run_output();
                         app.running = true;
-                        spawn_worker(item, app, cli, config.clone(), done_tx.clone());
+                        spawn_worker(item, app, cli, config.clone(), false, done_tx.clone());
                     }
                 }
-                TuiAction::RunSelected | TuiAction::None => {}
+                TuiAction::BenchSelected if !app.running => {
+                    if let Some(item) = app.items.get(app.selected_item).cloned() {
+                        app.clear_run_output();
+                        app.running = true;
+                        spawn_worker(item, app, cli, config.clone(), true, done_tx.clone());
+                    }
+                }
+                TuiAction::RunSelected | TuiAction::BenchSelected | TuiAction::None => {}
             }
         }
     }
     Ok(())
 }
 
-/// Spawn a background worker thread to execute the selected file or `[tasks]` entry.
+/// Spawn a background worker thread to execute or benchmark the selected file or `[tasks]` entry.
 fn spawn_worker(
     item: SidebarItem,
     app: &TuiApp,
     cli: &CliArgs,
     config: Config,
+    bench_mode: bool,
     done_tx: mpsc::Sender<()>,
 ) {
     let mut opts = cli.to_runner_options();
@@ -185,6 +193,8 @@ fn spawn_worker(
     let args_str = cli.args_str();
     let multi = cli.multi;
     let quiet = cli.quiet;
+    let bench_runs = cli.bench.unwrap_or(10);
+    let warmup = cli.warmup.unwrap_or(2);
 
     thread::spawn(move || {
         let printer = Printer::with_colors(
@@ -200,7 +210,15 @@ fn spawn_worker(
         ) {
             match item {
                 SidebarItem::File(path) => {
-                    if let Some(ref tdir) = test_dir {
+                    if bench_mode {
+                        let _ = BenchRunner::run_bench_targets(
+                            &mut runner,
+                            &[path],
+                            multi,
+                            bench_runs,
+                            warmup,
+                        );
+                    } else if let Some(ref tdir) = test_dir {
                         let _ = TestcasesRunner::run_tests(
                             &mut runner,
                             Path::new(tdir),

@@ -736,7 +736,10 @@ impl BaseRunner {
         }
 
         let tui_active = self.printer.has_tui_sink();
-        let capture_stdout = expect_path.is_some() || (!compiling && tui_active);
+        let bench_silent = self.options.bench.is_some()
+            && !compiling
+            && self.printer.verbosity() < crate::util::output::Verbosity::Verbose;
+        let capture_stdout = expect_path.is_some() || (!compiling && (tui_active || bench_silent));
         let res = match self.execute_inner(cmd, use_shell, compiling, capture_stdout) {
             Ok(ok) => ok,
             Err(err) => {

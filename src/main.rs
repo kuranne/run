@@ -20,7 +20,7 @@ use run::core::handlers::custom_handler::CustomLanguageHandler;
 use run::core::registry::LanguageHandler;
 use run::core::handlers::java_handler::JavaHandler;
 use run::core::handlers::script_handler::ScriptHandler;
-use run::core::{CompilerRunner, ProjectRunner, TaskRunner, TestcasesRunner};
+use run::core::{BenchRunner, CompilerRunner, ProjectRunner, TaskRunner, TestcasesRunner};
 use run::util::args::CliArgs;
 use run::util::cache::CacheManager;
 use run::util::completion::CompletionGenerator;
@@ -555,11 +555,21 @@ fn run_once(
                 };
             }
         };
-        let ok = match runner.execute_binary(&resolved, &raw_cmd) {
-            Ok(res) => res,
-            Err(err) => {
-                printer.error(&err.to_string());
-                false
+        let ok = if let Some(bench_runs) = cli.bench {
+            BenchRunner::run_bench_command(
+                &mut runner,
+                &resolved,
+                &raw_cmd,
+                bench_runs,
+                cli.warmup.unwrap_or(2),
+            )
+        } else {
+            match runner.execute_binary(&resolved, &raw_cmd) {
+                Ok(res) => res,
+                Err(err) => {
+                    printer.error(&err.to_string());
+                    false
+                }
             }
         };
         cleanup_sandbox(started_compose, cli);
@@ -591,11 +601,21 @@ fn run_once(
                 };
             }
         };
-        let ok = match runner.execute_binary(&resolved, &cmd_args) {
-            Ok(res) => res,
-            Err(err) => {
-                printer.error(&err.to_string());
-                false
+        let ok = if let Some(bench_runs) = cli.bench {
+            BenchRunner::run_bench_command(
+                &mut runner,
+                &resolved,
+                &cmd_args,
+                bench_runs,
+                cli.warmup.unwrap_or(2),
+            )
+        } else {
+            match runner.execute_binary(&resolved, &cmd_args) {
+                Ok(res) => res,
+                Err(err) => {
+                    printer.error(&err.to_string());
+                    false
+                }
             }
         };
         cleanup_sandbox(started_compose, cli);
@@ -762,6 +782,14 @@ fn run_once(
 
     let ok = if let Some(ref td_str) = cli.test_dir {
         TestcasesRunner::run_tests(&mut runner, Path::new(td_str), &target_files, effective_multi)
+    } else if let Some(bench_runs) = cli.bench {
+        BenchRunner::run_bench_targets(
+            &mut runner,
+            &target_files,
+            effective_multi,
+            bench_runs,
+            cli.warmup.unwrap_or(2),
+        )
     } else {
         runner.compile_and_run(&target_files, effective_multi)
     };

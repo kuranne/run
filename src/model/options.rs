@@ -92,6 +92,100 @@ pub struct RunnerOptions {
     pub plain: bool,
     /// Launch full-screen interactive workspace TUI (`--tui`).
     pub tui: bool,
+    /// Optional micro-benchmark iteration count (`--bench [N]`).
+    pub bench: Option<usize>,
+    /// Warmup iteration count for `--bench` (`--warmup <W>`, default `2`).
+    pub warmup: usize,
+}
+
+/// Statistical summary computed across micro-benchmark iterations (`--bench`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BenchStats {
+    /// Number of measured iterations executed.
+    pub runs: usize,
+    /// Number of warmup iterations executed before measurement.
+    pub warmup: usize,
+    /// Raw wall-clock durations in seconds for each measured iteration.
+    pub samples_secs: Vec<f64>,
+    /// Minimum duration in seconds.
+    pub min_secs: f64,
+    /// Median (50th percentile) duration in seconds.
+    pub median_secs: f64,
+    /// Arithmetic mean duration in seconds.
+    pub mean_secs: f64,
+    /// 95th percentile duration in seconds.
+    pub p95_secs: f64,
+    /// Maximum duration in seconds.
+    pub max_secs: f64,
+    /// Peak resident memory observed across measured iterations in bytes.
+    pub peak_memory_bytes: Option<u64>,
+}
+
+impl BenchStats {
+    /// Compute [`BenchStats`] from raw duration samples and peak memory.
+    pub fn from_samples(warmup: usize, samples_secs: Vec<f64>, peak_memory_bytes: Option<u64>) -> Self {
+        let runs = samples_secs.len();
+        if runs == 0 {
+            return Self {
+                runs: 0,
+                warmup,
+                samples_secs,
+                min_secs: 0.0,
+                median_secs: 0.0,
+                mean_secs: 0.0,
+                p95_secs: 0.0,
+                max_secs: 0.0,
+                peak_memory_bytes,
+            };
+        }
+        let mut sorted = samples_secs.clone();
+        sorted.sort_by(|a, b| a.total_cmp(b));
+        let min_secs = sorted[0];
+        let max_secs = sorted[runs - 1];
+        let mean_secs = sorted.iter().sum::<f64>() / (runs as f64);
+        let median_secs = if runs % 2 == 1 {
+            sorted[runs / 2]
+        } else {
+            (sorted[runs / 2 - 1] + sorted[runs / 2]) / 2.0
+        };
+        let p95_idx = ((runs as f64 * 0.95).ceil() as usize)
+            .saturating_sub(1)
+            .min(runs - 1);
+        let p95_secs = sorted[p95_idx];
+
+        Self {
+            runs,
+            warmup,
+            samples_secs,
+            min_secs,
+            median_secs,
+            mean_secs,
+            p95_secs,
+            max_secs,
+            peak_memory_bytes,
+        }
+    }
+
+    /// Render a compact Unicode sparkline (`▁▂▃▄▅▆▇█`) for the measured duration samples.
+    pub fn sparkline(&self) -> String {
+        const BLOCKS: &[char] = &['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+        if self.samples_secs.is_empty() {
+            return String::new();
+        }
+        let span = self.max_secs - self.min_secs;
+        self.samples_secs
+            .iter()
+            .map(|&v| {
+                if span <= f64::EPSILON {
+                    BLOCKS[3]
+                } else {
+                    let norm = ((v - self.min_secs) / span).clamp(0.0, 1.0);
+                    let idx = (norm * ((BLOCKS.len() - 1) as f64)).round() as usize;
+                    BLOCKS[idx.min(BLOCKS.len() - 1)]
+                }
+            })
+            .collect()
+    }
 }
 
 /// Parameters describing a single subprocess invocation handed to [`CommandExecutor`].

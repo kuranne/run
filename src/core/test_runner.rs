@@ -339,7 +339,7 @@ impl TestcasesRunner {
     }
 
     /// Compile compiled-language targets once in `--build-only` mode before iterating testcases.
-    fn prepare_compiled_binary(
+    pub(crate) fn prepare_compiled_binary(
         runner: &mut CompilerRunner,
         target_files: &[PathBuf],
         is_multi: bool,

@@ -13,7 +13,7 @@ use crossterm::style::{Attribute, Color, Stylize};
 use crossterm::tty::IsTty;
 use similar::TextDiff;
 
-use crate::model::options::UiMode;
+use crate::model::options::{BenchStats, UiMode};
 
 /// Global verbosity level stored atomically for [`Printer::global()`].
 static GLOBAL_VERBOSITY: AtomicU8 = AtomicU8::new(Verbosity::Info as u8);
@@ -73,6 +73,8 @@ pub enum UiEvent {
         /// Expected output for `Ctrl+O` expansion.
         expected_output: String,
     },
+    /// Completed micro-benchmark statistics (`--bench`).
+    BenchSummary(BenchStats),
 }
 
 /// Global TUI sink mutex accessor.

@@ -33,6 +33,7 @@ const VALUE_FLAGS_LONG: &[&str] = &[
     "--sandbox-dockerfile",
     "--sandbox-compose",
     "--sandbox-service",
+    "--warmup",
 ];
 
 /// Short flags taking an explicit following value token.
@@ -104,6 +105,17 @@ where
                     out.push(format!("--all={depth}"));
                 } else {
                     out.push("--all=-1".to_string());
+                }
+            }
+            "--bench" => {
+                if let Some((_, next)) = iter.peek()
+                    && next.parse::<usize>().is_ok()
+                {
+                    let count = (*next).clone();
+                    iter.next();
+                    out.push(format!("--bench={count}"));
+                } else {
+                    out.push("--bench=10".to_string());
                 }
             }
             "--completion" => {
@@ -338,6 +350,14 @@ pub struct CliArgs {
     #[arg(long = "tui", conflicts_with = "plain")]
     pub tui: bool,
 
+    /// Micro-benchmark target for `N` iterations (defaults to 10 when value is omitted).
+    #[arg(long = "bench", value_name = "N")]
+    pub bench: Option<usize>,
+
+    /// Number of warmup iterations before `--bench` measurements (default: 2).
+    #[arg(long = "warmup", value_name = "W")]
+    pub warmup: Option<usize>,
+
     /// Override compiler or interpreter executable for the active language.
     #[arg(long = "compiler", value_name = "BIN")]
     pub compiler: Option<String>,
@@ -478,6 +498,8 @@ impl CliArgs {
             run_args: self.extra_run_args.clone(),
             plain: self.plain,
             tui: self.tui,
+            bench: self.bench,
+            warmup: self.warmup.unwrap_or(2),
         }
     }
 
@@ -640,5 +662,13 @@ mod tests {
         assert!(tui_cli.to_runner_options().tui);
 
         assert!(CliArgs::parse_from_raw(["run", "--plain", "--tui"]).is_err());
+
+        let bench_default = parse(&["--bench", "main.c"]);
+        assert_eq!(bench_default.bench, Some(10));
+        assert_eq!(bench_default.to_runner_options().warmup, 2);
+
+        let bench_custom = parse(&["--bench", "25", "--warmup", "4", "main.c"]);
+        assert_eq!(bench_custom.bench, Some(25));
+        assert_eq!(bench_custom.to_runner_options().warmup, 4);
     }
 }

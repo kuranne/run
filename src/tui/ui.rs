@@ -3,9 +3,10 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Tabs, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Sparkline, Tabs, Wrap};
 use ratatui::Frame;
 
+use crate::core::BenchRunner;
 use crate::util::output::TagColor;
 use crate::util::spinner::BRAILLE_FRAMES;
 
@@ -166,6 +167,45 @@ fn render_main_pane(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
 
     match app.tab {
         MainTab::Output => {
+            let (bench_area, log_area) = if app.last_bench.is_some() {
+                let split = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(5), Constraint::Min(3)])
+                    .split(chunks[1]);
+                (Some(split[0]), split[1])
+            } else {
+                (None, chunks[1])
+            };
+
+            if let (Some(b_area), Some(stats)) = (bench_area, app.last_bench.as_ref()) {
+                let title = format!(
+                    " Bench ({} runs, {} warmup) · min {} · med {} · mean {} · p95 {} · max {} ",
+                    stats.runs,
+                    stats.warmup,
+                    BenchRunner::format_duration(stats.min_secs),
+                    BenchRunner::format_duration(stats.median_secs),
+                    BenchRunner::format_duration(stats.mean_secs),
+                    BenchRunner::format_duration(stats.p95_secs),
+                    BenchRunner::format_duration(stats.max_secs),
+                );
+                let data: Vec<u64> = stats
+                    .samples_secs
+                    .iter()
+                    .map(|&s| ((s * 1_000_000.0).round() as u64).max(1))
+                    .collect();
+                let spark = Sparkline::default()
+                    .block(
+                        Block::default()
+                            .title(title)
+                            .borders(Borders::ALL)
+                            .border_type(BorderType::Rounded)
+                            .border_style(Style::default().fg(Color::Green)),
+                    )
+                    .data(&data)
+                    .style(Style::default().fg(Color::Cyan));
+                frame.render_widget(spark, b_area);
+            }
+
             let mut lines: Vec<Line<'_>> = app
                 .logs
                 .iter()
@@ -185,9 +225,9 @@ fn render_main_pane(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
             for out in &app.output_lines {
                 lines.push(Line::from(out.as_str()));
             }
-            if lines.is_empty() {
+            if lines.is_empty() && app.last_bench.is_none() {
                 lines.push(Line::from(Span::styled(
-                    "Press 'r' or Enter to compile & run the selected target.",
+                    "Press 'r' to run or 'b' to benchmark the selected target.",
                     Style::default().fg(Color::DarkGray),
                 )));
             }
@@ -195,7 +235,7 @@ fn render_main_pane(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
                 .block(content_block)
                 .wrap(Wrap { trim: false })
                 .scroll((app.scroll, 0));
-            frame.render_widget(para, chunks[1]);
+            frame.render_widget(para, log_area);
         }
         MainTab::Diff => {
             let lines: Vec<Line<'_>> = if app.diff_lines.is_empty() {
@@ -309,7 +349,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
     let line = Line::from(vec![
         Span::styled(format!("{time_str}{mem_str}"), Style::default().fg(Color::Yellow)),
         Span::styled(
-            "r/Enter Run · Ctrl+O Toggle Test Output · Tab Focus · p Preset · w Watch · t/m Metrics · c Clear · q Quit",
+            "r/Enter Run · b Bench · Ctrl+O Toggle Test · Tab Focus · p Preset · w Watch · t/m Metrics · c Clear · q Quit",
             Style::default().fg(Color::DarkGray),
         ),
     ]);
