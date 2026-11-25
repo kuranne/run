@@ -70,6 +70,58 @@ pub struct TestCaseEntry {
     pub expanded: bool,
 }
 
+/// Active modal popup or inline input mode in the TUI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputModal {
+    /// Normal navigation mode.
+    #[default]
+    None,
+    /// Built-in fuzzy sidebar filter (`/`).
+    Filter,
+    /// Interactive multi-line stdin editor (`i`).
+    StdinEditor,
+    /// Interactive `--test-dir` directory picker (`d`).
+    TestDirPicker,
+}
+
+/// Case-insensitive fuzzy subsequence scorer (`fzf`-style) returning `Some(score)` on match.
+pub fn fuzzy_score(query: &str, candidate: &str) -> Option<i32> {
+    if query.is_empty() {
+        return Some(0);
+    }
+    let q_chars: Vec<char> = query.to_ascii_lowercase().chars().collect();
+    let c_chars: Vec<char> = candidate.to_ascii_lowercase().chars().collect();
+
+    let mut q_idx = 0usize;
+    let mut score: i32 = 0;
+    let mut prev_match: Option<usize> = None;
+
+    for (c_idx, &ch) in c_chars.iter().enumerate() {
+        if q_idx < q_chars.len() && ch == q_chars[q_idx] {
+            score += 1;
+            if prev_match.is_some_and(|p| p + 1 == c_idx) {
+                score += 4;
+            }
+            if c_idx == 0
+                || matches!(
+                    c_chars[c_idx - 1],
+                    '/' | '\\' | '_' | '-' | '.' | ':'
+                )
+            {
+                score += 3;
+            }
+            prev_match = Some(c_idx);
+            q_idx += 1;
+        }
+    }
+
+    if q_idx == q_chars.len() {
+        Some(score)
+    } else {
+        None
+    }
+}
+
 /// Action returned by [`TuiApp::handle_key`] to the event loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TuiAction {
@@ -128,6 +180,16 @@ pub struct TuiApp {
     pub test_dir: Option<String>,
     /// Most recent micro-benchmark summary (`--bench` or `b` hotkey).
     pub last_bench: Option<BenchStats>,
+    /// Active modal popup or inline input mode.
+    pub modal: InputModal,
+    /// Live fuzzy filter query for the sidebar (`/`).
+    pub filter_query: String,
+    /// Multi-line stdin text edited inside the TUI (`i`).
+    pub stdin_buffer: String,
+    /// Candidate subdirectories under `cwd` for the `--test-dir` picker (`d`).
+    pub test_dir_candidates: Vec<String>,
+    /// Selected index in the `--test-dir` picker (`0` = Disabled, `1..` = `test_dir_candidates[i - 1]`).
+    pub selected_test_dir_idx: usize,
 }
 
 impl TuiApp {
@@ -169,7 +231,35 @@ impl TuiApp {
             last_memory: None,
             test_dir,
             last_bench: None,
+            modal: InputModal::None,
+            filter_query: String::new(),
+            stdin_buffer: String::new(),
+            test_dir_candidates: Vec::new(),
+            selected_test_dir_idx: 0,
         }
+    }
+
+    /// Return sidebar items matching `filter_query`, ranked by [`fuzzy_score`].
+    pub fn filtered_items(&self) -> Vec<(usize, &SidebarItem)> {
+        if self.filter_query.is_empty() {
+            return self.items.iter().enumerate().collect();
+        }
+        let mut scored: Vec<(i32, usize, &SidebarItem)> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, item)| {
+                fuzzy_score(&self.filter_query, &item.label()).map(|s| (s, idx, item))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        scored.into_iter().map(|(_, idx, item)| (idx, item)).collect()
+    }
+
+    /// Return the currently highlighted sidebar item (respecting any active fuzzy filter).
+    pub fn current_item(&self) -> Option<&SidebarItem> {
+        let filtered = self.filtered_items();
+        filtered.get(self.selected_item).map(|(_, item)| *item)
     }
 
     /// Return the currently active preset name, if any.
@@ -263,6 +353,14 @@ impl TuiApp {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             return TuiAction::Quit;
         }
+
+        match self.modal {
+            InputModal::Filter => return self.handle_filter_key(key),
+            InputModal::StdinEditor => return self.handle_stdin_key(key),
+            InputModal::TestDirPicker => return self.handle_test_dir_key(key),
+            InputModal::None => {}
+        }
+
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('o') {
             if !self.test_cases.is_empty() {
                 self.tab = MainTab::Tests;
@@ -273,6 +371,29 @@ impl TuiApp {
 
         match key.code {
             KeyCode::Char('q') => TuiAction::Quit,
+            KeyCode::Char('/') => {
+                self.focus = TuiFocus::Sidebar;
+                self.modal = InputModal::Filter;
+                TuiAction::None
+            }
+            KeyCode::Char('i') => {
+                self.modal = InputModal::StdinEditor;
+                TuiAction::None
+            }
+            KeyCode::Char('d') => {
+                self.selected_test_dir_idx = self
+                    .test_dir
+                    .as_deref()
+                    .and_then(|cur| {
+                        self.test_dir_candidates
+                            .iter()
+                            .position(|c| c == cur)
+                            .map(|idx| idx + 1)
+                    })
+                    .unwrap_or(0);
+                self.modal = InputModal::TestDirPicker;
+                TuiAction::None
+            }
             KeyCode::Tab => {
                 self.focus = match self.focus {
                     TuiFocus::Sidebar => TuiFocus::Main,
@@ -326,6 +447,98 @@ impl TuiApp {
         }
     }
 
+    /// Handle keystrokes while the built-in `/` fuzzy sidebar filter is active.
+    fn handle_filter_key(&mut self, key: KeyEvent) -> TuiAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.filter_query.clear();
+                self.selected_item = 0;
+                self.modal = InputModal::None;
+            }
+            KeyCode::Enter => {
+                self.modal = InputModal::None;
+            }
+            KeyCode::Backspace => {
+                self.filter_query.pop();
+                self.selected_item = 0;
+            }
+            KeyCode::Up => {
+                self.selected_item = self.selected_item.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                let len = self.filtered_items().len();
+                if len > 0 && self.selected_item + 1 < len {
+                    self.selected_item += 1;
+                }
+            }
+            KeyCode::Char(c) => {
+                self.filter_query.push(c);
+                self.selected_item = 0;
+            }
+            _ => {}
+        }
+        TuiAction::None
+    }
+
+    /// Handle keystrokes while the `i` interactive stdin editor popup is active.
+    fn handle_stdin_key(&mut self, key: KeyEvent) -> TuiAction {
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s') {
+            self.modal = InputModal::None;
+            return TuiAction::None;
+        }
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('x') {
+            self.stdin_buffer.clear();
+            return TuiAction::None;
+        }
+        match key.code {
+            KeyCode::Esc => {
+                self.modal = InputModal::None;
+            }
+            KeyCode::Enter => {
+                self.stdin_buffer.push('\n');
+            }
+            KeyCode::Backspace => {
+                self.stdin_buffer.pop();
+            }
+            KeyCode::Char(c) => {
+                self.stdin_buffer.push(c);
+            }
+            _ => {}
+        }
+        TuiAction::None
+    }
+
+    /// Handle keystrokes while the `d` `--test-dir` picker popup is active.
+    fn handle_test_dir_key(&mut self, key: KeyEvent) -> TuiAction {
+        let total = self.test_dir_candidates.len() + 1;
+        match key.code {
+            KeyCode::Esc => {
+                self.modal = InputModal::None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.selected_test_dir_idx = self.selected_test_dir_idx.saturating_sub(1);
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.selected_test_dir_idx + 1 < total {
+                    self.selected_test_dir_idx += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if self.selected_test_dir_idx == 0 {
+                    self.test_dir = None;
+                } else if let Some(dir) =
+                    self.test_dir_candidates.get(self.selected_test_dir_idx - 1)
+                {
+                    self.test_dir = Some(dir.clone());
+                    self.tab = MainTab::Tests;
+                }
+                self.modal = InputModal::None;
+            }
+            _ => {}
+        }
+        TuiAction::None
+    }
+
     /// Move selection or scroll upward based on active focus/tab.
     fn move_up(&mut self) {
         match (self.focus, self.tab) {
@@ -345,7 +558,8 @@ impl TuiApp {
     fn move_down(&mut self) {
         match (self.focus, self.tab) {
             (TuiFocus::Sidebar, _) => {
-                if !self.items.is_empty() && self.selected_item + 1 < self.items.len() {
+                let len = self.filtered_items().len();
+                if len > 0 && self.selected_item + 1 < len {
                     self.selected_item += 1;
                 }
             }
@@ -436,5 +650,54 @@ mod tests {
             app.handle_key(KeyEvent::from(KeyCode::Char('q'))),
             TuiAction::Quit
         );
+    }
+
+    /// Verify fuzzy filter (`/`), stdin editor (`i`), and test-dir picker (`d`).
+    #[test]
+    fn test_fuzzy_filter_stdin_editor_and_test_dir_picker() {
+        assert!(fuzzy_score("mc", "main.c").is_some());
+        assert!(fuzzy_score("zzz", "main.c").is_none());
+
+        let mut app = TuiApp::new(
+            vec![
+                SidebarItem::File(PathBuf::from("alpha.py")),
+                SidebarItem::File(PathBuf::from("main.c")),
+            ],
+            vec![],
+            None,
+            false,
+            false,
+            false,
+            None,
+        );
+        app.test_dir_candidates = vec!["cases".to_string(), "tests".to_string()];
+
+        // Fuzzy filter `/`
+        app.handle_key(KeyEvent::from(KeyCode::Char('/')));
+        assert_eq!(app.modal, InputModal::Filter);
+        app.handle_key(KeyEvent::from(KeyCode::Char('m')));
+        app.handle_key(KeyEvent::from(KeyCode::Char('c')));
+        assert_eq!(app.filtered_items().len(), 1);
+        assert_eq!(app.current_item().unwrap().label(), "main.c");
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.modal, InputModal::None);
+
+        // Stdin editor `i`
+        app.handle_key(KeyEvent::from(KeyCode::Char('i')));
+        assert_eq!(app.modal, InputModal::StdinEditor);
+        app.handle_key(KeyEvent::from(KeyCode::Char('5')));
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        app.handle_key(KeyEvent::from(KeyCode::Esc));
+        assert_eq!(app.modal, InputModal::None);
+        assert_eq!(app.stdin_buffer, "5\n");
+
+        // Test-dir picker `d`
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        assert_eq!(app.modal, InputModal::TestDirPicker);
+        app.handle_key(KeyEvent::from(KeyCode::Down));
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.modal, InputModal::None);
+        assert_eq!(app.test_dir.as_deref(), Some("cases"));
+        assert_eq!(app.tab, MainTab::Tests);
     }
 }
