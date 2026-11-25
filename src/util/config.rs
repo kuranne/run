@@ -691,7 +691,7 @@ type = "interpreter"
         fs::write(&compose, "version: '3'\n").unwrap();
 
         let valid = format!(
-            "[sandbox]\nimage = \"gcc:latest\"\ndockerfile = \"{}\"\ncompose = \"{}\"\ncompose_service = \"app\"\nsandbox_net = true\nrestrict = false\n",
+            "[sandbox]\nimage = \"gcc:latest\"\ndockerfile = '{}'\ncompose = '{}'\ncompose_service = \"app\"\nsandbox_net = true\nrestrict = false\n",
             df.display(),
             compose.display()
         );

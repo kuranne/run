@@ -532,7 +532,15 @@ fn run_once(
     }
 
     // 1b. Direct PATH command via explicit `-- <cmd> [args...]` (e.g. `run -t -M -- ls -la`).
-    if cli.files.is_empty() && cli.all.is_none() && !cli.extra_run_args.is_empty() {
+    // When a project manifest is detected in `cwd`, only intercept `-- <first>` if `<first>`
+    // resolves to an existing path or `PATH` command; otherwise forward `-- args` to `ProjectRunner`.
+    if cli.files.is_empty()
+        && cli.all.is_none()
+        && !cli.extra_run_args.is_empty()
+        && (Path::new(&cli.extra_run_args[0]).exists()
+            || SystemSandboxEnv.which(&cli.extra_run_args[0]).is_some()
+            || ProjectRunner::detect_project(cwd, &config, None).is_none())
+    {
         let mut raw_cmd = std::mem::take(&mut runner.base.run_args);
         let prog = raw_cmd.remove(0);
         let resolved = if Path::new(&prog).exists() {

@@ -1234,7 +1234,9 @@ mod tests {
         assert!(wrapped.contains(&"--new-session".to_string()));
         assert!(wrapped.contains(&"--unshare-net".to_string()));
         assert!(wrapped.contains(&"--bind".to_string()));
-        assert!(wrapped.contains(&"/home/tester/.cache/run".to_string()));
+        assert!(wrapped
+            .iter()
+            .any(|p| p.replace('\\', "/") == "/home/tester/.cache/run"));
 
         for masked in ["/home", "/root", "/run", "/sys", "/tmp"] {
             let idx = wrapped.iter().position(|t| t == masked).expect("masked dir");
