@@ -19,6 +19,12 @@ RUN dnf install -y \
     procps-ng \
     && dnf clean all
 
-COPY . /app
+RUN dnf install -y nodejs && dnf clean all
+
+RUN useradd -m tester && chown tester:tester /app
+
+COPY --chown=tester:tester . /app
+
+USER tester
 
 CMD ["make", "lint", "doc", "test"]
