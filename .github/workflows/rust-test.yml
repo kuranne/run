@@ -42,5 +42,9 @@ jobs:
         run: cargo test --workspace
       - name: Build Release Binary
         run: cargo build --release
-      - name: Black-Box CLI Pytest Suite
+      - name: Black-Box CLI Pytest Suite (Unix)
+        if: runner.os != 'Windows'
         run: pytest -p no:cacheprovider -o pythonpath=". tests" tests/
+      - name: Black-Box CLI Pytest Suite (Windows)
+        if: runner.os == 'Windows'
+        run: python tests/run_unelevated.py -m pytest -p no:cacheprovider -o pythonpath=". tests" tests/
