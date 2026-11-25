@@ -43,6 +43,4 @@ jobs:
       - name: Build Release Binary
         run: cargo build --release
       - name: Black-Box CLI Pytest Suite
-        env:
-          PYTHONPATH: .:tests
-        run: pytest -p no:cacheprovider tests/
+        run: pytest -p no:cacheprovider -o pythonpath=". tests" tests/
