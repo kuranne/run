@@ -20,7 +20,10 @@ use run::core::handlers::custom_handler::CustomLanguageHandler;
 use run::core::registry::LanguageHandler;
 use run::core::handlers::java_handler::JavaHandler;
 use run::core::handlers::script_handler::ScriptHandler;
-use run::core::{BenchRunner, CompilerRunner, ProjectRunner, TaskRunner, TestcasesRunner};
+use run::core::{
+    BenchRunner, CompilerRunner, ProjectRunner, StressConfig, StressRunner, TaskRunner,
+    TestcasesRunner,
+};
 use run::util::args::CliArgs;
 use run::util::cache::CacheManager;
 use run::util::completion::CompletionGenerator;
@@ -780,7 +783,21 @@ fn run_once(
             && target_files.len() > 1
             && has_multi_compilable(&target_files, &config));
 
-    let ok = if let Some(ref td_str) = cli.test_dir {
+    let ok = if let Some(ref stress_pair) = cli.stress {
+        let stress_cfg = StressConfig {
+            gen_path: PathBuf::from(&stress_pair[0]),
+            brute_path: PathBuf::from(&stress_pair[1]),
+            checker_path: cli.checker.as_deref().map(PathBuf::from),
+            runs: cli.runs.unwrap_or(100),
+            start_seed: cli.seed.unwrap_or(1),
+            save_dir: cli
+                .out_dir
+                .as_deref()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| cwd.to_path_buf()),
+        };
+        StressRunner::run_stress(&mut runner, &target_files, effective_multi, &stress_cfg)
+    } else if let Some(ref td_str) = cli.test_dir {
         TestcasesRunner::run_tests(&mut runner, Path::new(td_str), &target_files, effective_multi)
     } else if let Some(bench_runs) = cli.bench {
         BenchRunner::run_bench_targets(

@@ -240,6 +240,10 @@ pub struct BaseRunner {
     pub last_compile_memory_bytes: Option<u64>,
     /// Whether the most recent `--expect` comparison passed (`true` if not used).
     pub last_expect_passed: bool,
+    /// When `true`, capture non-compile stdout into `last_captured_stdout` without printing it.
+    pub capture_silent: bool,
+    /// Captured stdout from the most recent non-compile command (used by `--stress`).
+    pub last_captured_stdout: String,
     /// Container sandbox configuration from `Run.toml`.
     pub sandbox_config: SandboxConfig,
     /// Tagged terminal printer.
@@ -426,6 +430,8 @@ impl BaseRunner {
             last_memory_bytes: None,
             last_compile_memory_bytes: None,
             last_expect_passed: true,
+            capture_silent: false,
+            last_captured_stdout: String::new(),
             sandbox_config: config.get_sandbox_config().clone(),
             printer,
             buffered_stdin,
@@ -739,7 +745,8 @@ impl BaseRunner {
         let bench_silent = self.options.bench.is_some()
             && !compiling
             && self.printer.verbosity() < crate::util::output::Verbosity::Verbose;
-        let capture_stdout = expect_path.is_some() || (!compiling && (tui_active || bench_silent));
+        let capture_stdout = expect_path.is_some()
+            || (!compiling && (tui_active || bench_silent || self.capture_silent));
         let res = match self.execute_inner(cmd, use_shell, compiling, capture_stdout) {
             Ok(ok) => ok,
             Err(err) => {
@@ -762,7 +769,10 @@ impl BaseRunner {
 
         let is_debug = self.options.debug || self.options.gdb || self.options.lldb;
         if !compiling && !is_debug {
-            if tui_active && !res.captured_stdout.is_empty() && !self.options.quiet {
+            self.last_captured_stdout = res.captured_stdout.clone();
+            if self.capture_silent {
+                // Silent capture mode (e.g. `--stress`): keep output in `last_captured_stdout`.
+            } else if tui_active && !res.captured_stdout.is_empty() && !self.options.quiet {
                 for line in res.captured_stdout.lines() {
                     emit_tui_event(UiEvent::OutputLine(line.to_string()));
                 }

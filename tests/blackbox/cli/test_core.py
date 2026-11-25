@@ -165,3 +165,73 @@ def test_core_micro_benchmark_c_and_path_command(
     out_cmd = strip_ansi(res_cmd.stdout)
     assert "[ BENCH ]" in out_cmd
     assert "(3 runs, 1 warmup)" in out_cmd
+
+
+def test_core_stress_testing_pass_fail_and_custom_checker(
+    work_dir: Path, run_cli: Callable[..., object]
+) -> None:
+    gen = work_dir / "gen.py"
+    gen.write_text("import sys\nprint(sys.argv[1])\n", encoding="utf-8")
+
+    brute = work_dir / "brute.py"
+    brute.write_text("n = int(input())\nprint(n * 2)\n", encoding="utf-8")
+
+    sol_ok = work_dir / "sol_ok.c"
+    sol_ok.write_text(
+        '#include <stdio.h>\nint main(void){int n; if(scanf("%d",&n)==1) printf("%d\\n", n*2); return 0;}\n',
+        encoding="utf-8",
+    )
+
+    # 1. All 5 runs pass.
+    r_ok = run_cli(
+        [str(sol_ok), "--stress", str(gen), str(brute), "--runs", "5", "--seed", "1"]
+    )
+    assert r_ok.returncode == 0, combined_output(r_ok)
+    assert "[ PASS ]" in strip_ansi(r_ok.stdout)
+    assert not (work_dir / "fail.in").exists()
+
+    # 2. Buggy solution fails on seed 3 -> saves fail.in / expected.out / actual.out + diff.
+    sol_bug = work_dir / "sol_bug.c"
+    sol_bug.write_text(
+        '#include <stdio.h>\n'
+        'int main(void){int n; if(scanf("%d",&n)==1) printf("%d\\n", n==3 ? 999 : n*2); return 0;}\n',
+        encoding="utf-8",
+    )
+    r_fail = run_cli(
+        [str(sol_bug), "--stress", str(gen), str(brute), "--runs", "5", "--seed", "1"]
+    )
+    assert r_fail.returncode == 1
+    out_fail = strip_ansi(combined_output(r_fail))
+    assert "[ FAIL ]" in out_fail
+    assert "seed 3" in out_fail
+    assert (work_dir / "fail.in").read_text(encoding="utf-8").strip() == "3"
+    assert (work_dir / "expected.out").read_text(encoding="utf-8").strip() == "6"
+    assert (work_dir / "actual.out").read_text(encoding="utf-8").strip() == "999"
+
+    # 3. Custom --checker accepts reordered multi-answer output.
+    sol_perm = work_dir / "sol_perm.py"
+    sol_perm.write_text("n = int(input())\nprint(n, 0)\n", encoding="utf-8")
+    brute_perm = work_dir / "brute_perm.py"
+    brute_perm.write_text("n = int(input())\nprint(0, n)\n", encoding="utf-8")
+    checker = work_dir / "checker.py"
+    checker.write_text(
+        "import sys\n"
+        "exp = sum(map(int, open(sys.argv[2]).read().split()))\n"
+        "act = sum(map(int, open(sys.argv[3]).read().split()))\n"
+        "sys.exit(0 if exp == act else 1)\n",
+        encoding="utf-8",
+    )
+    r_chk = run_cli(
+        [
+            str(sol_perm),
+            "--stress",
+            str(gen),
+            str(brute_perm),
+            "--runs",
+            "3",
+            "--checker",
+            str(checker),
+        ]
+    )
+    assert r_chk.returncode == 0, combined_output(r_chk)
+    assert "[ PASS ]" in strip_ansi(r_chk.stdout)

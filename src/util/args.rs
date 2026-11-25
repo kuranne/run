@@ -34,6 +34,9 @@ const VALUE_FLAGS_LONG: &[&str] = &[
     "--sandbox-compose",
     "--sandbox-service",
     "--warmup",
+    "--runs",
+    "--seed",
+    "--checker",
 ];
 
 /// Short flags taking an explicit following value token.
@@ -116,6 +119,14 @@ where
                     out.push(format!("--bench={count}"));
                 } else {
                     out.push("--bench=10".to_string());
+                }
+            }
+            "--stress" => {
+                out.push(tok.clone());
+                for _ in 0..2 {
+                    if let Some((_, next)) = iter.next() {
+                        out.push(next.clone());
+                    }
                 }
             }
             "--completion" => {
@@ -357,6 +368,22 @@ pub struct CliArgs {
     /// Number of warmup iterations before `--bench` measurements (default: 2).
     #[arg(long = "warmup", value_name = "W")]
     pub warmup: Option<usize>,
+
+    /// Differential stress test against `<GEN>` and `<BRUTE>` programs.
+    #[arg(long = "stress", num_args = 2, value_names = ["GEN", "BRUTE"])]
+    pub stress: Option<Vec<String>>,
+
+    /// Number of iterations for `--stress` (default: 100).
+    #[arg(long = "runs", value_name = "N")]
+    pub runs: Option<usize>,
+
+    /// Starting seed for `--stress` (default: 1).
+    #[arg(long = "seed", value_name = "S")]
+    pub seed: Option<u64>,
+
+    /// Optional custom checker program for `--stress` (`<in> <expected> <actual>`).
+    #[arg(long = "checker", value_name = "FILE")]
+    pub checker: Option<String>,
 
     /// Override compiler or interpreter executable for the active language.
     #[arg(long = "compiler", value_name = "BIN")]
@@ -670,5 +697,26 @@ mod tests {
         let bench_custom = parse(&["--bench", "25", "--warmup", "4", "main.c"]);
         assert_eq!(bench_custom.bench, Some(25));
         assert_eq!(bench_custom.to_runner_options().warmup, 4);
+
+        let stress_cli = parse(&[
+            "sol.cpp",
+            "--stress",
+            "gen.py",
+            "brute.cpp",
+            "--runs",
+            "25",
+            "--seed",
+            "7",
+            "--checker",
+            "chk.py",
+        ]);
+        assert_eq!(stress_cli.files, vec!["sol.cpp"]);
+        assert_eq!(
+            stress_cli.stress,
+            Some(vec!["gen.py".to_string(), "brute.cpp".to_string()])
+        );
+        assert_eq!(stress_cli.runs, Some(25));
+        assert_eq!(stress_cli.seed, Some(7));
+        assert_eq!(stress_cli.checker.as_deref(), Some("chk.py"));
     }
 }

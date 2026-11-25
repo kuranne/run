@@ -10,6 +10,7 @@ pub mod engine;
 pub mod handlers;
 pub mod project;
 pub mod registry;
+pub mod stress;
 pub mod test_runner;
 
 pub use base::{BaseRunner, SystemCommandExecutor};
@@ -18,6 +19,7 @@ pub use crate::model::options::{CommandExecutor, ExecOutcome, ExecSpec, RunnerOp
 pub use engine::CompilerRunner;
 pub use project::{split_compound_command, ProjectRunner, TaskRunner};
 pub use registry::{ExecutionContext, HandlerRegistry, LanguageHandler};
+pub use stress::{StressConfig, StressRunner};
 pub use test_runner::TestcasesRunner;
 
 /// Minimal RAII temporary directory helper for `#[cfg(test)]` modules (avoids adding `tempfile` crate).
