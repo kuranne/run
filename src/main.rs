@@ -544,6 +544,38 @@ fn run_once(
 
     apply_sandbox_overrides(&mut runner.base.sandbox_config, cli);
 
+    // 0. Inline snippet evaluation (`-e/--eval`) or interactive scratchpad REPL (`--repl`).
+    if let Some(ref code) = cli.eval {
+        let lang = cli.lang.as_deref().unwrap_or("py");
+        let ok = match run::core::repl::eval_snippet(&mut runner, lang, code) {
+            Ok(res) => res,
+            Err(err) => {
+                printer.error(&err.to_string());
+                false
+            }
+        };
+        return RunOutcome {
+            exit_code: i32::from(!ok),
+            watch_files: Vec::new(),
+            captured_stdin,
+        };
+    }
+
+    if let Some(ref lang) = cli.repl {
+        let exit_code = match run::core::repl::run_repl(&mut runner, lang) {
+            Ok(c) => c,
+            Err(err) => {
+                printer.error(&err.to_string());
+                1
+            }
+        };
+        return RunOutcome {
+            exit_code,
+            watch_files: Vec::new(),
+            captured_stdin,
+        };
+    }
+
     // 1. Check for configured [tasks.<name>] execution when first positional is not an existing path.
     if !cli.files.is_empty()
         && !Path::new(&cli.files[0]).exists()

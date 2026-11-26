@@ -91,6 +91,15 @@ _run() {
         '--runs[Number of iterations for --stress]:runs:' \
         '--seed[Starting RNG seed for --stress]:seed:' \
         '--checker[Custom checker program for --stress]:file:_files' \
+        '--cmp[Output comparator mode (exact, tokens, float:<eps>)]:mode:(exact tokens float:1e-6)' \
+        '--interactive[Run interactive judge bridged with interactor]:file:_files' \
+        '--compare[Compare target side-by-side against another target]:file:_files' \
+        '--cache-stats[Display build cache statistics]' \
+        '--cache-gc[Prune expired or LRU-overflow cache entries]' \
+        '--max-output[Cap captured stdout/stderr bytes in --json]:size:' \
+        '(-e --eval)'{-e,--eval}'[Evaluate inline code snippet]:code:' \
+        '--lang[Language for -e/--eval]:lang:(c cpp rs py go js sh)' \
+        '--repl[Start interactive compile-and-eval REPL]:lang:(c cpp rs py go js sh)' \
         '(-l --list)'{-l,--list}'[List tasks defined in Run.toml]' \
         '--unsafe[Allow running as root]' \
         '--completion[Generate shell completion script]:shell:(zsh bash fish powershell)' \
@@ -114,7 +123,7 @@ const BASH_COMPLETION: &str = r#"_run_complete() {
     local cur prev words cword
     _init_completion || return
 
-    local opts="-w --watch -f --force -d --dry-run -t --time -M --mem --memory -q --quiet -v -vv --verbose -i --stdin --stdin-file --stdin-text --expect --test-dir --filter --debug --gdb --lldb --valgrind --timeout --mem-limit --env --argument -m --multi -p --preset -j --jobs -B --build-only --no-run --asan --tsan --sanitize -L --all --flags --compiler --out-dir --keep --no-cache --new --template -l --list --doctor --init --directory --cwd --clean --no-color --plain --tui --json --json-schema --mcp --mcp-root --bench --warmup --stress --runs --seed --checker --unsafe --completion -V --version -h --help"
+    local opts="-w --watch -f --force -d --dry-run -t --time -M --mem --memory -q --quiet -v -vv --verbose -i --stdin --stdin-file --stdin-text --expect --test-dir --filter --debug --gdb --lldb --valgrind --timeout --mem-limit --env --argument -m --multi -p --preset -j --jobs -B --build-only --no-run --asan --tsan --sanitize -L --all --flags --compiler --out-dir --keep --no-cache --new --template -l --list --doctor --init --directory --cwd --clean --no-color --plain --tui --json --json-schema --mcp --mcp-root --bench --warmup --stress --runs --seed --checker --cmp --interactive --compare --cache-stats --cache-gc --max-output -e --eval --lang --repl --unsafe --completion -V --version -h --help"
 
     case "$prev" in
         -p|--preset)
@@ -222,6 +231,15 @@ complete -c run -l stress -r -d "Differential stress test against generator and 
 complete -c run -l runs -r -d "Number of iterations for --stress"
 complete -c run -l seed -r -d "Starting RNG seed for --stress"
 complete -c run -l checker -r -d "Custom checker program for --stress"
+complete -c run -l cmp -r -a "exact tokens float:1e-6" -d "Output comparator mode"
+complete -c run -l interactive -r -d "Interactive judge interactor program"
+complete -c run -l compare -r -d "Compare target against another target"
+complete -c run -l cache-stats -d "Display build cache statistics"
+complete -c run -l cache-gc -d "Prune expired or LRU-overflow cache entries"
+complete -c run -l max-output -r -d "Cap captured output bytes in --json"
+complete -c run -s e -l eval -r -d "Evaluate inline code snippet"
+complete -c run -l lang -r -a "c cpp rs py go js sh" -d "Language for -e/--eval"
+complete -c run -l repl -r -a "c cpp rs py go js sh" -d "Interactive compile-and-eval REPL"
 complete -c run -s l -l list -d "List tasks defined in Run.toml"
 complete -c run -l unsafe -d "Allow running as root"
 complete -c run -l completion -x -a "zsh bash fish powershell" -d "Generate shell completion script"
@@ -277,6 +295,9 @@ const POWERSHELL_COMPLETION: &str = r#"Register-ArgumentCompleter -Native -Comma
         '--no-color', '--plain', '--tui', '--json', '--json-schema',
         '--mcp', '--mcp-root',
         '--bench', '--warmup', '--stress', '--runs', '--seed', '--checker',
+        '--cmp', '--interactive', '--compare',
+        '--cache-stats', '--cache-gc', '--max-output',
+        '-e', '--eval', '--lang', '--repl',
         '--unsafe',
         '--completion',
         '-V', '--version',

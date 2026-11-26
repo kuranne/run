@@ -49,6 +49,7 @@ pub fn render_ui(frame: &mut Frame<'_>, app: &TuiApp, cwd_label: &str) {
     match app.modal {
         InputModal::StdinEditor => render_stdin_modal(frame, app),
         InputModal::TestDirPicker => render_test_dir_modal(frame, app),
+        InputModal::ArgsLimits => render_args_limits_modal(frame, app),
         InputModal::None | InputModal::Filter => {}
     }
 }
@@ -387,7 +388,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
     let line = Line::from(vec![
         Span::styled(format!("{time_str}{mem_str}"), Style::default().fg(Color::Yellow)),
         Span::styled(
-            "Space Multi · r Run · b Bench · / Filter · i Stdin · d TestDir · w Watch · Ctrl+O Test · p Preset · q Quit",
+            "Space Multi · r Run · b Bench · a Args · / Filter · i Stdin · d TestDir · w Watch · p Preset · q Quit",
             Style::default().fg(Color::DarkGray),
         ),
     ]);
@@ -463,6 +464,38 @@ fn render_test_dir_modal(frame: &mut Frame<'_>, app: &TuiApp) {
         .collect();
 
     frame.render_widget(List::new(items).block(block), popup);
+}
+
+/// Render the runtime args / timeout / mem-limit editor modal (`a`).
+fn render_args_limits_modal(frame: &mut Frame<'_>, app: &TuiApp) {
+    let popup = centered_rect(55, 38, frame.area());
+    frame.render_widget(Clear, popup);
+    let block = Block::default()
+        .title(" Runtime Args & Limits (Tab switch · Enter/Esc save) ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::Cyan));
+
+    let fields = [
+        ("Runtime Args", &app.args_input),
+        ("Timeout (s) ", &app.timeout_input),
+        ("Mem Limit   ", &app.mem_limit_input),
+    ];
+    let lines: Vec<Line<'_>> = fields
+        .iter()
+        .enumerate()
+        .map(|(i, (label, val))| {
+            let active = i == app.args_modal_field;
+            let cursor = if active { "▌" } else { "" };
+            let style = if active {
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            Line::from(Span::styled(format!(" {label}: {val}{cursor}"), style))
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines).block(block), popup);
 }
 
 #[cfg(test)]

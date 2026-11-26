@@ -83,6 +83,8 @@ pub enum InputModal {
     StdinEditor,
     /// Interactive `--test-dir` directory picker (`d`).
     TestDirPicker,
+    /// Interactive runtime args, timeout, and memory-limit editor (`a`).
+    ArgsLimits,
 }
 
 /// Case-insensitive fuzzy subsequence scorer (`fzf`-style) returning `Some(score)` on match.
@@ -193,6 +195,14 @@ pub struct TuiApp {
     pub test_dir_candidates: Vec<String>,
     /// Selected index in the `--test-dir` picker (`0` = Disabled, `1..` = `test_dir_candidates[i - 1]`).
     pub selected_test_dir_idx: usize,
+    /// Runtime arguments string edited in `ArgsLimits` modal (`a`).
+    pub args_input: String,
+    /// Timeout string (seconds) edited in `ArgsLimits` modal (`a`).
+    pub timeout_input: String,
+    /// Memory limit string (e.g. `256M`) edited in `ArgsLimits` modal (`a`).
+    pub mem_limit_input: String,
+    /// Active field index (`0` = args, `1` = timeout, `2` = mem_limit) in `ArgsLimits` modal.
+    pub args_modal_field: usize,
 }
 
 impl TuiApp {
@@ -240,6 +250,10 @@ impl TuiApp {
             stdin_buffer: String::new(),
             test_dir_candidates: Vec::new(),
             selected_test_dir_idx: 0,
+            args_input: String::new(),
+            timeout_input: String::new(),
+            mem_limit_input: String::new(),
+            args_modal_field: 0,
         }
     }
 
@@ -395,6 +409,7 @@ impl TuiApp {
             InputModal::Filter => return self.handle_filter_key(key),
             InputModal::StdinEditor => return self.handle_stdin_key(key),
             InputModal::TestDirPicker => return self.handle_test_dir_key(key),
+            InputModal::ArgsLimits => return self.handle_args_limits_key(key),
             InputModal::None => {}
         }
 
@@ -415,6 +430,10 @@ impl TuiApp {
             }
             KeyCode::Char('i') => {
                 self.modal = InputModal::StdinEditor;
+                TuiAction::None
+            }
+            KeyCode::Char('a') => {
+                self.modal = InputModal::ArgsLimits;
                 TuiAction::None
             }
             KeyCode::Char('d') => {
@@ -578,6 +597,38 @@ impl TuiApp {
             _ => {}
         }
         TuiAction::None
+    }
+
+    /// Handle keystrokes inside the `a` runtime args / timeout / mem-limit editor modal.
+    fn handle_args_limits_key(&mut self, key: KeyEvent) -> TuiAction {
+        let buf = match self.args_modal_field {
+            1 => &mut self.timeout_input,
+            2 => &mut self.mem_limit_input,
+            _ => &mut self.args_input,
+        };
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => {
+                self.modal = InputModal::None;
+                TuiAction::None
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                self.args_modal_field = (self.args_modal_field + 1) % 3;
+                TuiAction::None
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                self.args_modal_field = (self.args_modal_field + 2) % 3;
+                TuiAction::None
+            }
+            KeyCode::Backspace => {
+                buf.pop();
+                TuiAction::None
+            }
+            KeyCode::Char(c) => {
+                buf.push(c);
+                TuiAction::None
+            }
+            _ => TuiAction::None,
+        }
     }
 
     /// Move selection or scroll upward based on active focus/tab.

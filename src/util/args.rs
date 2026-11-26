@@ -461,6 +461,18 @@ pub struct CliArgs {
     #[arg(long = "compare", value_name = "TARGET_B")]
     pub compare: Option<String>,
 
+    /// Evaluate an inline code snippet (`-e/--eval <CODE>`, use `--lang` to pick language).
+    #[arg(short = 'e', long = "eval", value_name = "CODE")]
+    pub eval: Option<String>,
+
+    /// Language for `-e`/`--eval` (`c`, `cpp`, `rs`, `py`, `go`, `js`, `sh`; default: `py`).
+    #[arg(long = "lang", value_name = "LANG")]
+    pub lang: Option<String>,
+
+    /// Start an interactive compile-and-eval REPL for `<LANG>` (`c`, `cpp`, `rs`, `py`, `go`, `js`, `sh`).
+    #[arg(long = "repl", value_name = "LANG")]
+    pub repl: Option<String>,
+
     /// Override compiler or interpreter executable for the active language.
     #[arg(long = "compiler", value_name = "BIN")]
     pub compiler: Option<String>,

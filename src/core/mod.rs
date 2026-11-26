@@ -12,6 +12,7 @@ pub mod handlers;
 pub mod interactive;
 pub mod project;
 pub mod registry;
+pub mod repl;
 pub mod stress;
 pub mod test_runner;
 

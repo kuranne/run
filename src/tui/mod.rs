@@ -266,13 +266,27 @@ fn spawn_worker(
     opts.preset = app.active_preset().map(ToString::to_string);
     opts.time = app.time_enabled;
     opts.memory = app.mem_enabled;
+    if let Ok(secs) = app.timeout_input.trim().parse::<f64>()
+        && secs > 0.0
+    {
+        opts.timeout = Some(secs);
+    }
+    if !app.mem_limit_input.trim().is_empty()
+        && let Ok(bytes) = crate::util::args::parse_mem_limit(app.mem_limit_input.trim())
+    {
+        opts.mem_limit_bytes = Some(bytes);
+    }
     let test_dir = app.test_dir.clone();
     let stdin_buffer = app.stdin_buffer.clone();
     if !stdin_buffer.is_empty() {
         opts.stdin = Some("-".to_string());
     }
     let flags_str = cli.flags_str();
-    let args_str = cli.args_str();
+    let args_str = if !app.args_input.trim().is_empty() {
+        Some(app.args_input.trim().to_string())
+    } else {
+        cli.args_str()
+    };
     let marked_targets = app.marked_targets_in_order();
     let cli_multi = cli.multi;
     let quiet = cli.quiet;
