@@ -6,17 +6,22 @@
 
 pub mod base;
 pub mod bench;
+pub mod compare;
 pub mod engine;
 pub mod handlers;
+pub mod interactive;
 pub mod project;
 pub mod registry;
+pub mod repl;
 pub mod stress;
 pub mod test_runner;
 
 pub use base::{BaseRunner, SystemCommandExecutor};
 pub use bench::BenchRunner;
-pub use crate::model::options::{CommandExecutor, ExecOutcome, ExecSpec, RunnerOptions};
+pub use compare::compare_outputs;
+pub use crate::model::options::{CommandExecutor, CompareMode, ExecOutcome, ExecSpec, RunnerOptions};
 pub use engine::CompilerRunner;
+pub use interactive::InteractiveRunner;
 pub use project::{split_compound_command, ProjectRunner, TaskRunner};
 pub use registry::{ExecutionContext, HandlerRegistry, LanguageHandler};
 pub use stress::{StressConfig, StressRunner};

@@ -350,7 +350,14 @@ impl StressRunner {
                 let _ = fs::remove_dir_all(&tmp_dir);
                 chk_res.unwrap_or(false)
             } else {
-                Self::normalize_output(&brute_out) == Self::normalize_output(&sol_out)
+                match runner.base.options.compare_mode {
+                    crate::model::options::CompareMode::Exact => {
+                        Self::normalize_output(&brute_out) == Self::normalize_output(&sol_out)
+                    }
+                    mode => {
+                        crate::core::compare::compare_outputs(&brute_out, &sol_out, mode).is_ok()
+                    }
+                }
             };
 
             if !matched {

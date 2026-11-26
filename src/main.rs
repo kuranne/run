@@ -21,8 +21,8 @@ use run::core::registry::LanguageHandler;
 use run::core::handlers::java_handler::JavaHandler;
 use run::core::handlers::script_handler::ScriptHandler;
 use run::core::{
-    BenchRunner, CompilerRunner, ProjectRunner, StressConfig, StressRunner, TaskRunner,
-    TestcasesRunner,
+    BenchRunner, CompilerRunner, InteractiveRunner, ProjectRunner, StressConfig, StressRunner,
+    TaskRunner, TestcasesRunner,
 };
 use run::util::args::CliArgs;
 use run::util::cache::CacheManager;
@@ -443,6 +443,55 @@ fn run_once(
         }
     }
 
+    if cli.cache_stats || cli.cache_gc {
+        match CacheManager::new(cwd) {
+            Ok(cache) => {
+                if cli.cache_gc {
+                    let meta = &run::util::env::PackageMetadata::get().cache;
+                    let max_age = config.cache.max_age_days.unwrap_or(meta.max_age_days);
+                    let max_mb = config.cache.max_size_mb.unwrap_or(meta.max_size_mb);
+                    let pruned = cache.prune(max_age, max_mb);
+                    printer.action(
+                        "CLEAN",
+                        &format!(
+                            "Pruned {pruned} cache entry(s) (max_age_days={max_age}, max_size_mb={max_mb})."
+                        ),
+                        TagColor::Green,
+                    );
+                }
+                if cli.cache_stats {
+                    let stats = cache.stats();
+                    let kb = stats.total_bytes as f64 / 1024.0;
+                    let age_str = stats
+                        .oldest_age_secs
+                        .map(|s| format!("{:.1}h", s as f64 / 3600.0))
+                        .unwrap_or_else(|| "n/a".to_string());
+                    printer.info(&format!(
+                        "Cache bucket: {} | entries: {} | size: {:.1} KB | oldest: {age_str}",
+                        stats.bucket_dir.display(),
+                        stats.entry_count,
+                        kb
+                    ));
+                }
+            }
+            Err(err) => {
+                printer.error(&format!("Failed to inspect cache: {err}"));
+                return RunOutcome {
+                    exit_code: 1,
+                    watch_files: Vec::new(),
+                    captured_stdin: prebuffered_stdin.cloned(),
+                };
+            }
+        }
+        if cli.files.is_empty() && cli.new_target.is_none() && cli.all.is_none() {
+            return RunOutcome {
+                exit_code: 0,
+                watch_files: Vec::new(),
+                captured_stdin: prebuffered_stdin.cloned(),
+            };
+        }
+    }
+
     if let Some(ref target) = cli.new_target {
         let code = match TemplateManager::generate(
             target,
@@ -495,6 +544,38 @@ fn run_once(
 
     apply_sandbox_overrides(&mut runner.base.sandbox_config, cli);
 
+    // 0. Inline snippet evaluation (`-e/--eval`) or interactive scratchpad REPL (`--repl`).
+    if let Some(ref code) = cli.eval {
+        let lang = cli.lang.as_deref().unwrap_or("py");
+        let ok = match run::core::repl::eval_snippet(&mut runner, lang, code) {
+            Ok(res) => res,
+            Err(err) => {
+                printer.error(&err.to_string());
+                false
+            }
+        };
+        return RunOutcome {
+            exit_code: i32::from(!ok),
+            watch_files: Vec::new(),
+            captured_stdin,
+        };
+    }
+
+    if let Some(ref lang) = cli.repl {
+        let exit_code = match run::core::repl::run_repl(&mut runner, lang) {
+            Ok(c) => c,
+            Err(err) => {
+                printer.error(&err.to_string());
+                1
+            }
+        };
+        return RunOutcome {
+            exit_code,
+            watch_files: Vec::new(),
+            captured_stdin,
+        };
+    }
+
     // 1. Check for configured [tasks.<name>] execution when first positional is not an existing path.
     if !cli.files.is_empty()
         && !Path::new(&cli.files[0]).exists()
@@ -526,7 +607,7 @@ fn run_once(
         runner.cleanup();
         return RunOutcome {
             exit_code: i32::from(!ok),
-            watch_files: Vec::new(),
+            watch_files: TaskRunner::collect_watch_files(&cli.files[0], &config, cwd),
             captured_stdin,
         };
     }
@@ -801,7 +882,48 @@ fn run_once(
             && target_files.len() > 1
             && has_multi_compilable(&target_files, &config));
 
-    let ok = if let Some(ref stress_pair) = cli.stress {
+    let ok = if let Some(ref interactor) = cli.interactive {
+        InteractiveRunner::run_interactive(
+            &mut runner,
+            &target_files,
+            effective_multi,
+            Path::new(interactor),
+        )
+    } else if let Some(ref cmp_target) = cli.compare {
+        let cmp_files = vec![PathBuf::from(cmp_target)];
+        if let Some(ref td_str) = cli.test_dir {
+            printer.info(&format!(
+                "Comparing {} vs {cmp_target} on {}",
+                target_files
+                    .first()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+                td_str
+            ));
+            let ok_a = TestcasesRunner::run_tests(
+                &mut runner,
+                Path::new(td_str),
+                &target_files,
+                effective_multi,
+            );
+            let ok_b = TestcasesRunner::run_tests(
+                &mut runner,
+                Path::new(td_str),
+                &cmp_files,
+                false,
+            );
+            ok_a && ok_b
+        } else {
+            BenchRunner::run_bench_compare(
+                &mut runner,
+                &target_files,
+                &cmp_files,
+                effective_multi,
+                cli.bench.unwrap_or(10),
+                cli.warmup.unwrap_or(2),
+            )
+        }
+    } else if let Some(ref stress_pair) = cli.stress {
         let stress_cfg = StressConfig {
             gen_path: PathBuf::from(&stress_pair[0]),
             brute_path: PathBuf::from(&stress_pair[1]),
@@ -864,6 +986,14 @@ fn real_main() -> i32 {
         return 0;
     }
 
+    if cli.mcp {
+        if let Err(err) = run::mcp::run_mcp_server(cli.mcp_root.as_deref()) {
+            eprintln!("MCP server error: {err}");
+            return 1;
+        }
+        return 0;
+    }
+
     let verbosity = Verbosity::from_cli(cli.quiet, cli.verbose);
     let ui_mode = cli.resolve_ui_mode(Colors::is_stdout_tty());
     let printer = Printer::init_global_with_ui(verbosity, cli.no_color || cli.json, ui_mode);
@@ -897,7 +1027,12 @@ fn real_main() -> i32 {
         } else {
             cli.extra_run_args.clone()
         };
-        let report = JsonReport::from_events(mode, targets, code, events);
+        let mut report = JsonReport::from_events(mode, targets, code, events);
+        if let Some(limit) = cli.max_output
+            && limit > 0
+        {
+            report.apply_max_output(limit as usize);
+        }
         println!(
             "{}",
             serde_json::to_string_pretty(&report).unwrap_or_default()
@@ -954,6 +1089,17 @@ fn execute_cli(cli: &CliArgs, printer: Printer, ui_mode: UiMode) -> i32 {
 
     if cli.init {
         return i32::from(!ConfigInitializer::init_config(&cwd, cli.force));
+    }
+
+    if cli.list {
+        let config = match Config::load(Some(&cwd), None) {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                printer.error(&err.to_string());
+                return 1;
+            }
+        };
+        return TaskRunner::list_tasks(&config, &printer);
     }
 
     if cli.sandbox_stop {

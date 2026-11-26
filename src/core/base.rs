@@ -20,10 +20,10 @@ use crate::core::registry::RunnerOptions;
 use crate::util::config::{Config, SandboxConfig};
 use crate::util::env::PackageMetadata;
 use crate::model::error::RunError;
-use crate::util::output::{emit_tui_event, Printer, TagColor, UiEvent};
+pub use crate::model::options::{CommandExecutor, ExecOutcome, ExecSpec, UiMode};
+use crate::util::output::{emit_tui_event, Printer, TagColor, UiEvent, Verbosity};
 use crate::util::process::MonitoredChild;
 use crate::util::spinner::Spinner;
-pub use crate::model::options::{CommandExecutor, ExecOutcome, ExecSpec};
 use crate::util::sandbox::{
     ComposeSandbox, ContainerSandbox, NativeRestrictor, PersistentSandbox,
 };
@@ -162,8 +162,9 @@ impl CommandExecutor for SystemCommandExecutor {
             }
         };
 
-        let output = child.wait_with_timeout(
+        let output = child.wait_with_limits(
             timeout_dur,
+            spec.mem_limit_bytes,
             kill_info.map(|_| &on_timeout_cb as &dyn Fn()),
         )?;
 
@@ -180,11 +181,37 @@ impl CommandExecutor for SystemCommandExecutor {
 
         if output.timed_out {
             let t_disp = spec.timeout_secs.unwrap_or(0.0);
+            if sink_active && !spec.compiling {
+                emit_tui_event(UiEvent::RunResult {
+                    duration_secs: elapsed_secs,
+                    memory_bytes: output.peak_memory_bytes,
+                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                    timed_out: true,
+                    memory_limit_exceeded: false,
+                });
+            }
             return Err(if spec.compiling {
                 RunError::compilation(format!("Compilation timed out after {t_disp} seconds."))
             } else {
                 RunError::execution(format!("Execution timed out after {t_disp} seconds."))
             });
+        }
+
+        if output.memory_limit_exceeded {
+            let limit_mb = spec.mem_limit_bytes.unwrap_or(0) as f64 / (1024.0 * 1024.0);
+            let used_mb = output.peak_memory_bytes.unwrap_or(0) as f64 / (1024.0 * 1024.0);
+            if sink_active && !spec.compiling {
+                emit_tui_event(UiEvent::RunResult {
+                    duration_secs: elapsed_secs,
+                    memory_bytes: output.peak_memory_bytes,
+                    stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+                    timed_out: false,
+                    memory_limit_exceeded: true,
+                });
+            }
+            return Err(RunError::execution(format!(
+                "Memory limit exceeded ({used_mb:.2} MB > {limit_mb:.2} MB)."
+            )));
         }
 
         let captured_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -311,6 +338,57 @@ fn resolve_with_existing_ancestor(path: &Path) -> PathBuf {
     normalized
 }
 
+/// Strip a `16hex_` cache filename prefix (if present) and return a short display name.
+fn short_display_name(raw: &str) -> String {
+    let name = Path::new(raw)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(raw);
+    if let Some((prefix, rest)) = name.split_once('_')
+        && prefix.len() == 16
+        && prefix.bytes().all(|b| b.is_ascii_hexdigit())
+        && !rest.is_empty()
+    {
+        return rest.to_string();
+    }
+    name.to_string()
+}
+
+/// Build a concise compile label for non-verbose Modern/TUI output.
+fn format_modern_compile_label(cmd: &[String]) -> String {
+    if let Some(pos) = cmd.iter().position(|a| a == "-o")
+        && let Some(out) = cmd.get(pos + 1)
+    {
+        return format!("Compiling {}", short_display_name(out));
+    }
+    let tool = cmd
+        .first()
+        .map(|s| short_display_name(s))
+        .unwrap_or_else(|| "target".to_string());
+    format!("Compiling ({tool})")
+}
+
+/// Build a concise run label for non-verbose Modern/TUI output, hiding long cache paths.
+fn format_modern_run_label(cmd: &[String]) -> String {
+    let Some(first) = cmd.first() else {
+        return String::new();
+    };
+    let head = if first.contains(".cache/run/")
+        || first.contains("\\cache\\run\\")
+        || ((first.contains("/run/") || first.contains("\\run\\"))
+            && (first.contains("/bin/") || first.contains("\\bin\\")))
+    {
+        short_display_name(first)
+    } else {
+        first.clone()
+    };
+    if cmd.len() > 1 {
+        format!("{head} {}", cmd[1..].join(" "))
+    } else {
+        head
+    }
+}
+
 /// Join tokens into a shell command string for `use_shell` execution via `shlex::try_join`.
 fn join_shell_tokens(cmd: &[String]) -> String {
     if cmd.len() == 1 {
@@ -365,6 +443,21 @@ impl BaseRunner {
             printer,
             stdin_buf,
         )
+    }
+
+    /// Create an isolated sibling [`BaseRunner`] sharing this runner's [`CommandExecutor`] for parallel task waves.
+    pub(crate) fn clone_for_parallel_task(&self, config: &Config) -> Result<Self, RunError> {
+        let mut cloned = Self::new_with_stdin(
+            self.options.clone(),
+            None,
+            None,
+            config,
+            self.printer,
+            None,
+        )?;
+        cloned.set_executor(Arc::clone(&self.executor));
+        cloned.sandbox_config = self.sandbox_config.clone();
+        Ok(cloned)
     }
 
     /// Construct a [`BaseRunner`] with an explicit optional `buffered_stdin` payload
@@ -491,7 +584,7 @@ impl BaseRunner {
     }
 
     /// Parse `--env KEY=VALUE` pairs into a [`BTreeMap`].
-    fn parse_custom_env(&self) -> BTreeMap<String, String> {
+    pub(crate) fn parse_custom_env(&self) -> BTreeMap<String, String> {
         let mut custom = BTreeMap::new();
         for entry in &self.options.env {
             if let Some((k, v)) = entry.split_once('=') {
@@ -661,7 +754,25 @@ impl BaseRunner {
             )));
         }
 
-        self.printer.action(tag, &cmd_str, TagColor::Green);
+        let modern_compact = self.printer.ui_mode() == UiMode::Modern
+            && self.printer.verbosity() < Verbosity::Verbose;
+        if modern_compact {
+            if !compiling {
+                self.printer.action(
+                    tag,
+                    &format_modern_run_label(cmd),
+                    TagColor::Green,
+                );
+            } else if self.printer.has_tui_sink() {
+                self.printer.action(
+                    tag,
+                    &format_modern_compile_label(cmd),
+                    TagColor::Green,
+                );
+            }
+        } else {
+            self.printer.action(tag, &cmd_str, TagColor::Green);
+        }
 
         let custom_env = self.parse_custom_env();
         let sanitized_env = SecurityManager::sanitize_execution_env(
@@ -687,6 +798,11 @@ impl BaseRunner {
             stdin_path: self.options.stdin.clone(),
             buffered_stdin: self.buffered_stdin.clone(),
             timeout_secs,
+            mem_limit_bytes: if compiling {
+                None
+            } else {
+                self.options.mem_limit_bytes
+            },
             active_container,
             quiet: self.options.quiet,
             track_memory: self.options.memory,
@@ -790,6 +906,7 @@ impl BaseRunner {
                     memory_bytes: res.memory_bytes,
                     stdout: res.captured_stdout.clone(),
                     timed_out: false,
+                    memory_limit_exceeded: false,
                 });
             }
         }
@@ -827,7 +944,13 @@ impl BaseRunner {
                 match fs::read(exp) {
                     Ok(bytes) => {
                         let expected = String::from_utf8_lossy(&bytes);
-                        if expected.trim() == res.captured_stdout.trim() {
+                        if crate::core::compare::compare_outputs(
+                            &expected,
+                            &res.captured_stdout,
+                            self.options.compare_mode,
+                        )
+                        .is_ok()
+                        {
                             self.printer.status(
                                 "PASS",
                                 &format!("Output matches {exp}"),
@@ -1295,5 +1418,22 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, RunError::Compilation(_)));
         assert!(err.to_string().contains("timed out"));
+    }
+
+    #[test]
+    fn test_modern_compact_labels() {
+        let compile_cmd = vec![
+            "g++".into(),
+            "/Users/kuranne/.cache/run/d5ec8d59a7e1bf8e/objs/21978b9805cbe5f0_hello.cpp.o".into(),
+            "-o".into(),
+            "./main.out".into(),
+        ];
+        assert_eq!(format_modern_compile_label(&compile_cmd), "Compiling main.out");
+
+        let run_cached = vec![
+            "/Users/kuranne/.cache/run/d5ec8d59a7e1bf8e/bin/223b68d51d8f954f_solo.out".into(),
+            "--flag".into(),
+        ];
+        assert_eq!(format_modern_run_label(&run_cached), "solo.out --flag");
     }
 }

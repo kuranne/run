@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 import pytest
 
-from tests.e2e.conftest import ANSI_RE, REPO_ROOT, clean_path, is_pid_alive, strip_ansi
+from tests.e2e.conftest import ANSI_RE, REPO_ROOT, clean_path, has_tool, is_pid_alive, require_optional_tool, strip_ansi
 
 pytestmark = pytest.mark.tier2
 
@@ -176,6 +176,8 @@ def test_f07_custom_language_multi_files_with_spaces(
 def test_f07_custom_language_overrides_builtin_c_and_custom_run_out(
     work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
+    if not has_tool("cc"):
+        pytest.skip("cc is not installed on PATH")
     (work_dir / "Run.toml").write_text(
         "[[languages]]\n"
         'name = "override_c"\n'
@@ -323,6 +325,7 @@ def test_f08_invalid_sanitize_rejected_by_compiler(
 def test_f08_debugger_dry_run_command_construction_with_args(
     work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
+    require_optional_tool("node")
     (work_dir / "app.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
     (work_dir / "app.py").write_text("print('hi')\n", encoding="utf-8")
     (work_dir / "app.js").write_text("console.log('hi');\n", encoding="utf-8")
@@ -986,6 +989,10 @@ def test_f12_sandbox_malformed_image_and_missing_dockerfile_rejected(
     sandbox_toml: str,
     needs_dummy_docker: bool,
 ) -> None:
+    if (not needs_dummy_docker or os.name == "nt") and not (
+        has_tool("docker") or has_tool("podman")
+    ):
+        pytest.skip("docker/podman is not installed on PATH")
     (work_dir / "Run.toml").write_text(sandbox_toml, encoding="utf-8")
     (work_dir / "app.py").write_text('print("hi")\n', encoding="utf-8")
 

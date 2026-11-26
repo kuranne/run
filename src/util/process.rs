@@ -286,6 +286,8 @@ pub struct MonitoredOutput {
     pub peak_memory_bytes: Option<u64>,
     /// `true` if execution exceeded the configured timeout and was terminated.
     pub timed_out: bool,
+    /// `true` if execution exceeded `--mem-limit` and was terminated.
+    pub memory_limit_exceeded: bool,
 }
 
 /// Cross-platform monitored child process isolating process groups and tracking peak RSS.
@@ -300,6 +302,7 @@ pub struct MonitoredChild {
     /// Harvested peak memory in bytes once reaped (`None` while running).
     peak_memory_bytes: Option<u64>,
     /// Optional Linux procfs background sampler.
+    #[cfg(unix)]
     procfs_sampler: Option<Arc<ProcfsSampler>>,
     /// Windows Job Object handle keeping all descendant processes in one killable tree.
     #[cfg(windows)]
@@ -362,6 +365,7 @@ impl MonitoredChild {
         #[cfg(windows)]
         let job = WindowsJob::attach(&child);
 
+        #[cfg(unix)]
         let procfs_sampler = if cfg!(target_os = "linux") {
             let interval =
                 Duration::from_millis(PackageMetadata::get().limits.procfs_poll_interval_ms);
@@ -380,6 +384,7 @@ impl MonitoredChild {
             pid,
             exit_status: None,
             peak_memory_bytes: None,
+            #[cfg(unix)]
             procfs_sampler,
             #[cfg(windows)]
             job,
@@ -596,7 +601,60 @@ impl MonitoredChild {
             stderr,
             peak_memory_bytes,
             timed_out: false,
+            memory_limit_exceeded: false,
         })
+    }
+
+    /// Query current live resident memory (RSS) in bytes for the running child, if supported.
+    fn sample_live_rss_bytes(&mut self) -> Option<u64> {
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(ref sampler) = self.procfs_sampler {
+                sampler.sample();
+                return sampler.peak_bytes();
+            }
+            read_procfs_vmhwm(self.pid)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            use std::mem::size_of;
+            let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+            // SAFETY: `info` is a POD struct sized by `size_of::<proc_taskinfo>()`.
+            let rc = unsafe {
+                libc::proc_pidinfo(
+                    self.pid as libc::c_int,
+                    libc::PROC_PIDTASKINFO,
+                    0,
+                    (&raw mut info).cast(),
+                    size_of::<libc::proc_taskinfo>() as libc::c_int,
+                )
+            };
+            if rc > 0 {
+                return Some(info.pti_resident_size);
+            }
+            None
+        }
+        #[cfg(windows)]
+        {
+            use std::mem::size_of;
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::System::ProcessStatus::{
+                K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+            };
+            let handle = self.child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+            let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+            counters.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+            // SAFETY: `counters` is properly sized and `handle` is owned by `self.child`.
+            let ok = unsafe { K32GetProcessMemoryInfo(handle, &raw mut counters, counters.cb) };
+            if ok != 0 {
+                return Some(counters.PeakWorkingSetSize as u64);
+            }
+            None
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+        {
+            None
+        }
     }
 
     /// Wait for child completion up to `timeout`, killing the process tree and harvesting memory on timeout.
@@ -605,7 +663,19 @@ impl MonitoredChild {
         timeout: Option<Duration>,
         on_timeout: Option<&dyn Fn()>,
     ) -> Result<MonitoredOutput, RunError> {
-        let Some(limit) = timeout else {
+        self.wait_with_limits(timeout, None, on_timeout)
+    }
+
+    /// Wait for child completion up to `timeout` and `mem_limit_bytes`, killing the process tree if exceeded.
+    pub fn wait_with_limits(
+        &mut self,
+        timeout: Option<Duration>,
+        mem_limit_bytes: Option<u64>,
+        on_timeout: Option<&dyn Fn()>,
+    ) -> Result<MonitoredOutput, RunError> {
+        let _ = mem_limit_bytes;
+
+        if timeout.is_none() && mem_limit_bytes.is_none() {
             let status = match self.wait() {
                 Ok(s) => s,
                 Err(err) if is_interrupted() => {
@@ -627,10 +697,15 @@ impl MonitoredChild {
                 stderr,
                 peak_memory_bytes,
                 timed_out: false,
+                memory_limit_exceeded: false,
             });
-        };
+        }
 
-        let deadline = Instant::now() + limit;
+        let deadline = timeout.map(|d| Instant::now() + d);
+        let mut timed_out = false;
+        let mut memory_limit_exceeded = false;
+        let mut observed_peak: Option<u64> = None;
+
         loop {
             if is_interrupted() {
                 if let Some(cb) = on_timeout {
@@ -641,23 +716,48 @@ impl MonitoredChild {
                 self.kill_process_tree(DEFAULT_SIGTERM, grace);
                 return Err(RunError::execution("Interrupted by signal"));
             }
+
+            if let Some(mem_limit) = mem_limit_bytes
+                && let Some(rss) = self.sample_live_rss_bytes()
+            {
+                observed_peak = Some(observed_peak.map_or(rss, |p| p.max(rss)));
+                if rss > mem_limit {
+                    memory_limit_exceeded = true;
+                    break;
+                }
+            }
+
             if let Some(status) = self.try_wait()? {
                 let (stdout, stderr) = self.take_output();
-                let peak_memory_bytes = self.peak_memory_bytes();
+                let peak_memory_bytes = match (self.peak_memory_bytes(), observed_peak) {
+                    (Some(a), Some(b)) => Some(a.max(b)),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                };
+                let exceeded = mem_limit_bytes
+                    .is_some_and(|lim| peak_memory_bytes.is_some_and(|peak| peak > lim));
                 return Ok(MonitoredOutput {
                     status,
                     stdout,
                     stderr,
                     peak_memory_bytes,
                     timed_out: false,
+                    memory_limit_exceeded: exceeded,
                 });
             }
-            let now = Instant::now();
-            if now >= deadline {
-                break;
+
+            if let Some(dl) = deadline {
+                let now = Instant::now();
+                if now >= dl {
+                    timed_out = true;
+                    break;
+                }
+                let remaining = dl.saturating_duration_since(now);
+                thread::sleep(remaining.min(Duration::from_millis(5)));
+            } else {
+                thread::sleep(Duration::from_millis(5));
             }
-            let remaining = deadline.saturating_duration_since(now);
-            thread::sleep(remaining.min(Duration::from_millis(5)));
         }
 
         if let Some(cb) = on_timeout {
@@ -680,13 +780,19 @@ impl MonitoredChild {
         };
 
         let (stdout, stderr) = self.take_output();
-        let peak_memory_bytes = self.peak_memory_bytes();
+        let peak_memory_bytes = match (self.peak_memory_bytes(), observed_peak) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
         Ok(MonitoredOutput {
             status,
             stdout,
             stderr,
             peak_memory_bytes,
-            timed_out: true,
+            timed_out,
+            memory_limit_exceeded,
         })
     }
 
@@ -940,21 +1046,31 @@ impl Drop for WindowsJob {
 mod tests {
     use super::*;
     use std::process::Stdio;
+    #[cfg(unix)]
     use std::sync::atomic::AtomicUsize;
 
-    /// Build a cross-platform `Command` invoking a short Python or shell inline snippet.
-    ///
-    /// Uses `python3` if present on Unix/macOS for exact MB allocation tests matching
-    /// `test_memory_tracking.py`; falls back to `sh` where needed.
+    /// Return the platform Python executable (`python` on Windows to bypass Store `python3` alias).
+    fn python_bin() -> &'static str {
+        #[cfg(windows)]
+        {
+            "python"
+        }
+        #[cfg(not(windows))]
+        {
+            "python3"
+        }
+    }
+
+    /// Build a cross-platform `Command` invoking a short Python inline snippet.
     fn python_cmd(code: &str) -> Command {
-        let mut cmd = Command::new("python3");
+        let mut cmd = Command::new(python_bin());
         cmd.arg("-c").arg(code);
         cmd
     }
 
-    /// Return `true` if `python3` is available in `PATH` for memory allocation tests.
+    /// Return `true` if Python is available in `PATH` for memory allocation tests.
     fn has_python3() -> bool {
-        Command::new("python3")
+        Command::new(python_bin())
             .arg("--version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())

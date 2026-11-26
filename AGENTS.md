@@ -18,12 +18,14 @@ Concise architecture map, workflows, and verification commands for AI coding age
 
 | Path | Responsibility |
 |------|----------------|
-| `src/main.rs` | Thin CLI entrypoint, dispatch, `--watch`, `fzf` picker, `--json` wrapper |
+| `src/main.rs` | Thin CLI entrypoint, dispatch, `--watch`, `fzf` picker, `--json` wrapper, `--mcp` dispatch |
+| `src/mcp/` | Model Context Protocol (MCP) stdio server (`--mcp`, `--mcp-root`) exposing 7 tools & `run://json-schema` |
 | `src/model/` | Pure data models & traits: `config`, `error`, `metadata`, `options`, `report`, `sandbox` |
-| `src/core/` | Execution engines: `base`, `engine`, `registry`, `project`, `test_runner`, `bench`, `stress` |
+| `src/core/` | Execution engines: `base`, `engine`, `registry`, `project` (incl. `TaskRunner` DAG/SHA-256), `test_runner`, `bench`, `stress` |
 | `src/core/handlers/` | Language handlers: `c_family`, `rust_handler`, `java_handler`, `python_handler`, `script_handler`, `custom_handler` |
 | `src/tui/` | `ratatui` interactive workspace (`mod.rs`, `app.rs`, `ui.rs`) |
 | `src/util/` | `args`, `cache`, `completion`, `config`, `doctor`, `env`, `glob`, `init_config`, `output`, `process`, `sandbox`, `security`, `spinner`, `substitutions`, `template_manager` |
+| `scripts/` | Cross-platform dev/test helpers: `dev-check.sh`, `test-local.sh`, `test-docker.sh`, `test-windows.sh` |
 | `xtask/src/main.rs` | Cross-platform automation (`install`, `uninstall`, `test`, `lint`, `completions`) |
 | `tests/whitebox.rs` | Cross-module `mockall` Rust integration tests (`tests/whitebox/*.rs`) |
 | `tests/blackbox/` | Domain-grouped Python CLI black-box tests (`cli/`, `config/`, `languages/`, `security/`) |
@@ -59,18 +61,22 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 cargo build --release
 PYTHONPATH=.:tests RUN_BIN="$PWD/target/release/run" pytest -p no:cacheprovider tests/
 
-# All-in-one via xtask
+# All-in-one via xtask or scripts/
 cargo xtask lint
 cargo xtask test
+./scripts/dev-check.sh
+./scripts/test-local.sh
 ```
 
 ### Using `run` as an Agent Tool (Low-Token Mode)
 - Always pass `--json` (never parse ANSI/human output):
   ```bash
   run --json main.c
+  run --json --mem-limit 64M --timeout 5 main.c
   run --json --test-dir cases/ --filter "edge_*" main.c
   run --json --bench 10 main.c
   run --json sol.c --stress gen.py brute.py --runs 100
   ```
+- Or connect via MCP stdio server: `run --mcp [--mcp-root <DIR>]`
 - Inspect the schema in one call: `run --json-schema`
 - For ultra-compact token-bounded output, use `.agents/skills/run-cli/scripts/run_compact.py` (see `.agents/skills/run-cli/SKILL.md`).

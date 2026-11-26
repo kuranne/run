@@ -10,10 +10,11 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsStr;
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -38,9 +39,28 @@ pub enum CacheEntry {
         binary_hash: Option<String>,
         /// Absolute path of the compiled binary or object file, if recorded.
         binary_path: Option<String>,
+        /// Unix timestamp (seconds) when this entry was last written or hit.
+        #[serde(default)]
+        last_accessed: u64,
+        /// Recorded size in bytes of the cached output artifact, if any.
+        #[serde(default)]
+        size_bytes: u64,
     },
     /// Legacy cache format storing only the composite source hash string.
     Legacy(String),
+}
+
+/// Summary statistics for a project cache bucket (`--cache-stats`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CacheStats {
+    /// Path to the project cache bucket directory.
+    pub bucket_dir: PathBuf,
+    /// Number of tracked entries in `cache.json`.
+    pub entry_count: usize,
+    /// Total disk size in bytes of files inside `bucket_dir`.
+    pub total_bytes: u64,
+    /// Age in seconds of the oldest entry with a recorded timestamp, if any.
+    pub oldest_age_secs: Option<u64>,
 }
 
 /// Manages per-project build caching under `~/.cache/run/<project_hash>/`.
@@ -60,8 +80,94 @@ pub struct CacheManager {
     pub src_dir: PathBuf,
     /// Path to the JSON metadata index (`cache.json`).
     pub cache_file: PathBuf,
+    /// Path to the cross-process advisory lock file (`cache.lock`).
+    pub lock_file: PathBuf,
     /// Mutex-protected in-memory mirror of `cache.json`.
     cache_data: Mutex<BTreeMap<String, CacheEntry>>,
+}
+
+/// RAII guard for an OS-level exclusive advisory lock on `cache.lock`.
+struct CacheFileLock(File);
+
+impl Drop for CacheFileLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+/// Return current Unix timestamp in seconds.
+fn now_epoch_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Acquire a blocking OS-level exclusive advisory lock on `lock_path`.
+fn acquire_file_lock(lock_path: &Path) -> Result<CacheFileLock, RunError> {
+    if let Some(parent) = lock_path.parent() {
+        fs::create_dir_all(parent).map_err(RunError::Io)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(lock_path)
+        .map_err(RunError::Io)?;
+    file.lock().map_err(RunError::Io)?;
+    Ok(CacheFileLock(file))
+}
+
+/// Write `bytes` atomically to `path` via a sibling temporary file and rename.
+pub fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> Result<(), RunError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(RunError::Io)?;
+    }
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_name = format!(
+        ".{}.tmp.{}.{}",
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("cache"),
+        std::process::id(),
+        nanos
+    );
+    let tmp_path = path.with_file_name(tmp_name);
+    {
+        let mut f = File::create(&tmp_path).map_err(RunError::Io)?;
+        f.write_all(bytes).map_err(RunError::Io)?;
+        let _ = f.sync_all();
+    }
+
+    #[cfg(windows)]
+    {
+        for attempt in 0..10 {
+            match fs::rename(&tmp_path, path) {
+                Ok(()) => return Ok(()),
+                Err(err)
+                    if err.kind() == std::io::ErrorKind::PermissionDenied && attempt < 9 =>
+                {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(err) => {
+                    let _ = fs::remove_file(&tmp_path);
+                    return Err(RunError::Io(err));
+                }
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Err(err) = fs::rename(&tmp_path, path) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(RunError::Io(err));
+        }
+    }
+    Ok(())
 }
 
 /// Cached regex stripping C/C++ `//...` and `/*...*/` comments.
@@ -213,6 +319,7 @@ impl CacheManager {
         let bin_dir = cache_dir.join(&meta.cache.bin_dir);
         let src_dir = cache_dir.join(&meta.cache.src_dir);
         let cache_file = cache_dir.join(&meta.cache.metadata_file);
+        let lock_file = cache_dir.join(&meta.cache.lock_file);
 
         let cache_data = Self::load_cache_from_disk(&cache_file);
         Ok(Self {
@@ -221,8 +328,18 @@ impl CacheManager {
             bin_dir,
             src_dir,
             cache_file,
+            lock_file,
             cache_data: Mutex::new(cache_data),
         })
+    }
+
+    /// Execute `f` while holding the cross-process OS advisory lock for this cache bucket.
+    pub fn with_file_lock<F, T>(&self, f: F) -> Result<T, RunError>
+    where
+        F: FnOnce() -> Result<T, RunError>,
+    {
+        let _lock = acquire_file_lock(&self.lock_file)?;
+        f()
     }
 
     /// Load `cache.json` via `serde_json`, logging a warning and starting fresh on error.
@@ -245,14 +362,19 @@ impl CacheManager {
         }
     }
 
-    /// Persist `data` to `cache.json` while holding the cache mutex.
+    /// Persist `data` to `cache.json` while holding the cache mutex and OS advisory lock.
     ///
-    /// Removes `cache.json` and an empty `cache_dir` when `data` is empty.
-    fn save_cache_locked(&self, data: &BTreeMap<String, CacheEntry>) {
+    /// Reloads `cache.json` from disk under the lock to merge concurrent process updates,
+    /// auto-GCs entries whose source or recorded output artifact no longer exists,
+    /// and writes atomically via a temporary file + rename.
+    fn save_cache_locked(&self, data: &mut BTreeMap<String, CacheEntry>) {
         if data.is_empty() {
-            if self.cache_file.exists() {
+            if let Ok(_lock) = acquire_file_lock(&self.lock_file)
+                && self.cache_file.exists()
+            {
                 let _ = fs::remove_file(&self.cache_file);
             }
+            remove_file_retry(&self.lock_file);
             if self.cache_dir.exists()
                 && fs::read_dir(&self.cache_dir).is_ok_and(|mut it| it.next().is_none())
             {
@@ -265,8 +387,35 @@ impl CacheManager {
             return;
         }
 
-        if let Ok(json) = serde_json::to_string_pretty(data) {
-            let _ = fs::write(&self.cache_file, json);
+        let Ok(_lock) = acquire_file_lock(&self.lock_file) else {
+            return;
+        };
+
+        let mut merged = Self::load_cache_from_disk(&self.cache_file);
+        for (k, v) in data.iter() {
+            merged.insert(k.clone(), v.clone());
+        }
+
+        // Auto-GC stale entries whose source file or recorded binary artifact is gone.
+        merged.retain(|key, entry| {
+            if !Path::new(key).exists() {
+                return false;
+            }
+            if let CacheEntry::Detailed {
+                binary_path: Some(bin),
+                ..
+            } = entry
+                && !Path::new(bin).exists()
+            {
+                return false;
+            }
+            true
+        });
+
+        *data = merged.clone();
+
+        if let Ok(json) = serde_json::to_string_pretty(&merged) {
+            let _ = atomic_write_bytes(&self.cache_file, json.as_bytes());
         }
     }
 
@@ -474,7 +623,7 @@ impl CacheManager {
             .into_owned();
         let comp_hash = self.get_composite_hash(file_path);
 
-        let (bin_hash, bin_path) = match output_path {
+        let (bin_hash, bin_path, size_bytes) = match output_path {
             Some(out) if out.exists() => (
                 Some(self.get_file_hash(out)),
                 Some(
@@ -483,6 +632,7 @@ impl CacheManager {
                         .to_string_lossy()
                         .into_owned(),
                 ),
+                fs::metadata(out).map(|m| m.len()).unwrap_or(0),
             ),
             Some(out) => (
                 None,
@@ -492,19 +642,172 @@ impl CacheManager {
                         .to_string_lossy()
                         .into_owned(),
                 ),
+                0,
             ),
-            None => (None, None),
+            None => (None, None, 0),
         };
 
         let entry = CacheEntry::Detailed {
             source_hash: comp_hash,
             binary_hash: bin_hash,
             binary_path: bin_path,
+            last_accessed: now_epoch_secs(),
+            size_bytes,
         };
 
         let mut guard = self.cache_data.lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(key, entry);
-        self.save_cache_locked(&guard);
+        self.save_cache_locked(&mut guard);
+    }
+
+    /// Compute current entry count, total disk bytes, and oldest entry age for `--cache-stats`.
+    pub fn stats(&self) -> CacheStats {
+        let data = Self::load_cache_from_disk(&self.cache_file);
+        let now = now_epoch_secs();
+        let oldest_age_secs = data
+            .values()
+            .filter_map(|e| match e {
+                CacheEntry::Detailed { last_accessed, .. } if *last_accessed > 0 => {
+                    Some(now.saturating_sub(*last_accessed))
+                }
+                _ => None,
+            })
+            .max();
+
+        let mut total_bytes = 0u64;
+        if self.cache_dir.exists() {
+            let mut stack = vec![self.cache_dir.clone()];
+            while let Some(dir) = stack.pop() {
+                if let Ok(entries) = fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if let Ok(meta) = fs::symlink_metadata(&p) {
+                            if meta.file_type().is_dir() {
+                                stack.push(p);
+                            } else if meta.file_type().is_file() {
+                                total_bytes = total_bytes.saturating_add(meta.len());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        CacheStats {
+            bucket_dir: self.cache_dir.clone(),
+            entry_count: data.len(),
+            total_bytes,
+            oldest_age_secs,
+        }
+    }
+
+    /// Prune expired or LRU-overflow cache entries according to `max_age_days` and `max_size_mb`.
+    ///
+    /// Returns the number of entries removed. Passing `0` disables the corresponding limit.
+    pub fn prune(&self, max_age_days: u64, max_size_mb: u64) -> usize {
+        if max_age_days == 0 && max_size_mb == 0 {
+            return 0;
+        }
+        let mut guard = self.cache_data.lock().unwrap_or_else(|e| e.into_inner());
+        if !self.cache_dir.exists() {
+            return 0;
+        }
+        let Ok(_lock) = acquire_file_lock(&self.lock_file) else {
+            return 0;
+        };
+
+        let mut data = Self::load_cache_from_disk(&self.cache_file);
+        for (k, v) in guard.iter() {
+            data.insert(k.clone(), v.clone());
+        }
+
+        let now = now_epoch_secs();
+        let max_age_secs = max_age_days.saturating_mul(86_400);
+        let mut pruned = 0usize;
+
+        if max_age_secs > 0 {
+            let expired: Vec<String> = data
+                .iter()
+                .filter_map(|(k, entry)| match entry {
+                    CacheEntry::Detailed { last_accessed, .. }
+                        if *last_accessed > 0 && now.saturating_sub(*last_accessed) > max_age_secs =>
+                    {
+                        Some(k.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            for k in expired {
+                if let Some(CacheEntry::Detailed {
+                    binary_path: Some(bin),
+                    ..
+                }) = data.remove(&k)
+                {
+                    let p = Path::new(&bin);
+                    if p.starts_with(&self.cache_dir) && p.exists() {
+                        remove_file_retry(p);
+                    }
+                }
+                pruned += 1;
+            }
+        }
+
+        let max_bytes = max_size_mb.saturating_mul(1024 * 1024);
+        if max_bytes > 0 {
+            let mut sized: Vec<(String, u64, u64)> = data
+                .iter()
+                .map(|(k, entry)| match entry {
+                    CacheEntry::Detailed {
+                        last_accessed,
+                        size_bytes,
+                        binary_path,
+                        ..
+                    } => {
+                        let sz = if *size_bytes > 0 {
+                            *size_bytes
+                        } else if let Some(bin) = binary_path {
+                            fs::metadata(bin).map(|m| m.len()).unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        (k.clone(), *last_accessed, sz)
+                    }
+                    CacheEntry::Legacy(_) => (k.clone(), 0, 0),
+                })
+                .collect();
+
+            let mut total: u64 = sized.iter().map(|(_, _, sz)| *sz).sum();
+            if total > max_bytes {
+                sized.sort_by_key(|(_, ts, _)| *ts);
+                for (k, _, sz) in sized {
+                    if total <= max_bytes {
+                        break;
+                    }
+                    if let Some(CacheEntry::Detailed {
+                        binary_path: Some(bin),
+                        ..
+                    }) = data.remove(&k)
+                    {
+                        let p = Path::new(&bin);
+                        if p.starts_with(&self.cache_dir) && p.exists() {
+                            remove_file_retry(p);
+                        }
+                    }
+                    total = total.saturating_sub(sz);
+                    pruned += 1;
+                }
+            }
+        }
+
+        *guard = data.clone();
+        if data.is_empty() {
+            if self.cache_file.exists() {
+                let _ = fs::remove_file(&self.cache_file);
+            }
+        } else if let Ok(json) = serde_json::to_string_pretty(&data) {
+            let _ = atomic_write_bytes(&self.cache_file, json.as_bytes());
+        }
+        pruned
     }
 
     /// Clear all in-memory cache entries and remove cached object/binary/source files, symlinks, and directories.
@@ -512,7 +815,14 @@ impl CacheManager {
         let mut guard = self.cache_data.lock().unwrap_or_else(|e| e.into_inner());
         guard.clear();
 
-        for dir in [&self.objs_dir, &self.bin_dir, &self.src_dir] {
+        let lock = if self.cache_dir.exists() {
+            acquire_file_lock(&self.lock_file).ok()
+        } else {
+            None
+        };
+
+        let tasks_dir = self.cache_dir.join("tasks");
+        for dir in [&self.objs_dir, &self.bin_dir, &self.src_dir, &tasks_dir] {
             if let Ok(dir_meta) = fs::symlink_metadata(dir) {
                 if dir_meta.file_type().is_dir() {
                     if let Ok(entries) = fs::read_dir(dir) {
@@ -536,6 +846,11 @@ impl CacheManager {
 
         if fs::symlink_metadata(&self.cache_file).is_ok() {
             let _ = fs::remove_file(&self.cache_file);
+        }
+
+        drop(lock);
+        if fs::symlink_metadata(&self.lock_file).is_ok() {
+            remove_file_retry(&self.lock_file);
         }
 
         if self.cache_dir.exists()
@@ -862,6 +1177,84 @@ mod tests {
         // Calling clear() twice (second time on missing dir) is idempotent.
         manager.clear();
         manager.clear();
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Verify reload-on-write merges concurrent `CacheManager` instances and auto-GCs deleted sources.
+    #[test]
+    fn test_reload_on_write_merge_and_auto_gc() {
+        let tmp = make_temp_dir("merge_gc");
+        let mgr_a = make_manager(&tmp);
+        let mgr_b = make_manager(&tmp);
+
+        let file_a = tmp.join("a.c");
+        let file_b = tmp.join("b.c");
+        fs::write(&file_a, "int a() { return 1; }").unwrap();
+        fs::write(&file_b, "int b() { return 2; }").unwrap();
+
+        mgr_a.update_cache(&file_a, None);
+        mgr_b.update_cache(&file_b, None);
+
+        // A third reload must see both entries (mgr_b did not clobber mgr_a).
+        let mgr_c = make_manager(&tmp);
+        assert!(!mgr_c.is_changed(&file_a, None));
+        assert!(!mgr_c.is_changed(&file_b, None));
+
+        // Deleting file_a triggers auto-GC of its stale entry on the next save.
+        fs::remove_file(&file_a).unwrap();
+        mgr_b.update_cache(&file_b, None);
+        let mgr_d = make_manager(&tmp);
+        let guard = mgr_d.cache_data.lock().unwrap();
+        assert_eq!(guard.len(), 1);
+
+        drop(guard);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Verify `prune` evicts expired entries by age and LRU entries by size cap.
+    #[test]
+    fn test_prune_by_age_and_size() {
+        let tmp = make_temp_dir("prune_lru");
+        let manager = make_manager(&tmp);
+        let f_old = tmp.join("old.c");
+        let f_new = tmp.join("new.c");
+        fs::write(&f_old, "int old() { return 0; }").unwrap();
+        fs::write(&f_new, "int nw() { return 1; }").unwrap();
+
+        let bin_old = manager.get_cached_binary_path(&f_old);
+        let bin_new = manager.get_cached_binary_path(&f_new);
+        fs::create_dir_all(bin_old.parent().unwrap()).unwrap();
+        fs::write(&bin_old, vec![b'A'; 1024]).unwrap();
+        fs::write(&bin_new, vec![b'B'; 2 * 1024 * 1024]).unwrap();
+
+        // Insert old entry with stale timestamp (60 days ago).
+        {
+            let mut guard = manager.cache_data.lock().unwrap();
+            guard.insert(
+                std::path::absolute(&f_old).unwrap().to_string_lossy().into_owned(),
+                CacheEntry::Detailed {
+                    source_hash: manager.get_composite_hash(&f_old),
+                    binary_hash: Some(manager.get_file_hash(&bin_old)),
+                    binary_path: Some(std::path::absolute(&bin_old).unwrap().to_string_lossy().into_owned()),
+                    last_accessed: now_epoch_secs().saturating_sub(60 * 86_400),
+                    size_bytes: 1024,
+                },
+            );
+            manager.save_cache_locked(&mut guard);
+        }
+        manager.update_cache(&f_new, Some(&bin_new));
+
+        // Age prune (30 days) removes f_old + bin_old, keeping f_new.
+        let pruned_age = manager.prune(30, 0);
+        assert_eq!(pruned_age, 1);
+        assert!(!bin_old.exists());
+        assert!(bin_new.exists());
+
+        // Size prune (1 MB cap) evicts f_new (2 MB).
+        let pruned_size = manager.prune(0, 1);
+        assert_eq!(pruned_size, 1);
+        assert!(!bin_new.exists());
 
         let _ = fs::remove_dir_all(&tmp);
     }

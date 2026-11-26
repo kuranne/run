@@ -50,5 +50,39 @@ This repository includes a ready-to-use agent skill at `.agents/skills/run-cli/`
 
 ```bash
 python3 .agents/skills/run-cli/scripts/run_compact.py main.c --stdin-text "5 10\n"
-python3 .agents/skills/run-cli/scripts/run_compact.py --max-chars 300 -- --test-dir cases/ main.c
+python3 .agents/skills/run_cli/scripts/run_compact.py --max-chars 300 -- --test-dir cases/ main.c
 ```
+
+---
+
+## 5. MCP Server Mode (`--mcp`)
+
+`run --mcp` starts a Model Context Protocol (MCP) stdio server powered by `rmcp`, allowing Antigravity, Claude Desktop, Cursor, VS Code, or Codex to invoke `run` natively without spawning shell commands.
+
+### Exposed Tools & Resources
+
+| Kind | Name / URI | Description |
+|------|------------|-------------|
+| Tool | `run_code` | Compile and run files, projects, tasks, or `PATH` commands (`--json`) |
+| Tool | `run_tests` | Run a `--test-dir` suite with optional `--filter` globbing |
+| Tool | `bench_code` | Micro-benchmark with `--bench` and `--warmup` |
+| Tool | `stress_test` | Differential fuzzing with `--stress <GEN> <BRUTE>` |
+| Tool | `doctor` | Inspect installed compilers, runtimes, debuggers, and sandboxes |
+| Tool | `clean_cache` | Clear `run`'s persistent compilation cache |
+| Tool | `init_project` | Initialize `Run.toml` (`--init`) or scaffold a template (`--new`) |
+| Resource | `run://json-schema` | JSON Schema for `run --json` structured reports |
+
+### Client Configuration (`mcpServers`)
+
+```json
+{
+  "mcpServers": {
+    "run": {
+      "command": "run",
+      "args": ["--mcp", "--mcp-root", "/path/to/workspace"]
+    }
+  }
+}
+```
+
+Pass `--mcp-root <DIR>` to confine all `cwd` and file path arguments within a specific workspace directory. Built-in `SecurityManager` rules remain enforced (`--unsafe` and `--force` are omitted from MCP tool schemas).

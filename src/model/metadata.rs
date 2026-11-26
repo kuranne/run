@@ -7,6 +7,8 @@ use serde::Deserialize;
 pub struct CacheMetadata {
     /// Metadata filename inside each cache bucket (`cache.json`).
     pub metadata_file: String,
+    /// Advisory lock filename inside each cache bucket (`cache.lock`).
+    pub lock_file: String,
     /// Prefix length of SHA-256 key used for cache bucket directories.
     pub hash_prefix_len: usize,
     /// Object files subdirectory name (`objs`).
@@ -19,6 +21,10 @@ pub struct CacheMetadata {
     pub hash_chunk_bytes: usize,
     /// Maximum header bytes scanned when detecting shebangs.
     pub shebang_head_bytes: usize,
+    /// Default maximum age in days before cached entries are eligible for pruning.
+    pub max_age_days: u64,
+    /// Default maximum total cache size in megabytes before LRU eviction.
+    pub max_size_mb: u64,
 }
 
 /// Default exclusion lists from `[package.metadata.run.excludes]`.

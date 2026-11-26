@@ -29,6 +29,9 @@ shlex = "1"
 similar = "2"
 crossterm = "0.28"
 ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+rmcp = { version = "3.11", features = ["server", "macros", "transport-io"] }
+schemars = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "process", "time"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -57,12 +60,15 @@ stop_dirs = ["/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp"]
 
 [package.metadata.run.cache]
 metadata_file = "cache.json"
+lock_file = "cache.lock"
 hash_prefix_len = 16
 objs_dir = "objs"
 bin_dir = "bin"
 src_dir = "src"
 hash_chunk_bytes = 4096
 shebang_head_bytes = 1024
+max_age_days = 30
+max_size_mb = 512
 
 [package.metadata.run.excludes]
 extensions = [".toml", ".lock"]

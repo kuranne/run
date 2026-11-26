@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 pub use crate::model::config::{
-    Config, CoreConfig, CustomLanguageConfig, ExcludeConfig, PresetFlags, ProjectConfig,
-    SandboxConfig, TaskConfig, TaskTable, TemplateConfig, TemplateFileEntry, TemplateTable,
+    CacheConfig, Config, CoreConfig, CustomLanguageConfig, ExcludeConfig, PresetFlags,
+    ProjectConfig, SandboxConfig, TaskConfig, TaskTable, TemplateConfig, TemplateFileEntry,
+    TemplateTable,
 };
 use crate::model::error::RunError;
 use crate::model::metadata::PackageMetadata;
@@ -231,6 +232,14 @@ fn validate_toml_table(
                 return Err(RunError::Config(format!("'core.{key}' must be a boolean")));
             }
         }
+    }
+
+    if let Some(v) = table.get("vars")
+        && !v.is_table()
+    {
+        return Err(RunError::Config(
+            "'vars' section must be a table (dict)".to_string(),
+        ));
     }
 
     if let Some(v) = table.get("tasks")
@@ -462,6 +471,8 @@ impl Config {
 
         let core: CoreConfig = deserialize_section(table, "core")?;
         let sandbox: SandboxConfig = deserialize_section(table, "sandbox")?;
+        let cache: CacheConfig = deserialize_section(table, "cache")?;
+        let vars: BTreeMap<String, String> = deserialize_section(table, "vars")?;
         let tasks: BTreeMap<String, TaskConfig> = deserialize_section(table, "tasks")?;
         let runners: BTreeMap<String, String> = deserialize_section(table, "runners")?;
         let presets: BTreeMap<String, BTreeMap<String, PresetFlags>> =
@@ -489,6 +500,8 @@ impl Config {
             path,
             core,
             sandbox,
+            cache,
+            vars,
             tasks,
             projects,
             runners,
@@ -504,6 +517,11 @@ impl Config {
             .get(lang)
             .cloned()
             .unwrap_or_else(|| default.to_string())
+    }
+
+    /// Return configured `[vars]`.
+    pub fn get_vars(&self) -> &BTreeMap<String, String> {
+        &self.vars
     }
 
     /// Return configured `[tasks]`.

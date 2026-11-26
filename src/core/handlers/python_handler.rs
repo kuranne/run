@@ -5,6 +5,7 @@
 //! untrusted virtualenv owned by another user unless `--force` is supplied, and
 //! locates fallback system interpreters via [`crate::util::sandbox::SystemSandboxEnv`].
 
+#[cfg(any(unix, test))]
 use std::fs;
 use std::path::Path;
 
