@@ -360,6 +360,10 @@ pub struct CliArgs {
     #[arg(long = "mem-limit", value_name = "SIZE", value_parser = parse_mem_limit)]
     pub mem_limit: Option<u64>,
 
+    /// Cap captured stdout/stderr bytes in `--json` output (e.g. `64K`, `1M`; `0` = unlimited).
+    #[arg(long = "max-output", value_name = "SIZE", value_parser = parse_max_output)]
+    pub max_output: Option<u64>,
+
     /// Dynamic stdin: `-` for piped stdin, existing file path for file input, or inline text otherwise.
     #[arg(
         short = 'i',
@@ -634,6 +638,16 @@ impl CliArgs {
 }
 
 /// Parse a human-readable memory limit (`256M`, `256MB`, `512K`, `1G`, `256MiB`, bare MB) into bytes.
+/// Parse `--max-output <SIZE>` allowing `0` (unlimited) or any human-readable byte size (`64K`, `1M`).
+pub fn parse_max_output(raw: &str) -> Result<u64, String> {
+    let trimmed = raw.trim();
+    if trimmed == "0" || trimmed.eq_ignore_ascii_case("0b") {
+        return Ok(0);
+    }
+    parse_mem_limit(trimmed)
+}
+
+/// Parse `--mem-limit <SIZE>` into bytes (`B`, `K`/`KB`, `M`/`MB`, `G`/`GB`, or bare MB).
 pub fn parse_mem_limit(raw: &str) -> Result<u64, String> {
     let s = raw.trim();
     if s.is_empty() {

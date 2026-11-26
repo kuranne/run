@@ -157,6 +157,23 @@ pub struct InitProjectParams {
     pub cwd: Option<String>,
 }
 
+/// Parameters for the `run_task` MCP tool.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct RunTaskParams {
+    /// Name of a declared `[tasks.<name>]` entry in `Run.toml`.
+    pub task: String,
+    /// Optional positional arguments forwarded after `--`.
+    pub args: Option<Vec<String>>,
+    /// Execution timeout in seconds (`--timeout`).
+    pub timeout: Option<f64>,
+    /// Execution memory limit (e.g. `256M`, `512MB`, `1G`) (`--mem-limit`).
+    pub mem_limit: Option<String>,
+    /// Maximum captured output bytes (defaults to `64K` in MCP; pass `"0"` for unlimited).
+    pub max_output: Option<String>,
+    /// Optional working directory (must stay inside `--mcp-root` if set).
+    pub cwd: Option<String>,
+}
+
 /// MCP server exposing `run` capabilities over stdio using `rmcp`.
 #[derive(Debug, Clone)]
 pub struct RunMcpServer {
@@ -289,19 +306,35 @@ impl RunMcpServer {
         Ok(())
     }
 
-    /// Spawn `current_exe()` with `--json` + `args` inside the validated working directory.
+    /// Spawn `current_exe()` with `--json` + `--max-output` + `args` inside the validated working directory.
     async fn invoke_run(
         &self,
         args: Vec<String>,
         cwd: &Path,
+    ) -> Result<CallToolResult, McpError> {
+        self.invoke_run_with_limit(args, cwd, Some("64K")).await
+    }
+
+    /// Spawn `current_exe()` with `--json`, optional `--max-output`, and `args` inside `cwd`.
+    async fn invoke_run_with_limit(
+        &self,
+        args: Vec<String>,
+        cwd: &Path,
+        max_output: Option<&str>,
     ) -> Result<CallToolResult, McpError> {
         let exe = std::env::current_exe().map_err(|err| {
             McpError::internal_error(format!("Failed to locate run executable: {err}"), None)
         })?;
 
         let mut cmd = Command::new(exe);
-        cmd.arg("--json")
-            .args(&args)
+        cmd.arg("--json");
+        if let Some(limit) = max_output
+            && limit.trim() != "0"
+            && !args.iter().any(|a| a == "--max-output")
+        {
+            cmd.arg("--max-output").arg(limit);
+        }
+        cmd.args(&args)
             .current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -666,6 +699,60 @@ impl RunMcpServer {
         let lock = self.workspace_lock(&cwd).await;
         let _guard = lock.write().await;
         self.invoke_run(args, &cwd).await
+    }
+
+    /// List declared `[tasks]` in `Run.toml` (`--list`).
+    #[tool(
+        name = "list_tasks",
+        description = "List all `[tasks]` defined in `Run.toml` (with descriptions and parameters) via `run --list --json`."
+    )]
+    async fn list_tasks(
+        &self,
+        Parameters(params): Parameters<CwdOnlyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let cwd = self.resolve_cwd(params.cwd.as_deref())?;
+        self.invoke_run(vec!["--list".to_string()], &cwd).await
+    }
+
+    /// Execute a declared `[tasks.<name>]` entry from `Run.toml`.
+    #[tool(
+        name = "run_task",
+        description = "Run a declared `[tasks.<name>]` entry from `Run.toml` via `run --json`. Verifies the task is declared in `Run.toml` before execution."
+    )]
+    async fn run_task(
+        &self,
+        Parameters(params): Parameters<RunTaskParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let cwd = self.resolve_cwd(params.cwd.as_deref())?;
+        let cfg = crate::util::config::Config::load(Some(&cwd), None).map_err(|err| {
+            McpError::invalid_params(format!("Failed to load Run.toml: {err}"), None)
+        })?;
+        if !crate::core::TaskRunner::is_task(&params.task, &cfg) {
+            return Err(McpError::invalid_params(
+                format!("Task '{}' is not declared in Run.toml.", params.task),
+                None,
+            ));
+        }
+        let mut args = Vec::new();
+        if let Some(timeout) = params.timeout {
+            args.push("--timeout".to_string());
+            args.push(timeout.to_string());
+        }
+        if let Some(ref mem_limit) = params.mem_limit {
+            args.push("--mem-limit".to_string());
+            args.push(mem_limit.clone());
+        }
+        args.push(params.task.clone());
+        if let Some(ref extra) = params.args
+            && !extra.is_empty()
+        {
+            args.push("--".to_string());
+            args.extend(extra.iter().cloned());
+        }
+        let lock = self.workspace_lock(&cwd).await;
+        let _guard = lock.read().await;
+        let max_out = params.max_output.as_deref().or(Some("64K"));
+        self.invoke_run_with_limit(args, &cwd, max_out).await
     }
 }
 

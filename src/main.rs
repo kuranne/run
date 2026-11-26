@@ -995,7 +995,12 @@ fn real_main() -> i32 {
         } else {
             cli.extra_run_args.clone()
         };
-        let report = JsonReport::from_events(mode, targets, code, events);
+        let mut report = JsonReport::from_events(mode, targets, code, events);
+        if let Some(limit) = cli.max_output
+            && limit > 0
+        {
+            report.apply_max_output(limit as usize);
+        }
         println!(
             "{}",
             serde_json::to_string_pretty(&report).unwrap_or_default()

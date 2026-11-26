@@ -90,3 +90,22 @@ def test_json_test_dir_bench_and_stress(
     assert s_data["mode"] == "stress"
     assert s_data["stress"]["passed"] is False
     assert s_data["stress"]["failed_seed"] == 2
+
+
+def test_json_max_output_truncation(
+    work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
+) -> None:
+    """--max-output truncates oversized stdout in --json reports with head+tail marker."""
+    import json
+
+    noisy = work_dir / "noisy.py"
+    noisy.write_text('print("HEAD_" + "X" * 2000 + "_TAIL")\n', encoding="utf-8")
+
+    res = run_cli(["--json", "--max-output", "128B", str(noisy)])
+    assert res.returncode == 0, res.stdout + res.stderr
+    data = json.loads(res.stdout)
+    assert data["ok"] is True
+    assert data["run"]["truncated"] is True
+    assert "HEAD_" in data["run"]["stdout"]
+    assert "_TAIL" in data["run"]["stdout"]
+    assert "truncated" in data["run"]["stdout"]
