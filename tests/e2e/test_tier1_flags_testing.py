@@ -12,7 +12,7 @@ from typing import Callable
 
 import pytest
 
-from tests.e2e.conftest import is_pid_alive, strip_ansi
+from tests.e2e.conftest import has_tool, is_pid_alive, require_optional_tool, strip_ansi
 
 pytestmark = pytest.mark.tier1
 
@@ -92,6 +92,8 @@ def test_f04_project_custom_manifest_two_step_build_run(
 def test_f04_project_builtin_make_and_git_boundary(
     work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
+    if not has_tool("make"):
+        pytest.skip("make is not installed on PATH")
     outer = work_dir / "outer"
     outer.mkdir()
     (outer / "Makefile").write_text("all:\n\t@echo make_detected_ok\n", encoding="utf-8")
@@ -362,6 +364,8 @@ def test_f07_preset_flags_applied(
 def test_f07_flags_and_compiler_override(
     work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
+    if not has_tool("clang"):
+        pytest.skip("clang is not installed on PATH")
     (work_dir / "comp.c").write_text(
         '#include <stdio.h>\nint main(void) { printf("macro=%d\\n", MACRO_X); return 0; }\n',
         encoding="utf-8",
@@ -409,6 +413,8 @@ def test_f07_out_dir_and_keep(
 def test_f07_custom_language_compile_and_run_templates(
     work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
+    if not has_tool("cc"):
+        pytest.skip("cc is not installed on PATH")
     (work_dir / "Run.toml").write_text(
         "[[languages]]\n"
         'name = "wrapped_c"\n'
@@ -515,6 +521,7 @@ def test_f08_timeout_kills_runaway_process_and_grandchild(
 def test_f08_debug_and_lldb_dry_run(
     work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
 ) -> None:
+    require_optional_tool("node")
     (work_dir / "app.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
     (work_dir / "app.py").write_text("print('hi')\n", encoding="utf-8")
     (work_dir / "app.js").write_text("console.log('hi');\n", encoding="utf-8")

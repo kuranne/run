@@ -94,6 +94,8 @@ pub enum UiEvent {
         stdout: String,
         /// Whether execution timed out.
         timed_out: bool,
+        /// Whether execution exceeded `--mem-limit`.
+        memory_limit_exceeded: bool,
     },
     /// Captured child standard error text (for `--json` / `--tui`).
     Stderr(String),

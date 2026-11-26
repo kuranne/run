@@ -1,5 +1,6 @@
 //! Interactive TUI state machine, keybinding dispatcher, and `Ctrl+O` collapsible test cases.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -82,6 +83,8 @@ pub enum InputModal {
     StdinEditor,
     /// Interactive `--test-dir` directory picker (`d`).
     TestDirPicker,
+    /// Interactive runtime args, timeout, and memory-limit editor (`a`).
+    ArgsLimits,
 }
 
 /// Case-insensitive fuzzy subsequence scorer (`fzf`-style) returning `Some(score)` on match.
@@ -142,6 +145,8 @@ pub struct TuiApp {
     pub items: Vec<SidebarItem>,
     /// Index of the selected sidebar item.
     pub selected_item: usize,
+    /// Files marked with `Space` for multi-file compilation/execution (`-m`).
+    pub marked_files: BTreeSet<PathBuf>,
     /// Available `Run.toml` preset names.
     pub presets: Vec<String>,
     /// Currently active preset index (`None` means no preset).
@@ -190,6 +195,14 @@ pub struct TuiApp {
     pub test_dir_candidates: Vec<String>,
     /// Selected index in the `--test-dir` picker (`0` = Disabled, `1..` = `test_dir_candidates[i - 1]`).
     pub selected_test_dir_idx: usize,
+    /// Runtime arguments string edited in `ArgsLimits` modal (`a`).
+    pub args_input: String,
+    /// Timeout string (seconds) edited in `ArgsLimits` modal (`a`).
+    pub timeout_input: String,
+    /// Memory limit string (e.g. `256M`) edited in `ArgsLimits` modal (`a`).
+    pub mem_limit_input: String,
+    /// Active field index (`0` = args, `1` = timeout, `2` = mem_limit) in `ArgsLimits` modal.
+    pub args_modal_field: usize,
 }
 
 impl TuiApp {
@@ -212,6 +225,7 @@ impl TuiApp {
         Self {
             items,
             selected_item: 0,
+            marked_files: BTreeSet::new(),
             presets,
             selected_preset,
             time_enabled,
@@ -236,6 +250,10 @@ impl TuiApp {
             stdin_buffer: String::new(),
             test_dir_candidates: Vec::new(),
             selected_test_dir_idx: 0,
+            args_input: String::new(),
+            timeout_input: String::new(),
+            mem_limit_input: String::new(),
+            args_modal_field: 0,
         }
     }
 
@@ -260,6 +278,31 @@ impl TuiApp {
     pub fn current_item(&self) -> Option<&SidebarItem> {
         let filtered = self.filtered_items();
         filtered.get(self.selected_item).map(|(_, item)| *item)
+    }
+
+    /// Toggle multi-compile mark on the currently highlighted file item (`Space`).
+    pub fn toggle_mark_selected(&mut self) {
+        if let Some(SidebarItem::File(path)) = self.current_item().cloned()
+            && !self.marked_files.remove(&path)
+        {
+            self.marked_files.insert(path);
+        }
+    }
+
+    /// Return `true` if `item` is a file currently marked for multi-compile.
+    pub fn is_marked(&self, item: &SidebarItem) -> bool {
+        matches!(item, SidebarItem::File(p) if self.marked_files.contains(p))
+    }
+
+    /// Return all `Space`-marked files in sidebar display order.
+    pub fn marked_targets_in_order(&self) -> Vec<PathBuf> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                SidebarItem::File(p) if self.marked_files.contains(p) => Some(p.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Return the currently active preset name, if any.
@@ -366,6 +409,7 @@ impl TuiApp {
             InputModal::Filter => return self.handle_filter_key(key),
             InputModal::StdinEditor => return self.handle_stdin_key(key),
             InputModal::TestDirPicker => return self.handle_test_dir_key(key),
+            InputModal::ArgsLimits => return self.handle_args_limits_key(key),
             InputModal::None => {}
         }
 
@@ -386,6 +430,10 @@ impl TuiApp {
             }
             KeyCode::Char('i') => {
                 self.modal = InputModal::StdinEditor;
+                TuiAction::None
+            }
+            KeyCode::Char('a') => {
+                self.modal = InputModal::ArgsLimits;
                 TuiAction::None
             }
             KeyCode::Char('d') => {
@@ -427,6 +475,10 @@ impl TuiApp {
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.move_down();
+                TuiAction::None
+            }
+            KeyCode::Char(' ') => {
+                self.toggle_mark_selected();
                 TuiAction::None
             }
             KeyCode::Enter | KeyCode::Char('r') => TuiAction::RunSelected,
@@ -545,6 +597,38 @@ impl TuiApp {
             _ => {}
         }
         TuiAction::None
+    }
+
+    /// Handle keystrokes inside the `a` runtime args / timeout / mem-limit editor modal.
+    fn handle_args_limits_key(&mut self, key: KeyEvent) -> TuiAction {
+        let buf = match self.args_modal_field {
+            1 => &mut self.timeout_input,
+            2 => &mut self.mem_limit_input,
+            _ => &mut self.args_input,
+        };
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => {
+                self.modal = InputModal::None;
+                TuiAction::None
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                self.args_modal_field = (self.args_modal_field + 1) % 3;
+                TuiAction::None
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                self.args_modal_field = (self.args_modal_field + 2) % 3;
+                TuiAction::None
+            }
+            KeyCode::Backspace => {
+                buf.pop();
+                TuiAction::None
+            }
+            KeyCode::Char(c) => {
+                buf.push(c);
+                TuiAction::None
+            }
+            _ => TuiAction::None,
+        }
     }
 
     /// Move selection or scroll upward based on active focus/tab.
@@ -707,5 +791,44 @@ mod tests {
         assert_eq!(app.modal, InputModal::None);
         assert_eq!(app.test_dir.as_deref(), Some("cases"));
         assert_eq!(app.tab, MainTab::Tests);
+    }
+
+    #[test]
+    fn test_space_toggles_multi_compile_marks() {
+        let mut app = TuiApp::new(
+            vec![
+                SidebarItem::File(PathBuf::from("a.c")),
+                SidebarItem::File(PathBuf::from("b.c")),
+                SidebarItem::Task("build".into()),
+            ],
+            Vec::new(),
+            None,
+            false,
+            false,
+            false,
+            None,
+        );
+
+        // Space marks first file, ignores tasks, and toggles cleanly.
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.marked_targets_in_order(), vec![PathBuf::from("a.c")]);
+
+        app.handle_key(KeyEvent::from(KeyCode::Down));
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(
+            app.marked_targets_in_order(),
+            vec![PathBuf::from("a.c"), PathBuf::from("b.c")]
+        );
+
+        // Tasks cannot be marked for multi-compile.
+        app.handle_key(KeyEvent::from(KeyCode::Down));
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.marked_files.len(), 2);
+
+        // Pressing Space again on a.c unmarks it.
+        app.handle_key(KeyEvent::from(KeyCode::Up));
+        app.handle_key(KeyEvent::from(KeyCode::Up));
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.marked_targets_in_order(), vec![PathBuf::from("b.c")]);
     }
 }

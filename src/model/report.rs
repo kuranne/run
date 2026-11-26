@@ -31,6 +31,37 @@ pub struct RunReport {
     pub stderr: String,
     /// Whether execution timed out.
     pub timed_out: bool,
+    /// Whether execution exceeded `--mem-limit`.
+    pub memory_limit_exceeded: bool,
+    /// Whether captured stdout/stderr was truncated by `--max-output`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+}
+
+/// Truncate `text` to at most `max_bytes` (preserving UTF-8 char boundaries) with head + tail preview.
+pub fn truncate_head_tail(text: &str, max_bytes: usize) -> (String, bool) {
+    if max_bytes == 0 || text.len() <= max_bytes {
+        return (text.to_string(), false);
+    }
+    let omitted = text.len().saturating_sub(max_bytes);
+    let half = max_bytes / 2;
+    let mut head_end = half.min(text.len());
+    while head_end > 0 && !text.is_char_boundary(head_end) {
+        head_end -= 1;
+    }
+    let mut tail_start = text.len().saturating_sub(max_bytes - head_end);
+    while tail_start < text.len() && !text.is_char_boundary(tail_start) {
+        tail_start += 1;
+    }
+    if tail_start <= head_end {
+        return (text.to_string(), false);
+    }
+    let out = format!(
+        "{}\n... [truncated {omitted} bytes] ...\n{}",
+        &text[..head_end],
+        &text[tail_start..]
+    );
+    (out, true)
 }
 
 /// Single `--test-dir` case outcome inside [`TestSuiteReport`].
@@ -185,6 +216,7 @@ impl JsonReport {
                     memory_bytes,
                     stdout,
                     timed_out,
+                    memory_limit_exceeded,
                 } => {
                     run_report = Some(RunReport {
                         duration_secs,
@@ -192,6 +224,8 @@ impl JsonReport {
                         stdout,
                         stderr: String::new(),
                         timed_out,
+                        memory_limit_exceeded,
+                        truncated: false,
                     });
                 }
                 UiEvent::TestCaseResult {
@@ -252,6 +286,10 @@ impl JsonReport {
                 stdout,
                 stderr: stderr_buf,
                 timed_out: false,
+                memory_limit_exceeded: errors
+                    .iter()
+                    .any(|e| e.to_ascii_lowercase().contains("memory limit exceeded")),
+                truncated: false,
             });
         }
 
@@ -285,6 +323,28 @@ impl JsonReport {
         }
     }
 
+    /// Apply `--max-output` head/tail truncation to captured stdout/stderr and testcase actual outputs.
+    pub fn apply_max_output(&mut self, max_bytes: usize) {
+        if max_bytes == 0 {
+            return;
+        }
+        if let Some(ref mut run) = self.run {
+            let (out, t1) = truncate_head_tail(&run.stdout, max_bytes);
+            let (err, t2) = truncate_head_tail(&run.stderr, max_bytes);
+            run.stdout = out;
+            run.stderr = err;
+            if t1 || t2 {
+                run.truncated = true;
+            }
+        }
+        if let Some(ref mut suite) = self.tests {
+            for tc in &mut suite.cases {
+                let (act, _) = truncate_head_tail(&tc.actual, max_bytes);
+                tc.actual = act;
+            }
+        }
+    }
+
     /// Return a Draft 2020-12 JSON Schema describing [`JsonReport`] for `--json-schema`.
     pub fn json_schema() -> serde_json::Value {
         serde_json::json!({
@@ -314,7 +374,8 @@ impl JsonReport {
                         "peak_memory_bytes": { "type": "integer" },
                         "stdout": { "type": "string" },
                         "stderr": { "type": "string" },
-                        "timed_out": { "type": "boolean" }
+                        "timed_out": { "type": "boolean" },
+                        "memory_limit_exceeded": { "type": "boolean" }
                     }
                 },
                 "diff": { "type": "array", "items": { "type": "string" } },
@@ -392,6 +453,7 @@ mod tests {
                 memory_bytes: Some(2_000_000),
                 stdout: "hello\n".to_string(),
                 timed_out: false,
+                memory_limit_exceeded: false,
             },
             UiEvent::Stderr("note\n".to_string()),
             UiEvent::Log {

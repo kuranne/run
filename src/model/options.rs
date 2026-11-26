@@ -2,10 +2,52 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use serde::Serialize;
 
 use crate::model::error::RunError;
+
+/// Output comparison strategy for `--expect`, `--test-dir`, and `--stress` (`--cmp`).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum CompareMode {
+    /// Trimmed exact string equality (default).
+    #[default]
+    Exact,
+    /// Whitespace-delimited token-by-token comparison.
+    Tokens,
+    /// Floating-point tolerant token comparison (`|a - b| <= eps * max(1, |a|, |b|)`).
+    Float(f64),
+}
+
+impl FromStr for CompareMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let lower = s.trim().to_ascii_lowercase();
+        if lower == "exact" {
+            return Ok(Self::Exact);
+        }
+        if lower == "tokens" || lower == "token" {
+            return Ok(Self::Tokens);
+        }
+        if let Some(eps_str) = lower.strip_prefix("float:") {
+            let eps: f64 = eps_str.parse().map_err(|_| {
+                format!("Invalid float tolerance '{eps_str}' in --cmp (expected e.g. float:1e-6)")
+            })?;
+            if !eps.is_finite() || eps < 0.0 {
+                return Err(format!("Float tolerance must be finite and >= 0, got '{eps_str}'"));
+            }
+            return Ok(Self::Float(eps));
+        }
+        if lower == "float" {
+            return Ok(Self::Float(1e-6));
+        }
+        Err(format!(
+            "Invalid --cmp mode '{s}'. Expected 'exact', 'tokens', or 'float:<eps>' (e.g. float:1e-6)."
+        ))
+    }
+}
 
 /// Terminal presentation mode resolved from CLI flags and TTY detection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -48,6 +90,8 @@ pub struct RunnerOptions {
     pub jobs: Option<usize>,
     /// Expected output file path for diff verification (`--expect`).
     pub expect: Option<String>,
+    /// Output comparison mode for `--expect`, `--test-dir`, and `--stress` (`--cmp`).
+    pub compare_mode: CompareMode,
     /// Batch testcase directory (`--test-dir`).
     pub test_dir: Option<String>,
     /// Glob pattern filtering testcases under `--test-dir` (`--filter`).
@@ -68,6 +112,8 @@ pub struct RunnerOptions {
     pub sanitize: Option<String>,
     /// Maximum execution/compilation timeout in seconds (`--timeout`).
     pub timeout: Option<f64>,
+    /// Maximum execution resident memory in bytes (`--mem-limit`).
+    pub mem_limit_bytes: Option<u64>,
     /// Stdin file path or `"-"` for buffered pipe input (`-i` / `--stdin` / `--stdin-file`).
     pub stdin: Option<String>,
     /// Inline stdin text unescaped (`\n`, `\t`, `\r`, `\\`) and piped to child (`--stdin-text` or dynamic `-i`).
@@ -217,6 +263,8 @@ pub struct ExecSpec {
     pub buffered_stdin: Option<Vec<u8>>,
     /// Optional wall-clock timeout in seconds.
     pub timeout_secs: Option<f64>,
+    /// Optional execution resident memory limit in bytes (`--mem-limit`).
+    pub mem_limit_bytes: Option<u64>,
     /// Optional active ephemeral container `(engine, container_name)` for timeout cleanup.
     pub active_container: Option<(String, String)>,
     /// Suppress compiler stdout/stderr when `--quiet` is active.
