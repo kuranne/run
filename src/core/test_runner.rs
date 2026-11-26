@@ -18,7 +18,7 @@ use crate::core::registry::dotted_ext_lower;
 use crate::core::handlers::java_handler::JavaHandler;
 use crate::model::options::UiMode;
 use crate::util::env::PackageMetadata;
-use crate::util::output::{emit_tui_event, TagColor, UiEvent};
+use crate::util::output::{emit_tui_event, Printer, TagColor, UiEvent, Verbosity};
 use crate::util::spinner::ProgressBar;
 
 /// Cached regex splitting filenames into numeric and non-numeric chunks.
@@ -229,6 +229,19 @@ impl TestcasesRunner {
         let orig_expect = runner.base.options.expect.take();
         let orig_test_dir = runner.base.options.test_dir.take();
         let orig_buffered_stdin = runner.base.buffered_stdin().map(|b| b.to_vec());
+        let orig_capture_silent = runner.base.capture_silent;
+        let orig_base_printer = runner.base.printer;
+
+        let modern_compact =
+            !tui_active && ui_mode == UiMode::Modern && runner.printer.verbosity() < Verbosity::Verbose;
+        if modern_compact {
+            runner.base.capture_silent = true;
+            runner.base.printer = Printer::with_ui_mode(
+                Verbosity::Quiet,
+                orig_base_printer.colors(),
+                ui_mode,
+            );
+        }
 
         runner.base.options.test_dir = Some(test_dir.to_string_lossy().into_owned());
 
@@ -239,10 +252,18 @@ impl TestcasesRunner {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| in_path.display().to_string());
-            progress.update(idx + 1, &case_name);
+            if modern_compact {
+                progress.update(idx + 1, &case_name);
+            } else if ui_mode == UiMode::Modern && !tui_active {
+                progress.update(idx + 1, &case_name);
+                progress.clear();
+            }
             let in_bytes = match fs::read(in_path) {
                 Ok(bytes) => bytes,
                 Err(err) => {
+                    if modern_compact {
+                        progress.clear();
+                    }
                     runner.printer.error(&format!(
                         "Test #{} ({}) failed to read input: {err}",
                         idx + 1,
@@ -285,6 +306,21 @@ impl TestcasesRunner {
                     }
                 }
                 Ok(false) => {
+                    if modern_compact {
+                        progress.clear();
+                        let exp_str = out_path.display().to_string();
+                        let expected_output = fs::read_to_string(out_path).unwrap_or_default();
+                        runner.printer.status(
+                            "FAIL",
+                            &format!("Output mismatch with {exp_str} ({case_name})"),
+                            TagColor::Red,
+                        );
+                        runner.printer.diff(
+                            &expected_output,
+                            &runner.base.last_captured_stdout,
+                            &exp_str,
+                        );
+                    }
                     if tui_active {
                         let expected_output = fs::read_to_string(out_path).unwrap_or_default();
                         emit_tui_event(UiEvent::TestCaseResult {
@@ -298,6 +334,9 @@ impl TestcasesRunner {
                     }
                 }
                 Err(err) => {
+                    if modern_compact {
+                        progress.clear();
+                    }
                     runner.printer.error(&format!(
                         "Test #{} ({case_name}) failed with exception: {err}",
                         idx + 1
@@ -321,6 +360,8 @@ impl TestcasesRunner {
         runner.base.options.expect = orig_expect;
         runner.base.options.test_dir = orig_test_dir;
         runner.base.set_buffered_stdin(orig_buffered_stdin);
+        runner.base.capture_silent = orig_capture_silent;
+        runner.base.printer = orig_base_printer;
 
         if tui_active {
             runner.printer.status(
