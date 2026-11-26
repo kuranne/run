@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] - 2026-11-26
+
+### ✨ MCP Server, Resource Limits, Task DAG, Cache Locking, CP Tools & REPL
+
+Version `1.1.0` expands `run` for AI agents, competitive programming, and cross-platform task automation.
+
+### Added
+- **MCP Server Mode (`--mcp`, `--mcp-root`)**: Stdio MCP server powered by `rmcp` exposing 9 tools (`run_code`, `run_tests`, `bench_code`, `stress_test`, `doctor`, `clean_cache`, `init_project`, `list_tasks`, `run_task`), the `run://json-schema` resource, per-workspace `RwLock` concurrency control, and a 64 KB default `--max-output` cap.
+- **Resource Limits & Output Guard**: Added `--mem-limit <SIZE>` (`B`, `K`/`KB`, `M`/`MB`, `G`/`GB`, bare MB) with cross-platform RSS enforcement and `memory_limit_exceeded` in `--json`, plus `--max-output <SIZE>` head/tail UTF-8 truncation (`truncated: true`).
+- **Task Runner (`Run.toml`)**: Added `[vars]` (`${vars.*}`), structured `[tasks.<name>]` (`desc`, `cmd`/`cmds`, `deps` DAG with parallel leaf execution, `sources`/`generates` SHA-256 incremental caching, `params` mapped from `-- <argv>`, `platforms` + `[tasks.<name>.<os>]` overrides), task `--watch`, and `-l`/`--list`.
+- **Competitive Programming & Testing**: Added `--cmp exact|tokens|float:<eps>` for `--expect`/`--test-dir`/`--stress`, `--interactive <INTERACTOR>` bidirectional judge mode, and `--compare <TARGET_B>` side-by-side benchmarking/testing.
+- **TUI, Scratchpad/REPL & Dev Scripts**: Added `Space` multi-compile selection and `a` runtime args/limits modal in `--tui`, `-e`/`--eval <CODE> --lang <LANG>` (with auto-`main` wrapping) and `--repl <LANG>`, compact Modern output, updated Zsh/Bash/Fish/PowerShell completions (including `-L`/`--all`), and `scripts/` helpers (`dev-check.sh`, `test-local.sh`, `test-docker.sh`, `test-windows.sh`).
+
+### Fixed & Improved
+- **Cross-Process Cache Reliability**: Added OS advisory `cache.lock`, atomic temp-file+rename writes, reload-on-write merge, auto-GC of deleted source/artifact entries, age/LRU pruning, `--cache-stats`, and `--cache-gc`.
+- **Cross-Platform Test & Windows Fixes**: Fixed Windows `--mem-limit` RSS enforcement parity, UTF-8 decoding in `tests/conftest.py`, Linux `read_procfs_vmhwm` compilation, and E2E skip guards for optional external tools.
+
+---
+
 ## [1.0.0] - 2026-11-26
 
 ### 🚀 Complete Rust Rewrite & Interactive CLI/TUI Platform
