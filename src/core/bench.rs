@@ -110,83 +110,67 @@ impl BenchRunner {
     ) -> bool {
         let orig_time = runner.base.options.time;
         let orig_mem = runner.base.options.memory;
-        let orig_quiet = runner.base.options.quiet;
         let orig_bench = runner.base.options.bench;
-        let orig_printer = runner.printer;
-        let orig_base_printer = runner.base.printer;
         let verbose = runner.printer.verbosity() >= Verbosity::Verbose;
 
         runner.base.options.time = false;
         runner.base.options.memory = true;
-        runner.base.options.quiet = !verbose;
         runner.base.options.bench = Some(runs);
-        if !verbose {
-            let quiet_printer = Printer::with_ui_mode(
-                Verbosity::Quiet,
-                orig_printer.colors(),
-                orig_printer.ui_mode(),
-            );
-            runner.printer = quiet_printer;
-            runner.base.printer = quiet_printer;
-        }
 
-        let total_steps = warmup + runs;
-        let progress = ProgressBar::new(orig_printer, total_steps);
-        let mut samples = Vec::with_capacity(runs);
-        let mut peak_mem: Option<u64> = None;
-        let mut succeeded = true;
+        let result = runner.with_quiet_capture(!verbose, !verbose, false, |runner, orig_printer| {
+            let total_steps = warmup + runs;
+            let progress = ProgressBar::new(orig_printer, total_steps);
+            let mut samples = Vec::with_capacity(runs);
+            let mut peak_mem: Option<u64> = None;
 
-        for step in 0..total_steps {
-            let is_warmup = step < warmup;
-            let step_label = if is_warmup {
-                format!("warmup {}/{warmup}", step + 1)
-            } else {
-                format!("run {}/{runs}", step - warmup + 1)
-            };
-            progress.update(step + 1, &step_label);
+            for step in 0..total_steps {
+                let is_warmup = step < warmup;
+                let step_label = if is_warmup {
+                    format!("warmup {}/{warmup}", step + 1)
+                } else {
+                    format!("run {}/{runs}", step - warmup + 1)
+                };
+                progress.update(step + 1, &step_label);
 
-            let t0 = Instant::now();
-            match step_fn(runner) {
-                Ok(true) => {
-                    let elapsed = t0.elapsed().as_secs_f64();
-                    if !is_warmup {
-                        samples.push(elapsed);
-                        if let Some(mem) = runner.base.last_memory_bytes {
-                            peak_mem = Some(peak_mem.map_or(mem, |prev| prev.max(mem)));
+                let t0 = Instant::now();
+                match step_fn(runner) {
+                    Ok(true) => {
+                        let elapsed = t0.elapsed().as_secs_f64();
+                        if !is_warmup {
+                            samples.push(elapsed);
+                            if let Some(mem) = runner.base.last_memory_bytes {
+                                peak_mem = Some(peak_mem.map_or(mem, |prev| prev.max(mem)));
+                            }
                         }
                     }
-                }
-                Ok(false) => {
-                    progress.clear();
-                    orig_printer.error(&format!(
-                        "Benchmark aborted: {label} failed during {step_label}"
-                    ));
-                    succeeded = false;
-                    break;
-                }
-                Err(err) => {
-                    progress.clear();
-                    orig_printer.error(&format!(
-                        "Benchmark aborted during {step_label}: {err}"
-                    ));
-                    succeeded = false;
-                    break;
+                    Ok(false) => {
+                        progress.clear();
+                        orig_printer.error(&format!(
+                            "Benchmark aborted: {label} failed during {step_label}"
+                        ));
+                        return None;
+                    }
+                    Err(err) => {
+                        progress.clear();
+                        orig_printer.error(&format!(
+                            "Benchmark aborted during {step_label}: {err}"
+                        ));
+                        return None;
+                    }
                 }
             }
-        }
+
+            Some(BenchStats::from_samples(warmup, samples, peak_mem))
+        });
 
         runner.base.options.time = orig_time;
         runner.base.options.memory = orig_mem;
-        runner.base.options.quiet = orig_quiet;
         runner.base.options.bench = orig_bench;
-        runner.printer = orig_printer;
-        runner.base.printer = orig_base_printer;
 
-        if !succeeded {
+        let Some(stats) = result else {
             return false;
-        }
+        };
 
-        let stats = BenchStats::from_samples(warmup, samples, peak_mem);
         Self::emit_report(runner.printer, label, &stats);
         true
     }
@@ -266,63 +250,48 @@ impl BenchRunner {
 
         let orig_time = runner.base.options.time;
         let orig_mem = runner.base.options.memory;
-        let orig_quiet = runner.base.options.quiet;
         let orig_bench = runner.base.options.bench;
-        let orig_printer = runner.printer;
-        let orig_base_printer = runner.base.printer;
         let verbose = runner.printer.verbosity() >= Verbosity::Verbose;
 
         runner.base.options.time = false;
         runner.base.options.memory = true;
-        runner.base.options.quiet = !verbose;
         runner.base.options.bench = Some(runs);
-        if !verbose {
-            let quiet_printer = Printer::with_ui_mode(
-                Verbosity::Quiet,
-                orig_printer.colors(),
-                orig_printer.ui_mode(),
-            );
-            runner.printer = quiet_printer;
-            runner.base.printer = quiet_printer;
-        }
 
-        let mut samples = Vec::with_capacity(runs);
-        let mut peak_mem: Option<u64> = None;
-        let mut ok = true;
-        for step in 0..(warmup + runs) {
-            let t0 = Instant::now();
-            let step_ok = if is_compiled
-                && let Some(ref bin) = bin_path
-                && bin.exists()
-            {
-                runner.execute_binary(bin, &[])
-            } else if multi {
-                runner.handle_multi_compile(files)
-            } else {
-                runner.handle_single_file(&files[0])
-            };
-            if step_ok.unwrap_or(false) {
-                let elapsed = t0.elapsed().as_secs_f64();
-                if step >= warmup {
-                    samples.push(elapsed);
-                    if let Some(mem) = runner.base.last_memory_bytes {
-                        peak_mem = Some(peak_mem.map_or(mem, |prev| prev.max(mem)));
+        let stats = runner.with_quiet_capture(!verbose, !verbose, false, |runner, _| {
+            let mut samples = Vec::with_capacity(runs);
+            let mut peak_mem: Option<u64> = None;
+            for step in 0..(warmup + runs) {
+                let t0 = Instant::now();
+                let step_ok = if is_compiled
+                    && let Some(ref bin) = bin_path
+                    && bin.exists()
+                {
+                    runner.execute_binary(bin, &[])
+                } else if multi {
+                    runner.handle_multi_compile(files)
+                } else {
+                    runner.handle_single_file(&files[0])
+                };
+                if step_ok.unwrap_or(false) {
+                    let elapsed = t0.elapsed().as_secs_f64();
+                    if step >= warmup {
+                        samples.push(elapsed);
+                        if let Some(mem) = runner.base.last_memory_bytes {
+                            peak_mem = Some(peak_mem.map_or(mem, |prev| prev.max(mem)));
+                        }
                     }
+                } else {
+                    return None;
                 }
-            } else {
-                ok = false;
-                break;
             }
-        }
+            Some(BenchStats::from_samples(warmup, samples, peak_mem))
+        });
 
         runner.base.options.time = orig_time;
         runner.base.options.memory = orig_mem;
-        runner.base.options.quiet = orig_quiet;
         runner.base.options.bench = orig_bench;
-        runner.printer = orig_printer;
-        runner.base.printer = orig_base_printer;
 
-        ok.then(|| BenchStats::from_samples(warmup, samples, peak_mem))
+        stats
     }
 
     /// Render benchmark summary according to active [`UiMode`] or emit [`UiEvent::BenchSummary`].

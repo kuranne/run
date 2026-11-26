@@ -951,26 +951,32 @@ impl BaseRunner {
                         )
                         .is_ok()
                         {
-                            self.printer.status(
-                                "PASS",
-                                &format!("Output matches {exp}"),
-                                TagColor::Green,
-                            );
+                            if !self.capture_silent {
+                                self.printer.status(
+                                    "PASS",
+                                    &format!("Output matches {exp}"),
+                                    TagColor::Green,
+                                );
+                            }
                         } else {
-                            self.printer.status(
-                                "FAIL",
-                                &format!("Output mismatch with {exp}"),
-                                TagColor::Red,
-                            );
-                            self.printer.diff(&expected, &res.captured_stdout, exp);
+                            if !self.capture_silent {
+                                self.printer.status(
+                                    "FAIL",
+                                    &format!("Output mismatch with {exp}"),
+                                    TagColor::Red,
+                                );
+                                self.printer.diff(&expected, &res.captured_stdout, exp);
+                            }
                             self.last_expect_passed = false;
                             return Ok(false);
                         }
                     }
                     Err(err) => {
-                        self.printer.error(&format!(
-                            "Failed to read expectation file '{exp}': {err}"
-                        ));
+                        if !self.capture_silent {
+                            self.printer.error(&format!(
+                                "Failed to read expectation file '{exp}': {err}"
+                            ));
+                        }
                         self.last_expect_passed = false;
                         return Ok(false);
                     }
@@ -1435,5 +1441,58 @@ mod tests {
             "--flag".into(),
         ];
         assert_eq!(format_modern_run_label(&run_cached), "solo.out --flag");
+    }
+
+    #[test]
+    fn test_capture_silent_expect_returns_false_on_mismatch() {
+        let expect_path = std::env::temp_dir().join(format!(
+            "run_capture_silent_expect_{}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&expect_path, "expected\n").expect("write expect");
+
+        let cfg = Config::default();
+        let opts = RunnerOptions {
+            force: true,
+            expect: Some(expect_path.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        let mut runner = BaseRunner::new_with_stdin(
+            opts,
+            None,
+            None,
+            &cfg,
+            plain_printer(),
+            None,
+        )
+        .expect("runner");
+        runner.capture_silent = true;
+
+        let mut mock = MockCommandExecutor::new();
+        mock.expect_execute().times(1).returning(|_| {
+            Ok(ExecOutcome {
+                captured_stdout: "expected\n".to_string(),
+                elapsed_secs: 0.01,
+                memory_bytes: None,
+            })
+        });
+        runner.set_executor(Arc::new(mock));
+        assert!(runner.run_command(&["./app".to_string()], false, false).unwrap());
+        assert!(runner.last_expect_passed);
+
+        let mut mismatch_mock = MockCommandExecutor::new();
+        mismatch_mock.expect_execute().times(1).returning(|_| {
+            Ok(ExecOutcome {
+                captured_stdout: "actual\n".to_string(),
+                elapsed_secs: 0.01,
+                memory_bytes: None,
+            })
+        });
+        runner.set_executor(Arc::new(mismatch_mock));
+        assert!(!runner.run_command(&["./app".to_string()], false, false).unwrap());
+        assert!(!runner.last_expect_passed);
+        assert_eq!(runner.last_captured_stdout, "actual\n");
+
+        let _ = std::fs::remove_file(&expect_path);
     }
 }

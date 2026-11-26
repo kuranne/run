@@ -18,7 +18,7 @@ use crate::core::registry::dotted_ext_lower;
 use crate::core::handlers::java_handler::JavaHandler;
 use crate::model::options::UiMode;
 use crate::util::env::PackageMetadata;
-use crate::util::output::{emit_tui_event, Printer, TagColor, UiEvent, Verbosity};
+use crate::util::output::{emit_tui_event, TagColor, UiEvent, Verbosity};
 use crate::util::spinner::ProgressBar;
 
 /// Cached regex splitting filenames into numeric and non-numeric chunks.
@@ -229,139 +229,133 @@ impl TestcasesRunner {
         let orig_expect = runner.base.options.expect.take();
         let orig_test_dir = runner.base.options.test_dir.take();
         let orig_buffered_stdin = runner.base.buffered_stdin().map(|b| b.to_vec());
-        let orig_capture_silent = runner.base.capture_silent;
-        let orig_base_printer = runner.base.printer;
 
         let modern_compact =
             !tui_active && ui_mode == UiMode::Modern && runner.printer.verbosity() < Verbosity::Verbose;
-        if modern_compact {
-            runner.base.capture_silent = true;
-            runner.base.printer = Printer::with_ui_mode(
-                Verbosity::Quiet,
-                orig_base_printer.colors(),
-                ui_mode,
-            );
-        }
 
         runner.base.options.test_dir = Some(test_dir.to_string_lossy().into_owned());
 
         let progress = ProgressBar::new(runner.printer, total);
-        let mut passed_count = 0usize;
-        for (idx, (in_path, out_path)) in pairs.iter().enumerate() {
-            let case_name = in_path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| in_path.display().to_string());
+        let passed_count = runner.with_quiet_capture(modern_compact, false, modern_compact, |runner, _| {
+            let mut passed_count = 0usize;
+            for (idx, (in_path, out_path)) in pairs.iter().enumerate() {
+                let case_name = in_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| in_path.display().to_string());
+                if modern_compact {
+                    progress.update(idx + 1, &case_name);
+                } else if ui_mode == UiMode::Modern && !tui_active {
+                    progress.update(idx + 1, &case_name);
+                    progress.clear();
+                }
+                let in_bytes = match fs::read(in_path) {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        if modern_compact {
+                            progress.clear();
+                        }
+                        runner.printer.error(&format!(
+                            "Test #{} ({}) failed to read input: {err}",
+                            idx + 1,
+                            in_path.display()
+                        ));
+                        continue;
+                    }
+                };
+
+                runner.base.options.stdin = Some(in_path.to_string_lossy().into_owned());
+                runner.base.options.expect = Some(out_path.to_string_lossy().into_owned());
+                runner.base.set_buffered_stdin(Some(in_bytes));
+
+                let case_started = std::time::Instant::now();
+                let outcome = if is_compiled
+                    && let Some(ref bin) = bin_path
+                    && bin.exists()
+                {
+                    runner.execute_binary(bin, &[])
+                } else if is_multi {
+                    runner.handle_multi_compile(target_files)
+                } else {
+                    runner.handle_single_file(&target_files[0])
+                };
+                let case_elapsed = case_started.elapsed().as_secs_f64();
+
+                match outcome {
+                    Ok(true) => {
+                        passed_count += 1;
+                        if tui_active {
+                            let expected_output = fs::read_to_string(out_path).unwrap_or_default();
+                            emit_tui_event(UiEvent::TestCaseResult {
+                                name: case_name,
+                                passed: true,
+                                elapsed_secs: Some(case_elapsed),
+                                memory_bytes: runner.base.last_memory_bytes,
+                                actual_output: expected_output.clone(),
+                                expected_output,
+                            });
+                        }
+                    }
+                    Ok(false) => {
+                        if modern_compact {
+                            progress.clear();
+                            let exp_str = out_path.display().to_string();
+                            let expected_output = fs::read_to_string(out_path).unwrap_or_default();
+                            runner.printer.status(
+                                "FAIL",
+                                &format!("Output mismatch with {exp_str} ({case_name})"),
+                                TagColor::Red,
+                            );
+                            runner.printer.diff(
+                                &expected_output,
+                                &runner.base.last_captured_stdout,
+                                &exp_str,
+                            );
+                        }
+                        if tui_active {
+                            let expected_output = fs::read_to_string(out_path).unwrap_or_default();
+                            emit_tui_event(UiEvent::TestCaseResult {
+                                name: case_name,
+                                passed: false,
+                                elapsed_secs: Some(case_elapsed),
+                                memory_bytes: runner.base.last_memory_bytes,
+                                actual_output: runner.base.last_captured_stdout.clone(),
+                                expected_output,
+                            });
+                        }
+                    }
+                    Err(err) => {
+                        if modern_compact {
+                            progress.clear();
+                        }
+                        runner.printer.error(&format!(
+                            "Test #{} ({case_name}) failed with exception: {err}",
+                            idx + 1
+                        ));
+                        if tui_active {
+                            let expected_output = fs::read_to_string(out_path).unwrap_or_default();
+                            emit_tui_event(UiEvent::TestCaseResult {
+                                name: case_name,
+                                passed: false,
+                                elapsed_secs: Some(case_elapsed),
+                                memory_bytes: runner.base.last_memory_bytes,
+                                actual_output: err.to_string(),
+                                expected_output,
+                            });
+                        }
+                    }
+                }
+            }
             if modern_compact {
-                progress.update(idx + 1, &case_name);
-            } else if ui_mode == UiMode::Modern && !tui_active {
-                progress.update(idx + 1, &case_name);
                 progress.clear();
             }
-            let in_bytes = match fs::read(in_path) {
-                Ok(bytes) => bytes,
-                Err(err) => {
-                    if modern_compact {
-                        progress.clear();
-                    }
-                    runner.printer.error(&format!(
-                        "Test #{} ({}) failed to read input: {err}",
-                        idx + 1,
-                        in_path.display()
-                    ));
-                    continue;
-                }
-            };
-
-            runner.base.options.stdin = Some(in_path.to_string_lossy().into_owned());
-            runner.base.options.expect = Some(out_path.to_string_lossy().into_owned());
-            runner.base.set_buffered_stdin(Some(in_bytes));
-
-            let case_started = std::time::Instant::now();
-            let outcome = if is_compiled
-                && let Some(ref bin) = bin_path
-                && bin.exists()
-            {
-                runner.execute_binary(bin, &[])
-            } else if is_multi {
-                runner.handle_multi_compile(target_files)
-            } else {
-                runner.handle_single_file(&target_files[0])
-            };
-            let case_elapsed = case_started.elapsed().as_secs_f64();
-
-            match outcome {
-                Ok(true) => {
-                    passed_count += 1;
-                    if tui_active {
-                        let expected_output = fs::read_to_string(out_path).unwrap_or_default();
-                        emit_tui_event(UiEvent::TestCaseResult {
-                            name: case_name,
-                            passed: true,
-                            elapsed_secs: Some(case_elapsed),
-                            memory_bytes: runner.base.last_memory_bytes,
-                            actual_output: expected_output.clone(),
-                            expected_output,
-                        });
-                    }
-                }
-                Ok(false) => {
-                    if modern_compact {
-                        progress.clear();
-                        let exp_str = out_path.display().to_string();
-                        let expected_output = fs::read_to_string(out_path).unwrap_or_default();
-                        runner.printer.status(
-                            "FAIL",
-                            &format!("Output mismatch with {exp_str} ({case_name})"),
-                            TagColor::Red,
-                        );
-                        runner.printer.diff(
-                            &expected_output,
-                            &runner.base.last_captured_stdout,
-                            &exp_str,
-                        );
-                    }
-                    if tui_active {
-                        let expected_output = fs::read_to_string(out_path).unwrap_or_default();
-                        emit_tui_event(UiEvent::TestCaseResult {
-                            name: case_name,
-                            passed: false,
-                            elapsed_secs: Some(case_elapsed),
-                            memory_bytes: runner.base.last_memory_bytes,
-                            actual_output: runner.base.last_captured_stdout.clone(),
-                            expected_output,
-                        });
-                    }
-                }
-                Err(err) => {
-                    if modern_compact {
-                        progress.clear();
-                    }
-                    runner.printer.error(&format!(
-                        "Test #{} ({case_name}) failed with exception: {err}",
-                        idx + 1
-                    ));
-                    if tui_active {
-                        let expected_output = fs::read_to_string(out_path).unwrap_or_default();
-                        emit_tui_event(UiEvent::TestCaseResult {
-                            name: case_name,
-                            passed: false,
-                            elapsed_secs: Some(case_elapsed),
-                            memory_bytes: runner.base.last_memory_bytes,
-                            actual_output: err.to_string(),
-                            expected_output,
-                        });
-                    }
-                }
-            }
-        }
+            passed_count
+        });
 
         runner.base.options.stdin = orig_stdin;
         runner.base.options.expect = orig_expect;
         runner.base.options.test_dir = orig_test_dir;
         runner.base.set_buffered_stdin(orig_buffered_stdin);
-        runner.base.capture_silent = orig_capture_silent;
-        runner.base.printer = orig_base_printer;
 
         if tui_active {
             runner.printer.status(

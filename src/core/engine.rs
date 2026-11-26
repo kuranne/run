@@ -21,7 +21,7 @@ use crate::util::config::Config;
 use crate::util::env::PackageMetadata;
 use crate::model::error::RunError;
 use crate::util::glob::{match_extension, match_path};
-use crate::util::output::{Printer, TagColor};
+use crate::util::output::{Printer, TagColor, Verbosity};
 use crate::util::security::Validator;
 
 /// Main orchestrator managing caching, source discovery (`-L`), and [`HandlerRegistry`] dispatch.
@@ -95,6 +95,46 @@ impl CompilerRunner {
             cache,
             registry: HandlerRegistry::new(),
         })
+    }
+
+    /// Run `f` with runner printers and `capture_silent` optionally silenced,
+    /// restoring the original `printer`, `base.printer`, `base.options.quiet`,
+    /// and `base.capture_silent` state unconditionally afterward.
+    pub fn with_quiet_capture<R>(
+        &mut self,
+        silence_base: bool,
+        silence_runner: bool,
+        capture_silent: bool,
+        f: impl FnOnce(&mut Self, Printer) -> R,
+    ) -> R {
+        let orig_printer = self.printer;
+        let orig_base_printer = self.base.printer;
+        let orig_quiet = self.base.options.quiet;
+        let orig_capture_silent = self.base.capture_silent;
+
+        let quiet_printer = Printer::with_ui_mode(
+            Verbosity::Quiet,
+            orig_base_printer.colors(),
+            orig_base_printer.ui_mode(),
+        );
+        if silence_base {
+            self.base.printer = quiet_printer;
+        }
+        if silence_runner {
+            self.printer = quiet_printer;
+            self.base.options.quiet = true;
+        }
+        if capture_silent {
+            self.base.capture_silent = true;
+        }
+
+        let res = f(self, orig_printer);
+
+        self.printer = orig_printer;
+        self.base.printer = orig_base_printer;
+        self.base.options.quiet = orig_quiet;
+        self.base.capture_silent = orig_capture_silent;
+        res
     }
 
     /// Recursively discover C/C++/Java and custom-language source files under `path`

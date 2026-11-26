@@ -13,7 +13,7 @@ use crate::core::engine::CompilerRunner;
 use crate::core::test_runner::TestcasesRunner;
 use crate::model::error::RunError;
 use crate::model::options::UiMode;
-use crate::util::output::{emit_tui_event, Printer, TagColor, UiEvent, Verbosity};
+use crate::util::output::{emit_tui_event, TagColor, UiEvent};
 use crate::util::spinner::ProgressBar;
 
 /// Configuration for a `--stress` differential fuzzing session.
@@ -200,29 +200,17 @@ impl StressRunner {
         // Snapshot runner state restored unconditionally after stress loop.
         let orig_stdin = runner.base.options.stdin.take();
         let orig_expect = runner.base.options.expect.take();
-        let orig_quiet = runner.base.options.quiet;
         let orig_time = runner.base.options.time;
         let orig_mem = runner.base.options.memory;
         let orig_env = runner.base.options.env.clone();
         let orig_buffered = runner.base.buffered_stdin().map(|b| b.to_vec());
-        let orig_silent = runner.base.capture_silent;
-        let orig_printer = runner.printer;
-        let orig_base_printer = runner.base.printer;
 
-        let quiet_printer = Printer::with_ui_mode(
-            Verbosity::Quiet,
-            orig_printer.colors(),
-            orig_printer.ui_mode(),
-        );
-        runner.base.options.quiet = true;
         runner.base.options.time = false;
         runner.base.options.memory = false;
-        runner.base.capture_silent = true;
-        runner.printer = quiet_printer;
-        runner.base.printer = quiet_printer;
 
-        let progress = ProgressBar::new(orig_printer, runs);
-        let mut all_passed = true;
+        let progress = ProgressBar::new(runner.printer, runs);
+        let all_passed = runner.with_quiet_capture(true, true, true, |runner, orig_printer| {
+            let mut all_passed = true;
 
         for idx in 0..runs {
             let seed = cfg.start_seed + idx as u64;
@@ -388,17 +376,16 @@ impl StressRunner {
             }
         }
 
+            all_passed
+        });
+
         // Restore runner state unconditionally.
         runner.base.options.stdin = orig_stdin;
         runner.base.options.expect = orig_expect;
-        runner.base.options.quiet = orig_quiet;
         runner.base.options.time = orig_time;
         runner.base.options.memory = orig_mem;
         runner.base.options.env = orig_env;
         runner.base.set_buffered_stdin(orig_buffered);
-        runner.base.capture_silent = orig_silent;
-        runner.printer = orig_printer;
-        runner.base.printer = orig_base_printer;
 
         if all_passed {
             emit_tui_event(UiEvent::StressResult {
