@@ -1,5 +1,6 @@
 //! Interactive TUI state machine, keybinding dispatcher, and `Ctrl+O` collapsible test cases.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -142,6 +143,8 @@ pub struct TuiApp {
     pub items: Vec<SidebarItem>,
     /// Index of the selected sidebar item.
     pub selected_item: usize,
+    /// Files marked with `Space` for multi-file compilation/execution (`-m`).
+    pub marked_files: BTreeSet<PathBuf>,
     /// Available `Run.toml` preset names.
     pub presets: Vec<String>,
     /// Currently active preset index (`None` means no preset).
@@ -212,6 +215,7 @@ impl TuiApp {
         Self {
             items,
             selected_item: 0,
+            marked_files: BTreeSet::new(),
             presets,
             selected_preset,
             time_enabled,
@@ -260,6 +264,31 @@ impl TuiApp {
     pub fn current_item(&self) -> Option<&SidebarItem> {
         let filtered = self.filtered_items();
         filtered.get(self.selected_item).map(|(_, item)| *item)
+    }
+
+    /// Toggle multi-compile mark on the currently highlighted file item (`Space`).
+    pub fn toggle_mark_selected(&mut self) {
+        if let Some(SidebarItem::File(path)) = self.current_item().cloned()
+            && !self.marked_files.remove(&path)
+        {
+            self.marked_files.insert(path);
+        }
+    }
+
+    /// Return `true` if `item` is a file currently marked for multi-compile.
+    pub fn is_marked(&self, item: &SidebarItem) -> bool {
+        matches!(item, SidebarItem::File(p) if self.marked_files.contains(p))
+    }
+
+    /// Return all `Space`-marked files in sidebar display order.
+    pub fn marked_targets_in_order(&self) -> Vec<PathBuf> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                SidebarItem::File(p) if self.marked_files.contains(p) => Some(p.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Return the currently active preset name, if any.
@@ -427,6 +456,10 @@ impl TuiApp {
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.move_down();
+                TuiAction::None
+            }
+            KeyCode::Char(' ') => {
+                self.toggle_mark_selected();
                 TuiAction::None
             }
             KeyCode::Enter | KeyCode::Char('r') => TuiAction::RunSelected,
@@ -707,5 +740,44 @@ mod tests {
         assert_eq!(app.modal, InputModal::None);
         assert_eq!(app.test_dir.as_deref(), Some("cases"));
         assert_eq!(app.tab, MainTab::Tests);
+    }
+
+    #[test]
+    fn test_space_toggles_multi_compile_marks() {
+        let mut app = TuiApp::new(
+            vec![
+                SidebarItem::File(PathBuf::from("a.c")),
+                SidebarItem::File(PathBuf::from("b.c")),
+                SidebarItem::Task("build".into()),
+            ],
+            Vec::new(),
+            None,
+            false,
+            false,
+            false,
+            None,
+        );
+
+        // Space marks first file, ignores tasks, and toggles cleanly.
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.marked_targets_in_order(), vec![PathBuf::from("a.c")]);
+
+        app.handle_key(KeyEvent::from(KeyCode::Down));
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(
+            app.marked_targets_in_order(),
+            vec![PathBuf::from("a.c"), PathBuf::from("b.c")]
+        );
+
+        // Tasks cannot be marked for multi-compile.
+        app.handle_key(KeyEvent::from(KeyCode::Down));
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.marked_files.len(), 2);
+
+        // Pressing Space again on a.c unmarks it.
+        app.handle_key(KeyEvent::from(KeyCode::Up));
+        app.handle_key(KeyEvent::from(KeyCode::Up));
+        app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+        assert_eq!(app.marked_targets_in_order(), vec![PathBuf::from("b.c")]);
     }
 }

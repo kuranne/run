@@ -450,14 +450,17 @@ struct TaskFingerprint {
     stamp_file: PathBuf,
     digest: String,
     up_to_date: bool,
+    cwd: PathBuf,
 }
 
 impl TaskFingerprint {
-    fn write_digest(&self) -> std::io::Result<()> {
-        if let Some(parent) = self.stamp_file.parent() {
-            fs::create_dir_all(parent)?;
+    fn write_digest(&self) -> Result<(), RunError> {
+        if let Ok(cache) = CacheManager::new(&self.cwd) {
+            return cache.with_file_lock(|| {
+                crate::util::cache::atomic_write_bytes(&self.stamp_file, self.digest.as_bytes())
+            });
         }
-        fs::write(&self.stamp_file, &self.digest)
+        crate::util::cache::atomic_write_bytes(&self.stamp_file, self.digest.as_bytes())
     }
 }
 
@@ -520,6 +523,7 @@ fn compute_task_fingerprint(
         stamp_file,
         digest,
         up_to_date,
+        cwd: cwd.to_path_buf(),
     })
 }
 

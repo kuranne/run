@@ -60,12 +60,15 @@ stop_dirs = ["/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp"]
 
 [package.metadata.run.cache]
 metadata_file = "cache.json"
+lock_file = "cache.lock"
 hash_prefix_len = 16
 objs_dir = "objs"
 bin_dir = "bin"
 src_dir = "src"
 hash_chunk_bytes = 4096
 shebang_head_bytes = 1024
+max_age_days = 30
+max_size_mb = 512
 
 [package.metadata.run.excludes]
 extensions = [".toml", ".lock"]

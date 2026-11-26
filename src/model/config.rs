@@ -215,6 +215,16 @@ pub struct ExcludeConfig {
     pub dirs: Vec<String>,
 }
 
+/// `[cache]` retention and pruning settings from `Run.toml`.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct CacheConfig {
+    /// Maximum age in days before cached entries are eligible for pruning (`0` disables age pruning).
+    pub max_age_days: Option<u64>,
+    /// Maximum total cache size in megabytes before LRU eviction (`0` disables size pruning).
+    pub max_size_mb: Option<u64>,
+}
+
 /// Loaded and validated `Run.toml` configuration.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
@@ -224,6 +234,8 @@ pub struct Config {
     pub core: CoreConfig,
     /// `[sandbox]` settings.
     pub sandbox: SandboxConfig,
+    /// `[cache]` settings.
+    pub cache: CacheConfig,
     /// `[vars]` global task variables.
     pub vars: BTreeMap<String, String>,
     /// `[tasks]` mappings.

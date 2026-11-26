@@ -65,7 +65,7 @@ _run() {
         '--asan[Compile with AddressSanitizer and UndefinedBehaviorSanitizer]' \
         '--tsan[Compile with ThreadSanitizer]' \
         '--sanitize[Compile with custom sanitizer]:sanitizer:' \
-        '--link-auto[Auto find and link C/C++ files]:depth:' \
+        '(-L --all)'{-L,--all}'[Scan all sources in directory (optional depth)]:depth:' \
         '--flags[Compiler or interpreter flags]:flags:' \
         '--compiler[Compiler or interpreter override]:compiler:' \
         '--out-dir[Output directory for compiled binaries]:directory:_files -/' \
@@ -114,7 +114,7 @@ const BASH_COMPLETION: &str = r#"_run_complete() {
     local cur prev words cword
     _init_completion || return
 
-    local opts="-w --watch -f --force -d --dry-run -t --time -M --mem --memory -q --quiet -v -vv --verbose -i --stdin --stdin-file --stdin-text --expect --test-dir --filter --debug --gdb --lldb --valgrind --timeout --mem-limit --env --argument -m --multi -p --preset -j --jobs -B --build-only --no-run --asan --tsan --sanitize --link-auto --flags --compiler --out-dir --keep --no-cache --new --template -l --list --doctor --init --directory --cwd --clean --no-color --plain --tui --json --json-schema --mcp --mcp-root --bench --warmup --stress --runs --seed --checker --unsafe --completion -V --version -h --help"
+    local opts="-w --watch -f --force -d --dry-run -t --time -M --mem --memory -q --quiet -v -vv --verbose -i --stdin --stdin-file --stdin-text --expect --test-dir --filter --debug --gdb --lldb --valgrind --timeout --mem-limit --env --argument -m --multi -p --preset -j --jobs -B --build-only --no-run --asan --tsan --sanitize -L --all --flags --compiler --out-dir --keep --no-cache --new --template -l --list --doctor --init --directory --cwd --clean --no-color --plain --tui --json --json-schema --mcp --mcp-root --bench --warmup --stress --runs --seed --checker --unsafe --completion -V --version -h --help"
 
     case "$prev" in
         -p|--preset)
@@ -197,7 +197,7 @@ complete -c run -s B -l build-only -l no-run -d "Compile binary without executin
 complete -c run -l asan -d "Compile with AddressSanitizer"
 complete -c run -l tsan -d "Compile with ThreadSanitizer"
 complete -c run -l sanitize -r -d "Compile with custom sanitizer"
-complete -c run -l link-auto -d "Auto find and link C/C++ files"
+complete -c run -s L -l all -d "Scan all sources in directory (optional depth)"
 complete -c run -l flags -r -d "Compiler or interpreter flags"
 complete -c run -l compiler -r -d "Compiler or interpreter override"
 complete -c run -l out-dir -a "(__fish_complete_directories)" -d "Output directory for compiled binaries"
@@ -261,7 +261,7 @@ const POWERSHELL_COMPLETION: &str = r#"Register-ArgumentCompleter -Native -Comma
         '--asan',
         '--tsan',
         '--sanitize',
-        '--link-auto',
+        '-L', '--all',
         '--flags',
         '--compiler',
         '--out-dir',

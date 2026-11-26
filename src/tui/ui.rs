@@ -10,7 +10,7 @@ use crate::core::BenchRunner;
 use crate::util::output::TagColor;
 use crate::util::spinner::BRAILLE_FRAMES;
 
-use super::app::{InputModal, MainTab, TuiApp, TuiFocus};
+use super::app::{InputModal, MainTab, SidebarItem, TuiApp, TuiFocus};
 
 /// Map [`TagColor`] to a `ratatui::style::Color`.
 const fn to_ratatui_color(color: TagColor) -> Color {
@@ -120,6 +120,8 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
         format!(" Filter: /{}▌ ", app.filter_query)
     } else if !app.filter_query.is_empty() {
         format!(" Workspace (/{}) ", app.filter_query)
+    } else if !app.marked_files.is_empty() {
+        format!(" Workspace ({} marked) ", app.marked_files.len())
     } else {
         " Workspace ".to_string()
     };
@@ -130,21 +132,32 @@ fn render_sidebar(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
         .border_style(Style::default().fg(border_color));
 
     let filtered = app.filtered_items();
+    let any_marked = !app.marked_files.is_empty();
     let items: Vec<ListItem<'_>> = filtered
         .iter()
         .enumerate()
         .map(|(i, (_, item))| {
             let selected = i == app.selected_item;
+            let marked = app.is_marked(item);
             let prefix = if selected { "▸ " } else { "  " };
             let style = if selected {
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else if marked {
+                Style::default().fg(Color::Green)
             } else {
                 Style::default().fg(Color::White)
             };
-            ListItem::new(Line::from(Span::styled(
-                format!("{prefix}{}", item.label()),
-                style,
-            )))
+            let mut spans = vec![Span::styled(prefix, style)];
+            if any_marked {
+                let (box_str, box_color) = match item {
+                    SidebarItem::File(_) if marked => ("[●] ", Color::Green),
+                    SidebarItem::File(_) => ("[ ] ", Color::DarkGray),
+                    SidebarItem::Task(_) => ("    ", Color::DarkGray),
+                };
+                spans.push(Span::styled(box_str, Style::default().fg(box_color)));
+            }
+            spans.push(Span::styled(item.label(), style));
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
@@ -374,7 +387,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &TuiApp) {
     let line = Line::from(vec![
         Span::styled(format!("{time_str}{mem_str}"), Style::default().fg(Color::Yellow)),
         Span::styled(
-            "r Run · b Bench · / Filter · i Stdin · d TestDir · w Watch · Ctrl+O Test · p Preset · q Quit",
+            "Space Multi · r Run · b Bench · / Filter · i Stdin · d TestDir · w Watch · Ctrl+O Test · p Preset · q Quit",
             Style::default().fg(Color::DarkGray),
         ),
     ]);

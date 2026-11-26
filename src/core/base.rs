@@ -20,10 +20,10 @@ use crate::core::registry::RunnerOptions;
 use crate::util::config::{Config, SandboxConfig};
 use crate::util::env::PackageMetadata;
 use crate::model::error::RunError;
-use crate::util::output::{emit_tui_event, Printer, TagColor, UiEvent};
+pub use crate::model::options::{CommandExecutor, ExecOutcome, ExecSpec, UiMode};
+use crate::util::output::{emit_tui_event, Printer, TagColor, UiEvent, Verbosity};
 use crate::util::process::MonitoredChild;
 use crate::util::spinner::Spinner;
-pub use crate::model::options::{CommandExecutor, ExecOutcome, ExecSpec};
 use crate::util::sandbox::{
     ComposeSandbox, ContainerSandbox, NativeRestrictor, PersistentSandbox,
 };
@@ -336,6 +336,53 @@ fn resolve_with_existing_ancestor(path: &Path) -> PathBuf {
         cursor = parent;
     }
     normalized
+}
+
+/// Strip a `16hex_` cache filename prefix (if present) and return a short display name.
+fn short_display_name(raw: &str) -> String {
+    let name = Path::new(raw)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(raw);
+    if let Some((prefix, rest)) = name.split_once('_')
+        && prefix.len() == 16
+        && prefix.bytes().all(|b| b.is_ascii_hexdigit())
+        && !rest.is_empty()
+    {
+        return rest.to_string();
+    }
+    name.to_string()
+}
+
+/// Build a concise compile label for non-verbose Modern/TUI output.
+fn format_modern_compile_label(cmd: &[String]) -> String {
+    if let Some(pos) = cmd.iter().position(|a| a == "-o")
+        && let Some(out) = cmd.get(pos + 1)
+    {
+        return format!("Compiling {}", short_display_name(out));
+    }
+    let tool = cmd
+        .first()
+        .map(|s| short_display_name(s))
+        .unwrap_or_else(|| "target".to_string());
+    format!("Compiling ({tool})")
+}
+
+/// Build a concise run label for non-verbose Modern/TUI output, hiding long cache paths.
+fn format_modern_run_label(cmd: &[String]) -> String {
+    let Some(first) = cmd.first() else {
+        return String::new();
+    };
+    let head = if first.contains("/run/") || first.contains("\\run\\") {
+        short_display_name(first)
+    } else {
+        first.clone()
+    };
+    if cmd.len() > 1 {
+        format!("{head} {}", cmd[1..].join(" "))
+    } else {
+        head
+    }
 }
 
 /// Join tokens into a shell command string for `use_shell` execution via `shlex::try_join`.
@@ -688,7 +735,25 @@ impl BaseRunner {
             )));
         }
 
-        self.printer.action(tag, &cmd_str, TagColor::Green);
+        let modern_compact = self.printer.ui_mode() == UiMode::Modern
+            && self.printer.verbosity() < Verbosity::Verbose;
+        if modern_compact {
+            if !compiling {
+                self.printer.action(
+                    tag,
+                    &format_modern_run_label(cmd),
+                    TagColor::Green,
+                );
+            } else if self.printer.has_tui_sink() {
+                self.printer.action(
+                    tag,
+                    &format_modern_compile_label(cmd),
+                    TagColor::Green,
+                );
+            }
+        } else {
+            self.printer.action(tag, &cmd_str, TagColor::Green);
+        }
 
         let custom_env = self.parse_custom_env();
         let sanitized_env = SecurityManager::sanitize_execution_env(
@@ -1328,5 +1393,22 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, RunError::Compilation(_)));
         assert!(err.to_string().contains("timed out"));
+    }
+
+    #[test]
+    fn test_modern_compact_labels() {
+        let compile_cmd = vec![
+            "g++".into(),
+            "/Users/kuranne/.cache/run/d5ec8d59a7e1bf8e/objs/21978b9805cbe5f0_hello.cpp.o".into(),
+            "-o".into(),
+            "./main.out".into(),
+        ];
+        assert_eq!(format_modern_compile_label(&compile_cmd), "Compiling main.out");
+
+        let run_cached = vec![
+            "/Users/kuranne/.cache/run/d5ec8d59a7e1bf8e/bin/223b68d51d8f954f_solo.out".into(),
+            "--flag".into(),
+        ];
+        assert_eq!(format_modern_run_label(&run_cached), "solo.out --flag");
     }
 }

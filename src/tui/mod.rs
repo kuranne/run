@@ -273,7 +273,8 @@ fn spawn_worker(
     }
     let flags_str = cli.flags_str();
     let args_str = cli.args_str();
-    let multi = cli.multi;
+    let marked_targets = app.marked_targets_in_order();
+    let cli_multi = cli.multi;
     let quiet = cli.quiet;
     let bench_runs = cli.bench.unwrap_or(10);
     let warmup = cli.warmup.unwrap_or(2);
@@ -295,10 +296,16 @@ fn spawn_worker(
             }
             match item {
                 SidebarItem::File(path) => {
+                    let targets = if marked_targets.is_empty() {
+                        vec![path]
+                    } else {
+                        marked_targets
+                    };
+                    let multi = targets.len() > 1 || cli_multi;
                     if bench_mode {
                         let _ = BenchRunner::run_bench_targets(
                             &mut runner,
-                            &[path],
+                            &targets,
                             multi,
                             bench_runs,
                             warmup,
@@ -307,11 +314,11 @@ fn spawn_worker(
                         let _ = TestcasesRunner::run_tests(
                             &mut runner,
                             Path::new(tdir),
-                            &[path],
+                            &targets,
                             multi,
                         );
                     } else {
-                        let _ = runner.compile_and_run(&[path], multi);
+                        let _ = runner.compile_and_run(&targets, multi);
                     }
                 }
                 SidebarItem::Task(name) => {

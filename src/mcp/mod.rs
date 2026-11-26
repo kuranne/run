@@ -5,8 +5,10 @@
 //! initializer as MCP tools backed by `run --json` subprocesses, plus a
 //! `run://json-schema` resource describing the structured report format.
 
+use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
 use rmcp::model::{
@@ -19,6 +21,7 @@ use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt, tool, t
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tokio::process::Command;
+use tokio::sync::{Mutex as AsyncMutex, RwLock as AsyncRwLock};
 
 use crate::model::error::RunError;
 use crate::model::report::JsonReport;
@@ -162,6 +165,8 @@ pub struct RunMcpServer {
     tool_router: ToolRouter<Self>,
     /// Optional canonicalized root directory confining `cwd` and relative path inputs.
     mcp_root: Option<PathBuf>,
+    /// Per-workspace read/write locks allowing concurrent runs while serializing `clean_cache` / `init_project`.
+    workspace_locks: Arc<AsyncMutex<HashMap<PathBuf, Arc<AsyncRwLock<()>>>>>,
 }
 
 impl RunMcpServer {
@@ -185,7 +190,15 @@ impl RunMcpServer {
         Ok(Self {
             tool_router: Self::tool_router(),
             mcp_root: canonical_root,
+            workspace_locks: Arc::new(AsyncMutex::new(HashMap::new())),
         })
+    }
+
+    /// Return the per-workspace [`AsyncRwLock`] used to coordinate concurrent runs vs. `clean_cache`/`init_project`.
+    async fn workspace_lock(&self, cwd: &Path) -> Arc<AsyncRwLock<()>> {
+        let key = std::fs::canonicalize(cwd).unwrap_or_else(|_| lexical_normalize(cwd));
+        let mut map = self.workspace_locks.lock().await;
+        Arc::clone(map.entry(key).or_insert_with(|| Arc::new(AsyncRwLock::new(()))))
     }
 
     /// Resolve and validate `cwd` against `self.mcp_root` (if configured).
@@ -536,6 +549,8 @@ impl RunMcpServer {
             self.validate_path_arg(&cwd, o)?;
         }
         let args = build_run_code_args(&params);
+        let lock = self.workspace_lock(&cwd).await;
+        let _guard = lock.read().await;
         self.invoke_run(args, &cwd).await
     }
 
@@ -552,6 +567,8 @@ impl RunMcpServer {
         self.validate_path_arg(&cwd, &params.target)?;
         self.validate_path_arg(&cwd, &params.test_dir)?;
         let args = build_run_tests_args(&params);
+        let lock = self.workspace_lock(&cwd).await;
+        let _guard = lock.read().await;
         self.invoke_run(args, &cwd).await
     }
 
@@ -569,6 +586,8 @@ impl RunMcpServer {
             self.validate_path_arg(&cwd, t)?;
         }
         let args = build_bench_args(&params);
+        let lock = self.workspace_lock(&cwd).await;
+        let _guard = lock.read().await;
         self.invoke_run(args, &cwd).await
     }
 
@@ -589,6 +608,8 @@ impl RunMcpServer {
             self.validate_path_arg(&cwd, c)?;
         }
         let args = build_stress_args(&params);
+        let lock = self.workspace_lock(&cwd).await;
+        let _guard = lock.read().await;
         self.invoke_run(args, &cwd).await
     }
 
@@ -615,6 +636,8 @@ impl RunMcpServer {
         Parameters(params): Parameters<CwdOnlyParams>,
     ) -> Result<CallToolResult, McpError> {
         let cwd = self.resolve_cwd(params.cwd.as_deref())?;
+        let lock = self.workspace_lock(&cwd).await;
+        let _guard = lock.write().await;
         self.invoke_run(vec!["--clean".to_string()], &cwd).await
     }
 
@@ -640,6 +663,8 @@ impl RunMcpServer {
         } else {
             args.push("--init".to_string());
         }
+        let lock = self.workspace_lock(&cwd).await;
+        let _guard = lock.write().await;
         self.invoke_run(args, &cwd).await
     }
 }
@@ -871,5 +896,23 @@ mod tests {
                 "sol.c",
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn test_workspace_rwlock_allows_concurrent_reads_and_blocks_write() {
+        let srv = RunMcpServer::new(None).unwrap();
+        let ws = std::env::temp_dir();
+        let lock = srv.workspace_lock(&ws).await;
+
+        let r1 = lock.read().await;
+        let r2 = lock.try_read();
+        assert!(r2.is_ok(), "multiple concurrent read locks must succeed");
+        assert!(
+            lock.try_write().is_err(),
+            "write lock (clean_cache/init_project) must wait while reads are active"
+        );
+        drop(r2);
+        drop(r1);
+        assert!(lock.try_write().is_ok());
     }
 }
