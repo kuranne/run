@@ -255,6 +255,15 @@ impl BenchRunner {
         runs: usize,
         warmup: usize,
     ) -> Option<BenchStats> {
+        let (is_compiled, bin_path) =
+            match TestcasesRunner::prepare_compiled_binary(runner, files, multi) {
+                Ok(res) => res,
+                Err(msg) => {
+                    runner.printer.error(&msg);
+                    return None;
+                }
+            };
+
         let orig_time = runner.base.options.time;
         let orig_mem = runner.base.options.memory;
         let orig_quiet = runner.base.options.quiet;
@@ -282,7 +291,17 @@ impl BenchRunner {
         let mut ok = true;
         for step in 0..(warmup + runs) {
             let t0 = Instant::now();
-            if runner.compile_and_run(files, multi) {
+            let step_ok = if is_compiled
+                && let Some(ref bin) = bin_path
+                && bin.exists()
+            {
+                runner.execute_binary(bin, &[])
+            } else if multi {
+                runner.handle_multi_compile(files)
+            } else {
+                runner.handle_single_file(&files[0])
+            };
+            if step_ok.unwrap_or(false) {
                 let elapsed = t0.elapsed().as_secs_f64();
                 if step >= warmup {
                     samples.push(elapsed);

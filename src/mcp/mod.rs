@@ -64,6 +64,8 @@ pub struct RunCodeParams {
     pub keep: Option<bool>,
     /// Execute inside configured container/native sandbox (`--sandbox`).
     pub sandbox: Option<bool>,
+    /// Maximum captured output bytes (defaults to `64K` in MCP; pass `"0"` for unlimited).
+    pub max_output: Option<String>,
 }
 
 /// Parameters for the `run_tests` MCP tool.
@@ -91,6 +93,8 @@ pub struct RunTestsParams {
     pub cwd: Option<String>,
     /// Disable persistent compilation cache (`--no-cache`).
     pub no_cache: Option<bool>,
+    /// Maximum captured output bytes (defaults to `64K` in MCP; pass `"0"` for unlimited).
+    pub max_output: Option<String>,
 }
 
 /// Parameters for the `bench_code` MCP tool.
@@ -114,6 +118,8 @@ pub struct BenchCodeParams {
     pub preset: Option<Vec<String>>,
     /// Working directory for the invocation (must stay inside `--mcp-root` if set).
     pub cwd: Option<String>,
+    /// Maximum captured output bytes (defaults to `64K` in MCP; pass `"0"` for unlimited).
+    pub max_output: Option<String>,
 }
 
 /// Parameters for the `stress_test` MCP tool.
@@ -137,6 +143,8 @@ pub struct StressTestParams {
     pub mem_limit: Option<String>,
     /// Working directory for the invocation (must stay inside `--mcp-root` if set).
     pub cwd: Option<String>,
+    /// Maximum captured output bytes (defaults to `64K` in MCP; pass `"0"` for unlimited).
+    pub max_output: Option<String>,
 }
 
 /// Parameters for `doctor` and `clean_cache` MCP tools.
@@ -584,7 +592,8 @@ impl RunMcpServer {
         let args = build_run_code_args(&params);
         let lock = self.workspace_lock(&cwd).await;
         let _guard = lock.read().await;
-        self.invoke_run(args, &cwd).await
+        self.invoke_run_with_limit(args, &cwd, params.max_output.as_deref().or(Some("64K")))
+            .await
     }
 
     /// Run a batch testcase suite (`--test-dir`) with optional `--filter` globbing.
@@ -602,7 +611,8 @@ impl RunMcpServer {
         let args = build_run_tests_args(&params);
         let lock = self.workspace_lock(&cwd).await;
         let _guard = lock.read().await;
-        self.invoke_run(args, &cwd).await
+        self.invoke_run_with_limit(args, &cwd, params.max_output.as_deref().or(Some("64K")))
+            .await
     }
 
     /// Micro-benchmark a program or command (`--bench`) with warmup and statistical summary.
@@ -621,7 +631,8 @@ impl RunMcpServer {
         let args = build_bench_args(&params);
         let lock = self.workspace_lock(&cwd).await;
         let _guard = lock.read().await;
-        self.invoke_run(args, &cwd).await
+        self.invoke_run_with_limit(args, &cwd, params.max_output.as_deref().or(Some("64K")))
+            .await
     }
 
     /// Differential stress test a target against a generator and brute-force oracle (`--stress`).
@@ -643,7 +654,8 @@ impl RunMcpServer {
         let args = build_stress_args(&params);
         let lock = self.workspace_lock(&cwd).await;
         let _guard = lock.read().await;
-        self.invoke_run(args, &cwd).await
+        self.invoke_run_with_limit(args, &cwd, params.max_output.as_deref().or(Some("64K")))
+            .await
     }
 
     /// Inspect available compilers, interpreters, debuggers, and container engines (`--doctor`).
@@ -886,6 +898,7 @@ mod tests {
             out_dir: None,
             keep: Some(false),
             sandbox: Some(false),
+            max_output: None,
         });
         assert_eq!(
             run_args,
@@ -923,6 +936,7 @@ mod tests {
             preset: None,
             cwd: None,
             no_cache: None,
+            max_output: None,
         });
         assert_eq!(
             test_args,
@@ -949,6 +963,7 @@ mod tests {
             flags: None,
             preset: None,
             cwd: None,
+            max_output: None,
         });
         assert_eq!(
             bench_args,
@@ -965,6 +980,7 @@ mod tests {
             timeout: Some(2.0),
             mem_limit: None,
             cwd: None,
+            max_output: None,
         });
         assert_eq!(
             stress_args,

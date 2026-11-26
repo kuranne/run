@@ -470,7 +470,7 @@ pub struct CliArgs {
     pub lang: Option<String>,
 
     /// Start an interactive compile-and-eval REPL for `<LANG>` (`c`, `cpp`, `rs`, `py`, `go`, `js`, `sh`).
-    #[arg(long = "repl", value_name = "LANG")]
+    #[arg(long = "repl", value_name = "LANG", conflicts_with_all = ["json", "tui", "mcp"])]
     pub repl: Option<String>,
 
     /// Override compiler or interpreter executable for the active language.

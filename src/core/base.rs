@@ -373,7 +373,11 @@ fn format_modern_run_label(cmd: &[String]) -> String {
     let Some(first) = cmd.first() else {
         return String::new();
     };
-    let head = if first.contains("/run/") || first.contains("\\run\\") {
+    let head = if first.contains(".cache/run/")
+        || first.contains("\\cache\\run\\")
+        || ((first.contains("/run/") || first.contains("\\run\\"))
+            && (first.contains("/bin/") || first.contains("\\bin\\")))
+    {
         short_display_name(first)
     } else {
         first.clone()

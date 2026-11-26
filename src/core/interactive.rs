@@ -145,36 +145,24 @@ impl InteractiveRunner {
                 first.to_string_lossy().into_owned(),
             ]);
         }
-
-        // Compile via CompilerRunner in build-only mode, then inspect produced binary.
-        let orig_build_only = runner.base.options.build_only;
-        let orig_keep = runner.base.options.keep;
-        let prev_outputs = runner.base.output_files.len();
-        runner.base.options.build_only = true;
-        runner.base.options.keep = true;
-        let ok = runner.compile_and_run(files, multi);
-        runner.base.options.build_only = orig_build_only;
-        runner.base.options.keep = orig_keep;
-
-        if !ok {
-            return Err(RunError::compilation(format!(
-                "Compilation failed for {}",
-                first.display()
-            )));
+        if ext == ".js" {
+            return Ok(vec![
+                "node".to_string(),
+                first.to_string_lossy().into_owned(),
+            ]);
         }
-        let bin = runner
-            .base
-            .output_files
-            .get(prev_outputs..)
-            .and_then(|slice| slice.last())
-            .cloned()
-            .ok_or_else(|| {
-                RunError::compilation(format!(
-                    "No executable artifact produced for {}",
-                    first.display()
-                ))
-            })?;
-        Ok(vec![bin.to_string_lossy().into_owned()])
+
+        // Compile via TestcasesRunner::prepare_compiled_binary (handles C/C++/Rust/Go + cache hits).
+        match crate::core::test_runner::TestcasesRunner::prepare_compiled_binary(
+            runner, files, multi,
+        ) {
+            Ok((true, Some(bin))) if bin.exists() => Ok(vec![bin.to_string_lossy().into_owned()]),
+            Ok(_) => Err(RunError::compilation(format!(
+                "No executable artifact produced for {}",
+                first.display()
+            ))),
+            Err(msg) => Err(RunError::compilation(msg)),
+        }
     }
 
     /// Spawn `sol_cmd` and `int_cmd`, bridge their stdin/stdout, and enforce timeout/memory limits.

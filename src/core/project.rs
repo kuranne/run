@@ -324,40 +324,48 @@ impl TaskRunner {
                             )));
                         }
                     }
-                    let results: Vec<Result<bool, RunError>> = std::thread::scope(|scope| {
+                    let results: Vec<(Result<bool, RunError>, String)> = std::thread::scope(|scope| {
                         let mut handles = Vec::with_capacity(pending_deps.len());
                         for dep in &pending_deps {
                             let dep_name = (*dep).clone();
                             let mut sub_runner = match runner.clone_for_parallel_task(config) {
                                 Ok(r) => r,
                                 Err(err) => {
-                                    handles.push(scope.spawn(move || Err(err)));
+                                    handles.push(scope.spawn(move || (Err(err), String::new())));
                                     continue;
                                 }
                             };
+                            sub_runner.capture_silent = true;
                             handles.push(scope.spawn(move || {
                                 let mut sub_visiting = HashSet::new();
                                 let mut sub_completed = HashSet::new();
-                                Self::run_task_dag(
+                                let res = Self::run_task_dag(
                                     &dep_name,
                                     config,
                                     &[],
                                     &mut sub_runner,
                                     &mut sub_visiting,
                                     &mut sub_completed,
-                                )
+                                );
+                                (res, std::mem::take(&mut sub_runner.last_captured_stdout))
                             }));
                         }
                         handles
                             .into_iter()
                             .map(|h| {
                                 h.join().unwrap_or_else(|_| {
-                                    Err(RunError::execution("Parallel task worker panicked"))
+                                    (
+                                        Err(RunError::execution("Parallel task worker panicked")),
+                                        String::new(),
+                                    )
                                 })
                             })
                             .collect()
                     });
-                    for (dep, res) in pending_deps.iter().zip(results) {
+                    for (dep, (res, stdout)) in pending_deps.iter().zip(results) {
+                        if !stdout.is_empty() {
+                            print!("{stdout}");
+                        }
                         if !res? {
                             return Ok(false);
                         }
