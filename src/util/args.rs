@@ -437,6 +437,18 @@ pub struct CliArgs {
     #[arg(long = "checker", value_name = "FILE")]
     pub checker: Option<String>,
 
+    /// Output comparison mode for `--expect`, `--test-dir`, and `--stress` (`exact`, `tokens`, `float:<eps>`).
+    #[arg(long = "cmp", value_name = "MODE", default_value = "exact")]
+    pub cmp: crate::model::options::CompareMode,
+
+    /// Run target in interactive judge mode bridged with `<INTERACTOR>`.
+    #[arg(long = "interactive", value_name = "INTERACTOR")]
+    pub interactive: Option<String>,
+
+    /// Compare primary target side-by-side against `<TARGET_B>` (with `--bench` or `--test-dir`).
+    #[arg(long = "compare", value_name = "TARGET_B")]
+    pub compare: Option<String>,
+
     /// Override compiler or interpreter executable for the active language.
     #[arg(long = "compiler", value_name = "BIN")]
     pub compiler: Option<String>,
@@ -568,6 +580,7 @@ impl CliArgs {
             force: self.force,
             jobs: self.jobs,
             expect: self.expect.clone(),
+            compare_mode: self.cmp,
             test_dir: self.test_dir.clone(),
             test_filter: self.filter.clone(),
             debug: self.debug,

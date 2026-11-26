@@ -565,7 +565,7 @@ impl BaseRunner {
     }
 
     /// Parse `--env KEY=VALUE` pairs into a [`BTreeMap`].
-    fn parse_custom_env(&self) -> BTreeMap<String, String> {
+    pub(crate) fn parse_custom_env(&self) -> BTreeMap<String, String> {
         let mut custom = BTreeMap::new();
         for entry in &self.options.env {
             if let Some((k, v)) = entry.split_once('=') {
@@ -925,7 +925,13 @@ impl BaseRunner {
                 match fs::read(exp) {
                     Ok(bytes) => {
                         let expected = String::from_utf8_lossy(&bytes);
-                        if expected.trim() == res.captured_stdout.trim() {
+                        if crate::core::compare::compare_outputs(
+                            &expected,
+                            &res.captured_stdout,
+                            self.options.compare_mode,
+                        )
+                        .is_ok()
+                        {
                             self.printer.status(
                                 "PASS",
                                 &format!("Output matches {exp}"),

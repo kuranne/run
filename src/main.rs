@@ -21,8 +21,8 @@ use run::core::registry::LanguageHandler;
 use run::core::handlers::java_handler::JavaHandler;
 use run::core::handlers::script_handler::ScriptHandler;
 use run::core::{
-    BenchRunner, CompilerRunner, ProjectRunner, StressConfig, StressRunner, TaskRunner,
-    TestcasesRunner,
+    BenchRunner, CompilerRunner, InteractiveRunner, ProjectRunner, StressConfig, StressRunner,
+    TaskRunner, TestcasesRunner,
 };
 use run::util::args::CliArgs;
 use run::util::cache::CacheManager;
@@ -801,7 +801,48 @@ fn run_once(
             && target_files.len() > 1
             && has_multi_compilable(&target_files, &config));
 
-    let ok = if let Some(ref stress_pair) = cli.stress {
+    let ok = if let Some(ref interactor) = cli.interactive {
+        InteractiveRunner::run_interactive(
+            &mut runner,
+            &target_files,
+            effective_multi,
+            Path::new(interactor),
+        )
+    } else if let Some(ref cmp_target) = cli.compare {
+        let cmp_files = vec![PathBuf::from(cmp_target)];
+        if let Some(ref td_str) = cli.test_dir {
+            printer.info(&format!(
+                "Comparing {} vs {cmp_target} on {}",
+                target_files
+                    .first()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+                td_str
+            ));
+            let ok_a = TestcasesRunner::run_tests(
+                &mut runner,
+                Path::new(td_str),
+                &target_files,
+                effective_multi,
+            );
+            let ok_b = TestcasesRunner::run_tests(
+                &mut runner,
+                Path::new(td_str),
+                &cmp_files,
+                false,
+            );
+            ok_a && ok_b
+        } else {
+            BenchRunner::run_bench_compare(
+                &mut runner,
+                &target_files,
+                &cmp_files,
+                effective_multi,
+                cli.bench.unwrap_or(10),
+                cli.warmup.unwrap_or(2),
+            )
+        }
+    } else if let Some(ref stress_pair) = cli.stress {
         let stress_cfg = StressConfig {
             gen_path: PathBuf::from(&stress_pair[0]),
             brute_path: PathBuf::from(&stress_pair[1]),

@@ -191,6 +191,121 @@ impl BenchRunner {
         true
     }
 
+    /// Benchmark two targets side-by-side (`--compare`) and print speedup and memory deltas.
+    pub fn run_bench_compare(
+        runner: &mut CompilerRunner,
+        targets_a: &[PathBuf],
+        targets_b: &[PathBuf],
+        multi: bool,
+        runs: usize,
+        warmup: usize,
+    ) -> bool {
+        let label_a = targets_a
+            .first()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "target_a".to_string());
+        let label_b = targets_b
+            .first()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "target_b".to_string());
+
+        let Some(stats_a) = Self::measure_targets(runner, targets_a, multi, runs, warmup) else {
+            return false;
+        };
+        Self::emit_report(runner.printer, &label_a, &stats_a);
+
+        let Some(stats_b) = Self::measure_targets(runner, targets_b, multi, runs, warmup) else {
+            return false;
+        };
+        Self::emit_report(runner.printer, &label_b, &stats_b);
+
+        let ratio = if stats_b.median_secs > 0.0 {
+            stats_a.median_secs / stats_b.median_secs
+        } else {
+            1.0
+        };
+        let summary = if ratio > 1.0 {
+            format!(
+                "Compare: {label_b} is {ratio:.2}x faster than {label_a} (median {} vs {})",
+                Self::format_duration(stats_b.median_secs),
+                Self::format_duration(stats_a.median_secs),
+            )
+        } else if ratio < 1.0 && ratio > 0.0 {
+            format!(
+                "Compare: {label_a} is {:.2}x faster than {label_b} (median {} vs {})",
+                1.0 / ratio,
+                Self::format_duration(stats_a.median_secs),
+                Self::format_duration(stats_b.median_secs),
+            )
+        } else {
+            format!(
+                "Compare: {label_a} and {label_b} have equal median ({})",
+                Self::format_duration(stats_a.median_secs),
+            )
+        };
+        runner.printer.status("COMPARE", &summary, TagColor::Cyan);
+        true
+    }
+
+    /// Measure `files` for `runs` (+ `warmup`) and return [`BenchStats`] without printing.
+    fn measure_targets(
+        runner: &mut CompilerRunner,
+        files: &[PathBuf],
+        multi: bool,
+        runs: usize,
+        warmup: usize,
+    ) -> Option<BenchStats> {
+        let orig_time = runner.base.options.time;
+        let orig_mem = runner.base.options.memory;
+        let orig_quiet = runner.base.options.quiet;
+        let orig_bench = runner.base.options.bench;
+        let orig_printer = runner.printer;
+        let orig_base_printer = runner.base.printer;
+        let verbose = runner.printer.verbosity() >= Verbosity::Verbose;
+
+        runner.base.options.time = false;
+        runner.base.options.memory = true;
+        runner.base.options.quiet = !verbose;
+        runner.base.options.bench = Some(runs);
+        if !verbose {
+            let quiet_printer = Printer::with_ui_mode(
+                Verbosity::Quiet,
+                orig_printer.colors(),
+                orig_printer.ui_mode(),
+            );
+            runner.printer = quiet_printer;
+            runner.base.printer = quiet_printer;
+        }
+
+        let mut samples = Vec::with_capacity(runs);
+        let mut peak_mem: Option<u64> = None;
+        let mut ok = true;
+        for step in 0..(warmup + runs) {
+            let t0 = Instant::now();
+            if runner.compile_and_run(files, multi) {
+                let elapsed = t0.elapsed().as_secs_f64();
+                if step >= warmup {
+                    samples.push(elapsed);
+                    if let Some(mem) = runner.base.last_memory_bytes {
+                        peak_mem = Some(peak_mem.map_or(mem, |prev| prev.max(mem)));
+                    }
+                }
+            } else {
+                ok = false;
+                break;
+            }
+        }
+
+        runner.base.options.time = orig_time;
+        runner.base.options.memory = orig_mem;
+        runner.base.options.quiet = orig_quiet;
+        runner.base.options.bench = orig_bench;
+        runner.printer = orig_printer;
+        runner.base.printer = orig_base_printer;
+
+        ok.then(|| BenchStats::from_samples(warmup, samples, peak_mem))
+    }
+
     /// Render benchmark summary according to active [`UiMode`] or emit [`UiEvent::BenchSummary`].
     pub fn emit_report(printer: Printer, label: &str, stats: &BenchStats) {
         if emit_tui_event(UiEvent::BenchSummary(stats.clone())) {
