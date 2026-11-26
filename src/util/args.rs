@@ -256,6 +256,14 @@ pub struct CliArgs {
     #[arg(long = "clean-cache", visible_alias = "clean")]
     pub clean_cache: bool,
 
+    /// Display cache bucket path, entry count, disk usage, and age statistics.
+    #[arg(long = "cache-stats")]
+    pub cache_stats: bool,
+
+    /// Prune expired or LRU-overflow cache entries using `[cache]` limits.
+    #[arg(long = "cache-gc")]
+    pub cache_gc: bool,
+
     /// Suppress non-essential logs and external compiler stdout/stderr.
     #[arg(short = 'q', long = "quiet")]
     pub quiet: bool,

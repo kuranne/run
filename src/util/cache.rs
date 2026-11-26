@@ -50,6 +50,19 @@ pub enum CacheEntry {
     Legacy(String),
 }
 
+/// Summary statistics for a project cache bucket (`--cache-stats`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CacheStats {
+    /// Path to the project cache bucket directory.
+    pub bucket_dir: PathBuf,
+    /// Number of tracked entries in `cache.json`.
+    pub entry_count: usize,
+    /// Total disk size in bytes of files inside `bucket_dir`.
+    pub total_bytes: u64,
+    /// Age in seconds of the oldest entry with a recorded timestamp, if any.
+    pub oldest_age_secs: Option<u64>,
+}
+
 /// Manages per-project build caching under `~/.cache/run/<project_hash>/`.
 ///
 /// Maintains `objs/`, `bin/`, `src/`, and `cache.json` using a `Mutex`-guarded
@@ -645,6 +658,47 @@ impl CacheManager {
         let mut guard = self.cache_data.lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(key, entry);
         self.save_cache_locked(&mut guard);
+    }
+
+    /// Compute current entry count, total disk bytes, and oldest entry age for `--cache-stats`.
+    pub fn stats(&self) -> CacheStats {
+        let data = Self::load_cache_from_disk(&self.cache_file);
+        let now = now_epoch_secs();
+        let oldest_age_secs = data
+            .values()
+            .filter_map(|e| match e {
+                CacheEntry::Detailed { last_accessed, .. } if *last_accessed > 0 => {
+                    Some(now.saturating_sub(*last_accessed))
+                }
+                _ => None,
+            })
+            .max();
+
+        let mut total_bytes = 0u64;
+        if self.cache_dir.exists() {
+            let mut stack = vec![self.cache_dir.clone()];
+            while let Some(dir) = stack.pop() {
+                if let Ok(entries) = fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if let Ok(meta) = fs::symlink_metadata(&p) {
+                            if meta.file_type().is_dir() {
+                                stack.push(p);
+                            } else if meta.file_type().is_file() {
+                                total_bytes = total_bytes.saturating_add(meta.len());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        CacheStats {
+            bucket_dir: self.cache_dir.clone(),
+            entry_count: data.len(),
+            total_bytes,
+            oldest_age_secs,
+        }
     }
 
     /// Prune expired or LRU-overflow cache entries according to `max_age_days` and `max_size_mb`.

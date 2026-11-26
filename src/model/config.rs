@@ -50,6 +50,24 @@ pub struct SandboxConfig {
     pub container_name: Option<String>,
 }
 
+/// Per-OS overrides under `[tasks.<name>.windows]`, `.linux`, or `.macos`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct TaskOsOverride {
+    /// Override `command` on this OS.
+    pub command: Option<String>,
+    /// Override `cmd` on this OS.
+    pub cmd: Option<String>,
+    /// Override `cmds` on this OS.
+    pub cmds: Vec<String>,
+    /// Extra environment variables merged on this OS.
+    pub env: BTreeMap<String, String>,
+    /// Override `dir` on this OS.
+    pub dir: Option<String>,
+    /// Override `cwd` on this OS.
+    pub cwd: Option<String>,
+}
+
 /// Detailed task definition under `[tasks.<name>]`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
@@ -88,6 +106,14 @@ pub struct TaskTable {
     pub sandbox_net: bool,
     /// Run this task with native bubblewrap restriction.
     pub restrict: bool,
+    /// Optional OS allowlist (`"linux"`, `"macos"`, `"windows"`); empty means all platforms.
+    pub platforms: Vec<String>,
+    /// Windows-specific overrides (`[tasks.<name>.windows]`).
+    pub windows: Option<Box<TaskOsOverride>>,
+    /// Linux-specific overrides (`[tasks.<name>.linux]`).
+    pub linux: Option<Box<TaskOsOverride>>,
+    /// macOS-specific overrides (`[tasks.<name>.macos]`).
+    pub macos: Option<Box<TaskOsOverride>>,
 }
 
 impl TaskTable {
@@ -100,6 +126,57 @@ impl TaskTable {
             return vec![c];
         }
         Vec::new()
+    }
+
+    /// Return `true` if `platforms` is empty or includes the current host OS.
+    pub fn matches_current_platform(&self) -> bool {
+        if self.platforms.is_empty() {
+            return true;
+        }
+        let host = if cfg!(target_os = "windows") {
+            "windows"
+        } else if cfg!(target_os = "macos") {
+            "macos"
+        } else {
+            "linux"
+        };
+        self.platforms.iter().any(|p| {
+            let norm = p.trim().to_ascii_lowercase();
+            norm == host || (host == "macos" && norm == "darwin")
+        })
+    }
+
+    /// Return a copy of `self` with any matching OS-specific override merged in.
+    pub fn resolve_for_current_os(&self) -> Self {
+        let mut resolved = self.clone();
+        let os_override = if cfg!(target_os = "windows") {
+            self.windows.as_deref()
+        } else if cfg!(target_os = "macos") {
+            self.macos.as_deref()
+        } else {
+            self.linux.as_deref()
+        };
+        if let Some(ov) = os_override {
+            if !ov.cmds.is_empty() {
+                resolved.cmds = ov.cmds.clone();
+                resolved.cmd = None;
+                resolved.command = None;
+            } else if let Some(c) = ov.cmd.as_ref().or(ov.command.as_ref()) {
+                resolved.cmds.clear();
+                resolved.cmd = Some(c.clone());
+                resolved.command = None;
+            }
+            for (k, v) in &ov.env {
+                resolved.env.insert(k.clone(), v.clone());
+            }
+            if ov.dir.is_some() {
+                resolved.dir = ov.dir.clone();
+            }
+            if ov.cwd.is_some() {
+                resolved.cwd = ov.cwd.clone();
+            }
+        }
+        resolved
     }
 }
 

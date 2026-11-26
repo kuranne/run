@@ -111,3 +111,49 @@ def test_tasks_vars_deps_sha256_sources_params_and_list(
     r_cyc = run_cli(["cyc_a"])
     assert r_cyc.returncode == 1
     assert "Cyclic task dependency" in strip_ansi(combined_output(r_cyc))
+
+
+def test_tasks_platforms_parallel_deps_and_cache_stats_gc(
+    work_dir: Path, run_cli: Callable[..., subprocess.CompletedProcess[str]]
+) -> None:
+    """Verify OS-conditional tasks, parallel leaf deps, --cache-stats, and --cache-gc."""
+    import sys
+
+    other_os = "windows" if sys.platform != "win32" else "linux"
+    host_os = "windows" if sys.platform == "win32" else ("macos" if sys.platform == "darwin" else "linux")
+    (work_dir / "Run.toml").write_text(
+        f"[tasks.dep_a]\n"
+        f'cmd = "python3 -c \\"print(\'DEP_A\')\\""\n'
+        f"[tasks.dep_b]\n"
+        f'cmd = "python3 -c \\"print(\'DEP_B\')\\""\n'
+        f"[tasks.par]\n"
+        f'deps = ["dep_a", "dep_b"]\n'
+        f'cmd = "python3 -c \\"print(\'PAR_DONE\')\\""\n'
+        f"[tasks.skip_me]\n"
+        f'platforms = ["{other_os}"]\n'
+        f'cmd = "python3 -c \\"import sys; sys.exit(9)\\""\n'
+        f"[tasks.os_override]\n"
+        f'cmd = "python3 -c \\"print(\'BASE\')\\""\n'
+        f"[tasks.os_override.{host_os}]\n"
+        f'cmd = "python3 -c \\"print(\'HOST_OVERRIDE\')\\""\n',
+        encoding="utf-8",
+    )
+
+    r_par = run_cli(["par"])
+    assert r_par.returncode == 0, r_par.stdout + r_par.stderr
+    assert "DEP_A" in r_par.stdout
+    assert "DEP_B" in r_par.stdout
+    assert "PAR_DONE" in r_par.stdout
+
+    r_skip = run_cli(["skip_me"])
+    assert r_skip.returncode == 0, r_skip.stdout + r_skip.stderr
+    assert "[ SKIP ]" in r_skip.stdout
+
+    r_ov = run_cli(["os_override"])
+    assert r_ov.returncode == 0, r_ov.stdout + r_ov.stderr
+    assert "HOST_OVERRIDE" in r_ov.stdout
+
+    r_stats = run_cli(["--cache-stats", "--cache-gc"])
+    assert r_stats.returncode == 0, r_stats.stdout + r_stats.stderr
+    assert "Cache bucket:" in r_stats.stdout
+    assert "Pruned " in r_stats.stdout

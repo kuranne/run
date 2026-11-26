@@ -443,6 +443,55 @@ fn run_once(
         }
     }
 
+    if cli.cache_stats || cli.cache_gc {
+        match CacheManager::new(cwd) {
+            Ok(cache) => {
+                if cli.cache_gc {
+                    let meta = &run::util::env::PackageMetadata::get().cache;
+                    let max_age = config.cache.max_age_days.unwrap_or(meta.max_age_days);
+                    let max_mb = config.cache.max_size_mb.unwrap_or(meta.max_size_mb);
+                    let pruned = cache.prune(max_age, max_mb);
+                    printer.action(
+                        "CLEAN",
+                        &format!(
+                            "Pruned {pruned} cache entry(s) (max_age_days={max_age}, max_size_mb={max_mb})."
+                        ),
+                        TagColor::Green,
+                    );
+                }
+                if cli.cache_stats {
+                    let stats = cache.stats();
+                    let kb = stats.total_bytes as f64 / 1024.0;
+                    let age_str = stats
+                        .oldest_age_secs
+                        .map(|s| format!("{:.1}h", s as f64 / 3600.0))
+                        .unwrap_or_else(|| "n/a".to_string());
+                    printer.info(&format!(
+                        "Cache bucket: {} | entries: {} | size: {:.1} KB | oldest: {age_str}",
+                        stats.bucket_dir.display(),
+                        stats.entry_count,
+                        kb
+                    ));
+                }
+            }
+            Err(err) => {
+                printer.error(&format!("Failed to inspect cache: {err}"));
+                return RunOutcome {
+                    exit_code: 1,
+                    watch_files: Vec::new(),
+                    captured_stdin: prebuffered_stdin.cloned(),
+                };
+            }
+        }
+        if cli.files.is_empty() && cli.new_target.is_none() && cli.all.is_none() {
+            return RunOutcome {
+                exit_code: 0,
+                watch_files: Vec::new(),
+                captured_stdin: prebuffered_stdin.cloned(),
+            };
+        }
+    }
+
     if let Some(ref target) = cli.new_target {
         let code = match TemplateManager::generate(
             target,
@@ -526,7 +575,7 @@ fn run_once(
         runner.cleanup();
         return RunOutcome {
             exit_code: i32::from(!ok),
-            watch_files: Vec::new(),
+            watch_files: TaskRunner::collect_watch_files(&cli.files[0], &config, cwd),
             captured_stdin,
         };
     }

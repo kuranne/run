@@ -184,8 +184,9 @@ impl TaskRunner {
         0
     }
 
-    /// Substitute template variables, resolve DAG `deps`, check SHA-256 `sources`/`generates`,
-    /// map `params` / `-- <argv>`, and run the named `[tasks.<name>]` command chain.
+    /// Substitute template variables, resolve DAG `deps` (running independent deps in parallel),
+    /// check OS `platforms`/overrides and SHA-256 `sources`/`generates`, map `params` / `-- <argv>`,
+    /// and run the named `[tasks.<name>]` command chain.
     pub fn run_task(
         name: &str,
         config: &Config,
@@ -195,6 +196,35 @@ impl TaskRunner {
         let mut visiting = HashSet::new();
         let mut completed = HashSet::new();
         Self::run_task_dag(name, config, extra_args, runner, &mut visiting, &mut completed)
+    }
+
+    /// Collect source files matching `sources` globs of task `name` (and its `deps`) plus `Run.toml`
+    /// for `run --watch <task>`.
+    pub fn collect_watch_files(name: &str, config: &Config, cwd: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        let mut seen_tasks = HashSet::new();
+        let mut stack = vec![name.to_string()];
+        while let Some(task_name) = stack.pop() {
+            if !seen_tasks.insert(task_name.clone()) {
+                continue;
+            }
+            if let Some(TaskConfig::Detailed(table)) = config.get_tasks().get(&task_name) {
+                for dep in &table.deps {
+                    stack.push(dep.clone());
+                }
+                for pat in &table.sources {
+                    out.extend(collect_glob_matches(cwd, pat));
+                }
+            }
+        }
+        if let Some(ref cfg_path) = config.path
+            && cfg_path.exists()
+        {
+            out.push(cfg_path.clone());
+        }
+        out.sort();
+        out.dedup();
+        out
     }
 
     fn run_task_dag(
@@ -256,10 +286,88 @@ impl TaskRunner {
                 let step_args: &[String] = if append_extra { extra_args } else { &[] };
                 run_step(&task_cmd, step_args, runner, false)
             }
-            TaskConfig::Detailed(table) => {
-                for dep in &table.deps {
-                    if !Self::run_task_dag(dep, config, &[], runner, visiting, completed)? {
-                        return Ok(false);
+            TaskConfig::Detailed(raw_table) => {
+                let table = &raw_table.resolve_for_current_os();
+                if !table.matches_current_platform() {
+                    if !table.silent {
+                        runner.printer.status(
+                            "SKIP",
+                            &format!("Task '{name}' skipped on current platform."),
+                            TagColor::Yellow,
+                        );
+                    }
+                    return Ok(true);
+                }
+
+                // Collect uncompleted direct deps; run independent leaf/disjoint deps concurrently
+                // when there are 2+ deps and not in dry-run mode.
+                let pending_deps: Vec<&String> = table
+                    .deps
+                    .iter()
+                    .filter(|d| !completed.contains(d.as_str()))
+                    .collect();
+
+                let can_parallelize = pending_deps.len() > 1
+                    && !runner.options.dry_run
+                    && pending_deps.iter().all(|d| match config.get_tasks().get(d.as_str()) {
+                        Some(TaskConfig::Simple(_)) => true,
+                        Some(TaskConfig::Detailed(t)) => t.deps.is_empty(),
+                        None => false,
+                    });
+
+                if can_parallelize {
+                    // Check for cycles with visiting set first.
+                    for dep in &pending_deps {
+                        if visiting.contains(dep.as_str()) {
+                            return Err(RunError::config(format!(
+                                "Cyclic task dependency detected involving '{dep}'."
+                            )));
+                        }
+                    }
+                    let results: Vec<Result<bool, RunError>> = std::thread::scope(|scope| {
+                        let mut handles = Vec::with_capacity(pending_deps.len());
+                        for dep in &pending_deps {
+                            let dep_name = (*dep).clone();
+                            let mut sub_runner = match runner.clone_for_parallel_task(config) {
+                                Ok(r) => r,
+                                Err(err) => {
+                                    handles.push(scope.spawn(move || Err(err)));
+                                    continue;
+                                }
+                            };
+                            handles.push(scope.spawn(move || {
+                                let mut sub_visiting = HashSet::new();
+                                let mut sub_completed = HashSet::new();
+                                Self::run_task_dag(
+                                    &dep_name,
+                                    config,
+                                    &[],
+                                    &mut sub_runner,
+                                    &mut sub_visiting,
+                                    &mut sub_completed,
+                                )
+                            }));
+                        }
+                        handles
+                            .into_iter()
+                            .map(|h| {
+                                h.join().unwrap_or_else(|_| {
+                                    Err(RunError::execution("Parallel task worker panicked"))
+                                })
+                            })
+                            .collect()
+                    });
+                    for (dep, res) in pending_deps.iter().zip(results) {
+                        if !res? {
+                            return Ok(false);
+                        }
+                        completed.insert((*dep).clone());
+                    }
+                } else {
+                    for dep in &table.deps {
+                        if !Self::run_task_dag(dep, config, &[], runner, visiting, completed)? {
+                            return Ok(false);
+                        }
                     }
                 }
 

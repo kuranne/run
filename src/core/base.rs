@@ -441,6 +441,21 @@ impl BaseRunner {
         )
     }
 
+    /// Create an isolated sibling [`BaseRunner`] sharing this runner's [`CommandExecutor`] for parallel task waves.
+    pub(crate) fn clone_for_parallel_task(&self, config: &Config) -> Result<Self, RunError> {
+        let mut cloned = Self::new_with_stdin(
+            self.options.clone(),
+            None,
+            None,
+            config,
+            self.printer,
+            None,
+        )?;
+        cloned.set_executor(Arc::clone(&self.executor));
+        cloned.sandbox_config = self.sandbox_config.clone();
+        Ok(cloned)
+    }
+
     /// Construct a [`BaseRunner`] with an explicit optional `buffered_stdin` payload
     /// (allowing unit tests to exercise `-i -` without reading the test runner's stdin).
     pub fn new_with_stdin(
